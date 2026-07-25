@@ -101,4 +101,5 @@ def test_api_process_starts_migrates_and_stops_cleanly(tmp_path) -> None:
     assert versions == [
         ("001_initial",),
         ("002_collector_runtime_status",),
+        ("003_authenticated_control",),
     ]

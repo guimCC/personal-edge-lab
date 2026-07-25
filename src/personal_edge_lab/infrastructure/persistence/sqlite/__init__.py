@@ -1,5 +1,6 @@
 """SQLite repositories and migrations."""
 
+from personal_edge_lab.infrastructure.persistence.sqlite.auth import SqliteAuthRepository
 from personal_edge_lab.infrastructure.persistence.sqlite.command_audit import (
     SqliteCommandAuditRepository,
 )
@@ -9,6 +10,7 @@ from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import (
 )
 
 __all__ = [
+    "SqliteAuthRepository",
     "SqliteCommandAuditRepository",
     "SqliteTelemetryRepository",
     "run_migrations",

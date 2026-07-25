@@ -27,12 +27,18 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         "ac_command_audit",
         "idx_ac_command_device_requested",
         "collector_runtime_status",
+        "auth_sessions",
+        "idx_auth_sessions_expiry",
+        "auth_login_throttle",
+        "idx_ac_command_actor_idempotency",
+        "ac_command_device_locks",
     } <= object_names(database)
     with sqlite3.connect(database) as connection:
         versions = list(connection.execute("SELECT version FROM schema_migrations"))
     assert versions == [
         ("001_initial",),
         ("002_collector_runtime_status",),
+        ("003_authenticated_control",),
     ]
 
 
@@ -106,4 +112,5 @@ def test_concurrent_app_startup_applies_migration_once(tmp_path) -> None:
     assert migration_counts == [
         ("001_initial", 1),
         ("002_collector_runtime_status", 1),
+        ("003_authenticated_control", 1),
     ]

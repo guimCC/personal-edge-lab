@@ -49,6 +49,25 @@ class CommandOutcome(StrEnum):
     RESPONSE_UNKNOWN = "response_unknown"
 
 
+class CommandReservationStatus(StrEnum):
+    NEW = "new"
+    REPLAYED = "replayed"
+    IN_PROGRESS = "in_progress"
+    CONFLICT = "conflict"
+    DEVICE_BUSY = "device_busy"
+    RATE_LIMITED = "rate_limited"
+
+
+@dataclass(frozen=True, slots=True)
+class CommandRequestContext:
+    actor_id: str
+    request_source: str
+    idempotency_key: str
+    rate_limit: int
+    rate_window_seconds: int
+    lock_lease_seconds: float
+
+
 @dataclass(frozen=True, slots=True)
 class AcState:
     power: bool
@@ -131,6 +150,7 @@ class CommandExecution:
     command_type: str
     payload_json: str
     result: CommandResult
+    replayed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +166,18 @@ class CommandAuditEntry:
     response_body: str | None
     error_category: str | None
     error_message: str | None
+    actor_id: str | None = None
+    request_source: str = "local_cli"
+    idempotency_key: str | None = None
+    request_fingerprint: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CommandReservation:
+    status: CommandReservationStatus
+    command_id: int | None = None
+    entry: CommandAuditEntry | None = None
+    retry_after_seconds: int | None = None
 
 
 def canonical_json(payload: Any) -> str:

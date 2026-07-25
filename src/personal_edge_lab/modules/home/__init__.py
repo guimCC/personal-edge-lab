@@ -1,6 +1,12 @@
 """Home-control use cases."""
 
-from personal_edge_lab.modules.home.commands import CommandService
+from personal_edge_lab.modules.home.commands import (
+    CommandConflictError,
+    CommandInProgressError,
+    CommandRateLimitedError,
+    CommandService,
+    DeviceBusyError,
+)
 from personal_edge_lab.modules.home.queries import (
     DEFAULT_COMMAND_HISTORY_LIMIT,
     MAX_COMMAND_HISTORY_LIMIT,
@@ -12,6 +18,10 @@ __all__ = [
     "DEFAULT_COMMAND_HISTORY_LIMIT",
     "MAX_COMMAND_HISTORY_LIMIT",
     "CommandHistoryQueryError",
+    "CommandConflictError",
+    "CommandInProgressError",
+    "CommandRateLimitedError",
     "CommandService",
+    "DeviceBusyError",
     "ListCommandHistory",
 ]

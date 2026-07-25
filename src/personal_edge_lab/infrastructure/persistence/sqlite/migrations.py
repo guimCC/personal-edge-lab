@@ -84,6 +84,56 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version="003_authenticated_control",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                actor_id TEXT NOT NULL,
+                csrf_token TEXT NOT NULL,
+                credential_fingerprint TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                last_seen_at_utc TEXT NOT NULL,
+                idle_expires_at_utc TEXT NOT NULL,
+                absolute_expires_at_utc TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry
+            ON auth_sessions (idle_expires_at_utc, absolute_expires_at_utc)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS auth_login_throttle (
+                actor_id TEXT PRIMARY KEY,
+                window_started_at_utc TEXT NOT NULL,
+                failed_attempts INTEGER NOT NULL
+                    CHECK (failed_attempts >= 0),
+                blocked_until_utc TEXT
+            )
+            """,
+            "ALTER TABLE ac_command_audit ADD COLUMN actor_id TEXT",
+            """
+            ALTER TABLE ac_command_audit
+            ADD COLUMN request_source TEXT NOT NULL DEFAULT 'local_cli'
+            """,
+            "ALTER TABLE ac_command_audit ADD COLUMN idempotency_key TEXT",
+            "ALTER TABLE ac_command_audit ADD COLUMN request_fingerprint TEXT",
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ac_command_actor_idempotency
+            ON ac_command_audit (actor_id, idempotency_key)
+            WHERE actor_id IS NOT NULL AND idempotency_key IS NOT NULL
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS ac_command_device_locks (
+                device_id TEXT PRIMARY KEY,
+                command_id INTEGER NOT NULL,
+                lease_expires_at_utc TEXT NOT NULL,
+                FOREIGN KEY (command_id) REFERENCES ac_command_audit (id)
+            )
+            """,
+        ),
+    ),
 )
 
 
