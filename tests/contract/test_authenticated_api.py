@@ -101,6 +101,7 @@ def test_shell_and_session_are_public_but_platform_data_is_protected(tmp_path) -
         assert client.get("/health").status_code == 401
         assert client.get("/api/v1/telemetry/history").status_code == 401
         assert client.get("/api/v1/ac/history").status_code == 401
+        assert client.get("/api/v1/alerts").status_code == 401
         assert client.get("/health/live").status_code == 404
         assert client.get("/docs").status_code == 404
         assert client.get("/openapi.json").status_code == 404

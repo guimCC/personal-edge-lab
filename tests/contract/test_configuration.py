@@ -8,6 +8,10 @@ from personal_edge_lab.apps.ac_cli.config import (
     ConfigurationError as AcConfigurationError,
 )
 from personal_edge_lab.apps.ac_cli.config import Settings as AcSettings
+from personal_edge_lab.apps.alert_evaluator.config import (
+    ConfigurationError as AlertConfigurationError,
+)
+from personal_edge_lab.apps.alert_evaluator.config import Settings as AlertSettings
 from personal_edge_lab.apps.api.config import (
     ConfigurationError as ApiConfigurationError,
 )
@@ -38,6 +42,7 @@ API_VARIABLES = (
     "API_PORT",
     "API_TELEMETRY_STALE_AFTER_SECONDS",
     "API_COLLECTOR_STALE_AFTER_SECONDS",
+    "ALERT_EVALUATOR_STALE_AFTER_SECONDS",
     "API_DOCS_ENABLED",
     "PUBLIC_ORIGIN",
     "API_AUTH_ENABLED",
@@ -55,6 +60,18 @@ API_VARIABLES = (
     "DATABASE_PATH",
     "DEVICE_ID",
     "LOG_LEVEL",
+)
+ALERT_VARIABLES = (
+    "DATABASE_PATH",
+    "DEVICE_ID",
+    "LOG_LEVEL",
+    "ALERT_EVALUATION_INTERVAL_SECONDS",
+    "ALERT_TELEMETRY_SUSPECT_AFTER_SECONDS",
+    "ALERT_TELEMETRY_ALERT_AFTER_SECONDS",
+    "ALERT_EDGE_MIN_CONSECUTIVE_FAILURES",
+    "ALERT_EDGE_ALERT_AFTER_SECONDS",
+    "ALERT_RECOVERY_DISPLAY_SECONDS",
+    "ALERT_EVALUATOR_STALE_AFTER_SECONDS",
 )
 
 
@@ -122,6 +139,7 @@ def test_api_environment_defaults(monkeypatch) -> None:
     assert settings.port == 8000
     assert settings.telemetry_stale_after_seconds == 45
     assert settings.collector_stale_after_seconds == 45
+    assert settings.alert_evaluator_stale_after_seconds == 90
     assert settings.docs_enabled is True
     assert settings.auth_enabled is False
     assert settings.ac_control_enabled is False
@@ -243,6 +261,41 @@ def test_authenticated_control_requires_all_production_guards(
     assert settings.session_idle_seconds == 86_400
     assert settings.session_absolute_seconds == 604_800
     assert settings.command_rate_limit_per_minute == 6
+
+
+def test_alert_evaluator_environment_defaults(monkeypatch) -> None:
+    clear(monkeypatch, ALERT_VARIABLES)
+    settings = AlertSettings.from_env()
+    assert str(settings.database_path) == "data/telemetry.db"
+    assert settings.device_id == "ac-controller-01"
+    assert settings.evaluation_interval_seconds == 30
+    assert settings.evaluator_stale_after_seconds == 90
+    assert settings.policy.telemetry_suspect_after_seconds == 45
+    assert settings.policy.telemetry_alert_after_seconds == 180
+    assert settings.policy.edge_min_consecutive_failures == 4
+    assert settings.policy.edge_alert_after_seconds == 45
+    assert settings.policy.recovery_display_seconds == 300
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("ALERT_EVALUATION_INTERVAL_SECONDS", "0", "greater than zero"),
+        ("ALERT_TELEMETRY_ALERT_AFTER_SECONDS", "30", "must not be below"),
+        ("ALERT_EDGE_MIN_CONSECUTIVE_FAILURES", "0", "greater than zero"),
+        ("ALERT_EVALUATOR_STALE_AFTER_SECONDS", "30", "must exceed"),
+    ],
+)
+def test_invalid_alert_evaluator_environment_is_rejected(
+    monkeypatch,
+    name: str,
+    value: str,
+    message: str,
+) -> None:
+    clear(monkeypatch, ALERT_VARIABLES)
+    monkeypatch.setenv(name, value)
+    with pytest.raises(AlertConfigurationError, match=message):
+        AlertSettings.from_env()
 
 
 @pytest.mark.parametrize(

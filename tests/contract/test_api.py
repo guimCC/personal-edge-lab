@@ -10,7 +10,9 @@ from personal_edge_lab.application.ports.telemetry import SourceFailureCategory
 from personal_edge_lab.apps.api.application import create_app
 from personal_edge_lab.apps.api.config import Settings
 from personal_edge_lab.domain.ac import CommandOutcome, CommandResult
+from personal_edge_lab.domain.alerting import AlertPolicy
 from personal_edge_lab.domain.telemetry import TemperatureReading
+from personal_edge_lab.infrastructure.persistence.sqlite.alerting import SqliteAlertRepository
 from personal_edge_lab.infrastructure.persistence.sqlite.collector_status import (
     SqliteCollectorStatusRepository,
 )
@@ -21,6 +23,7 @@ from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_m
 from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import (
     SqliteTelemetryRepository,
 )
+from personal_edge_lab.modules.alerting import EvaluateOperationalAlerts
 
 NOW = datetime(2026, 7, 25, 14, 0, tzinfo=UTC)
 
@@ -71,17 +74,33 @@ def seed_running_collector(database) -> None:
         repository.record_success("node-1", attempted_at=NOW - timedelta(seconds=5))
 
 
+def evaluate_alerts(database, *, now: datetime = NOW) -> None:
+    EvaluateOperationalAlerts(
+        lambda: SqliteAlertRepository(database),
+        device_id="node-1",
+        policy=AlertPolicy(
+            telemetry_suspect_after_seconds=45,
+            telemetry_alert_after_seconds=180,
+            edge_min_consecutive_failures=4,
+            edge_alert_after_seconds=45,
+            recovery_display_seconds=300,
+        ),
+        clock=lambda: now,
+    ).execute()
+
+
 def test_health_reports_fresh_telemetry(tmp_path) -> None:
     database = tmp_path / "telemetry.db"
     seed_telemetry(database, reading())
     seed_running_collector(database)
+    evaluate_alerts(database)
     with TestClient(create_app(settings(database), clock=lambda: NOW)) as client:
         response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {
         "status": "healthy",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "checked_at_utc": "2026-07-25T14:00:00Z",
         "database": {"status": "healthy"},
         "telemetry": {
@@ -111,6 +130,14 @@ def test_health_reports_fresh_telemetry(tmp_path) -> None:
             "last_failure_at_utc": None,
             "last_failure_category": None,
             "last_failure_message": None,
+        },
+        "alerts": {
+            "status": "healthy",
+            "active_count": 0,
+            "suspect_count": 0,
+            "latest_transition_at_utc": None,
+            "evaluator_last_run_at_utc": "2026-07-25T14:00:00Z",
+            "evaluator_age_seconds": 0.0,
         },
     }
 
@@ -158,6 +185,88 @@ def test_health_distinguishes_running_collector_from_unreachable_edge_node(tmp_p
     assert payload["edge_node"]["status"] == "unreachable"
     assert payload["edge_node"]["last_failure_category"] == "timeout"
     assert "node.local" not in response.text
+
+
+def test_alerts_endpoint_reports_one_active_incident_and_current_states(tmp_path) -> None:
+    database = tmp_path / "alerts.db"
+    seed_telemetry(
+        database,
+        reading(received_at=NOW - timedelta(minutes=10)),
+    )
+    evaluate_alerts(database)
+    checked_at = NOW + timedelta(seconds=30)
+    evaluate_alerts(database, now=checked_at)
+
+    with TestClient(create_app(settings(database), clock=lambda: checked_at)) as client:
+        response = client.get(
+            "/api/v1/alerts",
+            params={"status": "active", "limit": 5},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["device_id"] == "node-1"
+    assert payload["status"] == "alerting"
+    assert payload["count"] == 1
+    assert payload["limit"] == 5
+    assert len(payload["states"]) == 2
+    telemetry_state = next(
+        item for item in payload["states"] if item["alert_type"] == "telemetry_stale"
+    )
+    assert telemetry_state["lifecycle"] == "alerting"
+    assert telemetry_state["active_incident_id"] == payload["incidents"][0]["id"]
+    assert payload["incidents"][0]["status"] == "active"
+    assert payload["incidents"][0]["duration_seconds"] == 0.0
+    assert "database" not in response.text.lower()
+
+
+def test_alerts_endpoint_returns_unknown_and_empty_before_first_evaluation(tmp_path) -> None:
+    database = tmp_path / "empty-alerts.db"
+    run_migrations(database)
+
+    with TestClient(create_app(settings(database), clock=lambda: NOW)) as client:
+        response = client.get("/api/v1/alerts")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "device_id": "node-1",
+        "status": "unknown",
+        "evaluator_last_run_at_utc": None,
+        "evaluator_age_seconds": None,
+        "count": 0,
+        "limit": 20,
+        "states": [],
+        "incidents": [],
+    }
+
+
+def test_alerts_endpoint_reports_recovered_incident_duration(tmp_path) -> None:
+    database = tmp_path / "recovered-alert.db"
+    seed_telemetry(
+        database,
+        reading(received_at=NOW - timedelta(minutes=10)),
+    )
+    evaluate_alerts(database)
+    alerting_at = NOW + timedelta(seconds=30)
+    evaluate_alerts(database, now=alerting_at)
+    recovered_at = alerting_at + timedelta(seconds=15)
+    with SqliteTelemetryRepository(database) as repository:
+        repository.insert(reading(received_at=recovered_at))
+    evaluate_alerts(database, now=recovered_at)
+
+    with TestClient(create_app(settings(database), clock=lambda: recovered_at)) as client:
+        response = client.get(
+            "/api/v1/alerts",
+            params={"status": "recovered", "limit": 1},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "recovered"
+    assert payload["count"] == 1
+    assert payload["incidents"][0]["status"] == "recovered"
+    assert payload["incidents"][0]["recovered_at_utc"] == "2026-07-25T14:00:45Z"
+    assert payload["incidents"][0]["duration_seconds"] == 15.0
 
 
 def test_latest_temperature_contract_and_device_override(tmp_path) -> None:
@@ -312,6 +421,9 @@ def test_ac_history_returns_structured_payload_and_pending_nulls(tmp_path) -> No
         ("/api/v1/telemetry/series", {"window": "week"}),
         ("/api/v1/ac/history", {"limit": 0}),
         ("/api/v1/ac/history", {"limit": 101}),
+        ("/api/v1/alerts", {"status": "invalid"}),
+        ("/api/v1/alerts", {"limit": 0}),
+        ("/api/v1/alerts", {"limit": 101}),
     ],
 )
 def test_invalid_queries_return_422(tmp_path, path: str, params: dict[str, object]) -> None:
@@ -356,6 +468,7 @@ def test_docs_and_openapi_expose_auth_and_read_routes_when_controls_disabled(
         "/api/v1/telemetry/history",
         "/api/v1/telemetry/series",
         "/api/v1/ac/history",
+        "/api/v1/alerts",
     }
     assert set(schema["paths"]["/api/v1/auth/session"]) == {"get"}
     assert set(schema["paths"]["/api/v1/auth/login"]) == {"post"}

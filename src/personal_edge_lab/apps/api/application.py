@@ -20,6 +20,8 @@ from personal_edge_lab.apps.api.config import Settings
 from personal_edge_lab.apps.api.schemas import (
     AcCommandRequest,
     AcCommandResponse,
+    AlertHealthResponse,
+    AlertListResponse,
     CollectorHealthResponse,
     CommandAuditResponse,
     CommandHistoryResponse,
@@ -42,6 +44,9 @@ from personal_edge_lab.domain.ac import (
 )
 from personal_edge_lab.domain.auth import AuthenticatedSession
 from personal_edge_lab.infrastructure.esp32.ac_controller import AcCommandClient
+from personal_edge_lab.infrastructure.persistence.sqlite.alerting import (
+    SqliteAlertRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.auth import (
     SqliteAuthRepository,
 )
@@ -54,6 +59,11 @@ from personal_edge_lab.infrastructure.persistence.sqlite.command_audit import (
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
 from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import (
     SqliteTelemetryRepository,
+)
+from personal_edge_lab.modules.alerting import (
+    AlertHistoryFilter,
+    AlertStatusSummary,
+    GetOperationalAlerts,
 )
 from personal_edge_lab.modules.authentication import (
     AuthenticationError,
@@ -82,6 +92,7 @@ LOGGER = logging.getLogger(__name__)
 DeviceId = Annotated[str | None, Query(pattern=r"\S")]
 TelemetryLimit = Annotated[int, Query(ge=1, le=1000)]
 CommandLimit = Annotated[int, Query(ge=1, le=100)]
+AlertLimit = Annotated[int, Query(ge=1, le=100)]
 IdempotencyKey = Annotated[
     str,
     Header(
@@ -347,12 +358,22 @@ def create_app(
                 stale_after_seconds=settings.collector_stale_after_seconds,
                 clock=lambda: checked_at,
             ).execute()
+        alerts = GetOperationalAlerts(
+            lambda: SqliteAlertRepository(settings.database_path),
+            evaluator_stale_after_seconds=settings.alert_evaluator_stale_after_seconds,
+            clock=lambda: checked_at,
+        ).execute(settings.device_id, limit=1)
         overall = (
             "healthy"
             if (
                 telemetry.status is TelemetryFreshness.FRESH
                 and operational.collector.status.value == "running"
                 and operational.edge_node.status.value == "reachable"
+                and alerts.status
+                in {
+                    AlertStatusSummary.HEALTHY,
+                    AlertStatusSummary.RECOVERED,
+                }
             )
             else "degraded"
         )
@@ -364,7 +385,34 @@ def create_app(
             telemetry=TelemetryHealthResponse.from_application(telemetry),
             collector=CollectorHealthResponse.from_application(operational.collector),
             edge_node=EdgeNodeHealthResponse.from_application(operational.edge_node),
+            alerts=AlertHealthResponse.from_application(alerts),
         )
+
+    @app.get(
+        "/api/v1/alerts",
+        response_model=AlertListResponse,
+        tags=["alerts"],
+    )
+    def alerts(
+        _session: Annotated[
+            AuthenticatedSession | None,
+            Depends(require_session),
+        ],
+        status: AlertHistoryFilter = AlertHistoryFilter.ALL,
+        limit: AlertLimit = 20,
+        device_id: DeviceId = None,
+    ) -> AlertListResponse:
+        checked_at = clock()
+        overview = GetOperationalAlerts(
+            lambda: SqliteAlertRepository(settings.database_path),
+            evaluator_stale_after_seconds=settings.alert_evaluator_stale_after_seconds,
+            clock=lambda: checked_at,
+        ).execute(
+            device_id or settings.device_id,
+            history_filter=status,
+            limit=limit,
+        )
+        return AlertListResponse.from_application(overview, checked_at=checked_at)
 
     @app.get(
         "/api/v1/telemetry/latest",

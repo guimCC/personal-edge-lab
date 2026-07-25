@@ -24,6 +24,7 @@ class Settings:
     log_level: int
     log_level_name: str
     collector_stale_after_seconds: float = 45.0
+    alert_evaluator_stale_after_seconds: float = 90.0
     public_origin: str = "https://rubik-edge-01.local"
     auth_enabled: bool = False
     ac_control_enabled: bool = False
@@ -49,6 +50,10 @@ class Settings:
         collector_stale_after = _positive_float(
             "API_COLLECTOR_STALE_AFTER_SECONDS",
             "45",
+        )
+        alert_evaluator_stale_after = _positive_float(
+            "ALERT_EVALUATOR_STALE_AFTER_SECONDS",
+            "90",
         )
         docs_enabled = _boolean("API_DOCS_ENABLED", "true")
         public_origin = os.getenv("PUBLIC_ORIGIN", "https://rubik-edge-01.local").rstrip("/")
@@ -124,6 +129,7 @@ class Settings:
             port=port,
             telemetry_stale_after_seconds=stale_after,
             collector_stale_after_seconds=collector_stale_after,
+            alert_evaluator_stale_after_seconds=alert_evaluator_stale_after,
             docs_enabled=docs_enabled,
             database_path=database_path,
             device_id=device_id,

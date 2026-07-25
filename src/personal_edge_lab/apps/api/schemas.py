@@ -9,7 +9,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from personal_edge_lab.domain.ac import CommandAuditEntry, CommandOutcome
+from personal_edge_lab.domain.alerting import AlertIncident, AlertState
 from personal_edge_lab.domain.telemetry import TemperatureReading
+from personal_edge_lab.modules.alerting import AlertOverview
 from personal_edge_lab.modules.telemetry import (
     CollectorHealth,
     EdgeNodeHealth,
@@ -210,6 +212,26 @@ class EdgeNodeHealthResponse(ApiModel):
         )
 
 
+class AlertHealthResponse(ApiModel):
+    status: Literal["healthy", "suspect", "alerting", "recovered", "unknown"]
+    active_count: int
+    suspect_count: int
+    latest_transition_at_utc: datetime | None
+    evaluator_last_run_at_utc: datetime | None
+    evaluator_age_seconds: float | None
+
+    @classmethod
+    def from_application(cls, overview: AlertOverview) -> AlertHealthResponse:
+        return cls(
+            status=overview.status,
+            active_count=overview.active_count,
+            suspect_count=overview.suspect_count,
+            latest_transition_at_utc=overview.latest_transition_at,
+            evaluator_last_run_at_utc=overview.evaluator_last_run_at,
+            evaluator_age_seconds=overview.evaluator_age_seconds,
+        )
+
+
 class HealthResponse(ApiModel):
     status: Literal["healthy", "degraded"]
     version: str
@@ -218,6 +240,104 @@ class HealthResponse(ApiModel):
     telemetry: TelemetryHealthResponse
     collector: CollectorHealthResponse
     edge_node: EdgeNodeHealthResponse
+    alerts: AlertHealthResponse
+
+
+class AlertStateResponse(ApiModel):
+    device_id: str
+    alert_type: Literal["telemetry_stale", "edge_unavailable"]
+    lifecycle: Literal["healthy", "suspect", "alerting", "recovered"]
+    suspect_started_at_utc: datetime | None
+    active_incident_id: int | None
+    recovered_at_utc: datetime | None
+    recovery_display_until_utc: datetime | None
+    last_observed_at_utc: datetime
+    evidence_category: str
+    evidence_message: str
+
+    @classmethod
+    def from_domain(cls, state: AlertState) -> AlertStateResponse:
+        return cls(
+            device_id=state.device_id,
+            alert_type=state.alert_type,
+            lifecycle=state.lifecycle,
+            suspect_started_at_utc=state.suspect_started_at,
+            active_incident_id=state.active_incident_id,
+            recovered_at_utc=state.recovered_at,
+            recovery_display_until_utc=state.recovery_display_until,
+            last_observed_at_utc=state.last_observed_at,
+            evidence_category=state.evidence_category,
+            evidence_message=state.evidence_message,
+        )
+
+
+class AlertIncidentResponse(ApiModel):
+    id: int
+    device_id: str
+    alert_type: Literal["telemetry_stale", "edge_unavailable"]
+    status: Literal["active", "recovered"]
+    suspect_started_at_utc: datetime
+    alerting_at_utc: datetime
+    recovered_at_utc: datetime | None
+    last_observed_at_utc: datetime
+    duration_seconds: float
+    evidence_category: str
+    evidence_message: str
+
+    @classmethod
+    def from_domain(
+        cls,
+        incident: AlertIncident,
+        *,
+        checked_at: datetime,
+    ) -> AlertIncidentResponse:
+        ended_at = incident.recovered_at or checked_at
+        return cls(
+            id=incident.id,
+            device_id=incident.device_id,
+            alert_type=incident.alert_type,
+            status=incident.status,
+            suspect_started_at_utc=incident.suspect_started_at,
+            alerting_at_utc=incident.alerting_at,
+            recovered_at_utc=incident.recovered_at,
+            last_observed_at_utc=incident.last_observed_at,
+            duration_seconds=max(0.0, (ended_at - incident.alerting_at).total_seconds()),
+            evidence_category=incident.evidence_category,
+            evidence_message=incident.evidence_message,
+        )
+
+
+class AlertListResponse(ApiModel):
+    device_id: str
+    status: Literal["healthy", "suspect", "alerting", "recovered", "unknown"]
+    evaluator_last_run_at_utc: datetime | None
+    evaluator_age_seconds: float | None
+    count: int
+    limit: int
+    states: list[AlertStateResponse]
+    incidents: list[AlertIncidentResponse]
+
+    @classmethod
+    def from_application(
+        cls,
+        overview: AlertOverview,
+        *,
+        checked_at: datetime,
+    ) -> AlertListResponse:
+        incidents = [
+            AlertIncidentResponse.from_domain(incident, checked_at=checked_at)
+            for incident in overview.incidents
+        ]
+        return cls(
+            device_id=overview.device_id,
+            status=overview.status,
+            evaluator_last_run_at_utc=overview.evaluator_last_run_at,
+            evaluator_age_seconds=overview.evaluator_age_seconds,
+            count=len(incidents),
+            limit=overview.limit,
+            states=[AlertStateResponse.from_domain(state) for state in overview.states],
+            incidents=incidents,
+        )
 
 
 class SessionResponse(ApiModel):
