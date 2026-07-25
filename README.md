@@ -161,7 +161,7 @@ checkout with one command:
 Provision the local certificate first from a trusted workstation:
 
 ```bash
-./scripts/provision-local-tls.sh --copy-to ubuntu@rubik-edge-01
+./scripts/provision-local-tls.sh --copy-to ubuntu@rubik-edge-01.local
 ```
 
 The deployment script preserves a pre-deployment backup, validates the TLS/security prerequisites,

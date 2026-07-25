@@ -183,7 +183,7 @@ is additive; it does not rewrite telemetry or existing audit rows.
 On the trusted development workstation, with pinned mkcert v1.4.4:
 
 ```bash
-./scripts/provision-local-tls.sh --copy-to ubuntu@rubik-edge-01
+./scripts/provision-local-tls.sh --copy-to ubuntu@rubik-edge-01.local
 ```
 
 The helper prints the `rootCA.pem` path. Install that CA certificate manually as trusted on the

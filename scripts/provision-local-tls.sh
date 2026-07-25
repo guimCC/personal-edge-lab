@@ -12,7 +12,7 @@ RUBIK_TARGET=""
 
 usage() {
     cat <<'EOF'
-Usage: ./scripts/provision-local-tls.sh [--copy-to ubuntu@rubik-edge-01]
+Usage: ./scripts/provision-local-tls.sh [--copy-to ubuntu@rubik-edge-01.local]
 
 Generate a rubik-edge-01.local leaf certificate with mkcert v1.4.4.
 With --copy-to, install only the leaf certificate and leaf key on RUBIK.
