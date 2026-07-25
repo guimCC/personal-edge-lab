@@ -8,6 +8,10 @@ from personal_edge_lab.apps.ac_cli.config import (
     ConfigurationError as AcConfigurationError,
 )
 from personal_edge_lab.apps.ac_cli.config import Settings as AcSettings
+from personal_edge_lab.apps.api.config import (
+    ConfigurationError as ApiConfigurationError,
+)
+from personal_edge_lab.apps.api.config import Settings as ApiSettings
 from personal_edge_lab.apps.telemetry_collector.config import (
     ConfigurationError as TelemetryConfigurationError,
 )
@@ -28,6 +32,15 @@ AC_VARIABLES = (
     "DATABASE_PATH",
     "LOG_LEVEL",
     "AC_DEVICE_ID",
+)
+API_VARIABLES = (
+    "API_HOST",
+    "API_PORT",
+    "API_TELEMETRY_STALE_AFTER_SECONDS",
+    "API_DOCS_ENABLED",
+    "DATABASE_PATH",
+    "DEVICE_ID",
+    "LOG_LEVEL",
 )
 
 
@@ -88,6 +101,38 @@ def test_ac_environment_overrides_are_preserved(monkeypatch, tmp_path) -> None:
     assert settings.device_id == "ac-7"
 
 
+def test_api_environment_defaults(monkeypatch) -> None:
+    clear(monkeypatch, API_VARIABLES)
+    settings = ApiSettings.from_env()
+    assert settings.host == "0.0.0.0"
+    assert settings.port == 8000
+    assert settings.telemetry_stale_after_seconds == 45
+    assert settings.docs_enabled is True
+    assert str(settings.database_path) == "data/telemetry.db"
+    assert settings.device_id == "ac-controller-01"
+    assert settings.log_level == logging.INFO
+    assert settings.log_level_name == "INFO"
+
+
+def test_api_environment_overrides(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("API_HOST", "127.0.0.1")
+    monkeypatch.setenv("API_PORT", "8080")
+    monkeypatch.setenv("API_TELEMETRY_STALE_AFTER_SECONDS", "60.5")
+    monkeypatch.setenv("API_DOCS_ENABLED", "off")
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "edge.db"))
+    monkeypatch.setenv("DEVICE_ID", "sensor-7")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    settings = ApiSettings.from_env()
+    assert settings.host == "127.0.0.1"
+    assert settings.port == 8080
+    assert settings.telemetry_stale_after_seconds == 60.5
+    assert settings.docs_enabled is False
+    assert settings.database_path == tmp_path / "edge.db"
+    assert settings.device_id == "sensor-7"
+    assert settings.log_level == logging.DEBUG
+    assert settings.log_level_name == "DEBUG"
+
+
 @pytest.mark.parametrize(
     ("name", "value", "message"),
     [
@@ -130,3 +175,28 @@ def test_invalid_ac_environment_is_rejected(
     monkeypatch.setenv(name, value)
     with pytest.raises(AcConfigurationError, match=message):
         AcSettings.from_env()
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("API_HOST", " ", "must not be empty"),
+        ("API_PORT", "web", "must be an integer"),
+        ("API_PORT", "0", "1 through 65535"),
+        ("API_PORT", "65536", "1 through 65535"),
+        ("API_TELEMETRY_STALE_AFTER_SECONDS", "0", "greater than zero"),
+        ("API_DOCS_ENABLED", "sometimes", "true or false"),
+        ("DEVICE_ID", " ", "must not be empty"),
+        ("LOG_LEVEL", "LOUD", "invalid"),
+    ],
+)
+def test_invalid_api_environment_is_rejected(
+    monkeypatch,
+    name: str,
+    value: str,
+    message: str,
+) -> None:
+    clear(monkeypatch, API_VARIABLES)
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ApiConfigurationError, match=message):
+        ApiSettings.from_env()

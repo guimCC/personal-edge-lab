@@ -50,6 +50,21 @@ def test_modules_depend_on_ports_and_domain_not_adapters() -> None:
     assert not {path: names for path, names in violations.items() if names}
 
 
+def test_read_only_api_does_not_import_esp32_adapters() -> None:
+    forbidden = (
+        "personal_edge_lab.infrastructure.esp32",
+        "personal_edge_lab.modules.home.commands",
+        "httpx",
+    )
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(forbidden)
+        )
+        for path in python_files("apps/api")
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
 def test_only_expected_real_modules_exist() -> None:
     module_names = {
         path.name
