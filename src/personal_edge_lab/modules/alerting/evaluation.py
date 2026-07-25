@@ -153,7 +153,6 @@ class EvaluateOperationalAlerts:
             )
             return AlertSignal(
                 status=AlertSignalStatus.BAD,
-                observed_at=evaluated_at,
                 alert_ready=alert_ready,
                 evidence_category="no_data",
                 evidence_message="No telemetry has been stored for the device",
@@ -162,14 +161,12 @@ class EvaluateOperationalAlerts:
         if age_seconds <= self._policy.telemetry_suspect_after_seconds:
             return AlertSignal(
                 status=AlertSignalStatus.GOOD,
-                observed_at=evaluated_at,
                 alert_ready=False,
                 evidence_category="fresh",
                 evidence_message="Fresh telemetry is available",
             )
         return AlertSignal(
             status=AlertSignalStatus.BAD,
-            observed_at=evaluated_at,
             alert_ready=age_seconds > self._policy.telemetry_alert_after_seconds,
             evidence_category="stale",
             evidence_message="Telemetry has remained stale",
@@ -182,20 +179,19 @@ class EvaluateOperationalAlerts:
         state: AlertState | None,
     ) -> AlertSignal:
         if collector is None or collector.stopped_at is not None:
-            return _unknown_edge_signal(evaluated_at)
+            return _unknown_edge_signal()
         heartbeat_age = max(0.0, (evaluated_at - collector.heartbeat_at).total_seconds())
         if heartbeat_age > self._policy.telemetry_suspect_after_seconds:
-            return _unknown_edge_signal(evaluated_at)
+            return _unknown_edge_signal()
         if collector.last_attempt_outcome is CollectionAttemptOutcome.SUCCESS:
             return AlertSignal(
                 status=AlertSignalStatus.GOOD,
-                observed_at=evaluated_at,
                 alert_ready=False,
                 evidence_category="reachable",
                 evidence_message="The latest collection attempt succeeded",
             )
         if collector.last_attempt_outcome is not CollectionAttemptOutcome.FAILURE:
-            return _unknown_edge_signal(evaluated_at)
+            return _unknown_edge_signal()
         suspect_at = None if state is None else state.suspect_started_at
         sustained = (
             suspect_at is not None
@@ -203,7 +199,6 @@ class EvaluateOperationalAlerts:
         )
         return AlertSignal(
             status=AlertSignalStatus.BAD,
-            observed_at=evaluated_at,
             alert_ready=(
                 collector.consecutive_failures >= self._policy.edge_min_consecutive_failures
                 and sustained
@@ -414,10 +409,9 @@ def _append_transition(
     )
 
 
-def _unknown_edge_signal(observed_at: datetime) -> AlertSignal:
+def _unknown_edge_signal() -> AlertSignal:
     return AlertSignal(
         status=AlertSignalStatus.UNKNOWN,
-        observed_at=observed_at,
         alert_ready=False,
         evidence_category="unknown",
         evidence_message="Collector evidence is unavailable or stale",

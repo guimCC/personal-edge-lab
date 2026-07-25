@@ -59,7 +59,6 @@ class AlertPolicy:
 @dataclass(frozen=True, slots=True)
 class AlertSignal:
     status: AlertSignalStatus
-    observed_at: datetime
     alert_ready: bool
     evidence_category: str
     evidence_message: str

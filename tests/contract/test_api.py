@@ -417,6 +417,28 @@ def test_ac_history_returns_structured_payload_and_pending_nulls(tmp_path) -> No
     assert completed["http_status"] == 200
 
 
+def test_ac_history_returns_sanitized_503_for_corrupt_stored_payload(tmp_path) -> None:
+    database = tmp_path / "corrupt-audit.db"
+    run_migrations(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO ac_command_audit (
+                device_id, command_type, command_payload_json,
+                requested_at_utc, outcome, request_source
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("node-1", "power_off", "{invalid", NOW.isoformat(), "pending", "local_cli"),
+        )
+
+    with TestClient(create_app(settings(database), clock=lambda: NOW)) as client:
+        response = client.get("/api/v1/ac/history")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "stored data unavailable"}
+    assert "invalid" not in response.text
+
+
 @pytest.mark.parametrize(
     ("path", "params"),
     [

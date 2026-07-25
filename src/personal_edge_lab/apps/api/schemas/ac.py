@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import ConfigDict, Field, JsonValue
 
-from personal_edge_lab.apps.api.schemas.common import ApiModel
+from personal_edge_lab.apps.api.schemas.common import ApiModel, StoredDataError
 from personal_edge_lab.domain.ac import CommandAuditEntry, CommandOutcome
 
 
@@ -29,9 +29,12 @@ class CommandAuditResponse(ApiModel):
 
     @classmethod
     def from_domain(cls, entry: CommandAuditEntry) -> CommandAuditResponse:
-        payload = json.loads(entry.command_payload_json)
+        try:
+            payload = json.loads(entry.command_payload_json)
+        except json.JSONDecodeError as error:
+            raise StoredDataError("stored command payload is invalid") from error
         if not isinstance(payload, dict):
-            raise ValueError("stored command payload must be a JSON object")
+            raise StoredDataError("stored command payload is not an object")
         return cls(
             id=entry.id,
             device_id=entry.device_id,

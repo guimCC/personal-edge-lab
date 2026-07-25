@@ -22,6 +22,7 @@ from personal_edge_lab.apps.api.routers.auth import create_auth_router
 from personal_edge_lab.apps.api.routers.dashboard import create_dashboard_router
 from personal_edge_lab.apps.api.routers.operations import create_operations_router
 from personal_edge_lab.apps.api.routers.telemetry import create_telemetry_router
+from personal_edge_lab.apps.api.schemas.common import StoredDataError
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
 
 LOGGER = logging.getLogger(__name__)
@@ -76,6 +77,17 @@ def _configure_error_handling(app: FastAPI) -> None:
         return JSONResponse(
             status_code=503,
             content={"detail": "database unavailable"},
+        )
+
+    @app.exception_handler(StoredDataError)
+    async def stored_data_error_handler(
+        _request: Request,
+        error: StoredDataError,
+    ) -> JSONResponse:
+        LOGGER.error("API stored data validation failed", exc_info=error)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "stored data unavailable"},
         )
 
 
