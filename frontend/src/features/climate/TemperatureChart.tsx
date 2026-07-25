@@ -67,6 +67,8 @@ export default function TemperatureChart({ data, windowLabel }: TemperatureChart
               color: "var(--paper)",
               fontSize: 12,
             }}
+            itemStyle={{ color: "var(--paper)" }}
+            labelStyle={{ color: "var(--paper)" }}
             labelFormatter={(value) => formatDateTime(Number(value))}
             formatter={(value, name) => {
               if (name === "range" && Array.isArray(value)) {
