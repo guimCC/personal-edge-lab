@@ -3,7 +3,10 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from telemetry_collector.client import CollectionError, EdgeNodeClient
+from personal_edge_lab.infrastructure.esp32.temperature_source import (
+    EdgeNodeClient,
+    TemperatureSourceError,
+)
 
 
 def make_client(handler: httpx.MockTransport) -> EdgeNodeClient:
@@ -57,13 +60,31 @@ def test_valid_temperature_response() -> None:
 )
 def test_invalid_payloads(payload: object) -> None:
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
-    with make_client(transport) as client, pytest.raises(CollectionError, match="invalid"):
+    with make_client(transport) as client, pytest.raises(TemperatureSourceError, match="invalid"):
         client.fetch_temperature()
 
 
 def test_non_200_response() -> None:
     transport = httpx.MockTransport(lambda request: httpx.Response(503))
-    with make_client(transport) as client, pytest.raises(CollectionError, match="503"):
+    with make_client(transport) as client, pytest.raises(TemperatureSourceError, match="503"):
+        client.fetch_temperature()
+
+
+def test_invalid_json_response() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            content=b"{not-json",
+            headers={"content-type": "application/json"},
+        )
+    )
+    with (
+        make_client(transport) as client,
+        pytest.raises(
+            TemperatureSourceError,
+            match="not valid JSON",
+        ),
+    ):
         client.fetch_temperature()
 
 
@@ -72,5 +93,5 @@ def test_transport_failure(exception: httpx.RequestError) -> None:
     def fail(request: httpx.Request) -> httpx.Response:
         raise exception
 
-    with make_client(httpx.MockTransport(fail)) as client, pytest.raises(CollectionError):
+    with make_client(httpx.MockTransport(fail)) as client, pytest.raises(TemperatureSourceError):
         client.fetch_temperature()

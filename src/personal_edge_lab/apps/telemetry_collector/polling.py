@@ -1,4 +1,4 @@
-"""Polling orchestration and failure log suppression."""
+"""Polling lifecycle and failure log suppression."""
 
 from __future__ import annotations
 
@@ -6,43 +6,40 @@ import logging
 import threading
 from collections.abc import Callable
 
-from telemetry_collector.client import CollectionError
-from telemetry_collector.models import TemperatureReading
-from telemetry_collector.storage import TelemetryStore
+from personal_edge_lab.application.ports.telemetry import TemperatureSourceError
+from personal_edge_lab.modules.telemetry import CollectionReceipt
 
 LOGGER = logging.getLogger(__name__)
 FAILURE_REMINDER_EVERY = 20
 
 
-class TelemetryCollector:
+class TelemetryPollingLoop:
     def __init__(
         self,
         *,
-        fetch_temperature: Callable[[], TemperatureReading],
-        store: TelemetryStore,
+        collect_once: Callable[[], CollectionReceipt],
         interval_seconds: float,
         stop_event: threading.Event,
     ) -> None:
-        self._fetch_temperature = fetch_temperature
-        self._store = store
+        self._collect_once = collect_once
         self._interval_seconds = interval_seconds
         self._stop_event = stop_event
         self._consecutive_failures = 0
 
     def collect_once(self) -> bool:
         try:
-            reading = self._fetch_temperature()
-        except CollectionError as error:
+            receipt = self._collect_once()
+        except TemperatureSourceError as error:
             self._record_failure(error)
             return False
 
         if self._consecutive_failures:
             LOGGER.info("Edge node recovered after %d failed attempts", self._consecutive_failures)
         self._consecutive_failures = 0
-        row_id = self._store.insert(reading)
+        reading = receipt.reading
         LOGGER.info(
             "Stored reading id=%d device=%s temperature_c=%.2f age_ms=%d",
-            row_id,
+            receipt.row_id,
             reading.device_id,
             reading.temperature_c,
             reading.age_ms,
@@ -56,7 +53,7 @@ class TelemetryCollector:
             self._stop_event.wait(self._interval_seconds)
         LOGGER.info("Telemetry collector stopped")
 
-    def _record_failure(self, error: CollectionError) -> None:
+    def _record_failure(self, error: TemperatureSourceError) -> None:
         self._consecutive_failures += 1
         if self._consecutive_failures == 1:
             LOGGER.error("Temperature collection failed: %s", error)

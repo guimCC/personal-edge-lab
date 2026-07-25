@@ -1,0 +1,1 @@
+"""Continuous telemetry collector application."""

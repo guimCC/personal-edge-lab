@@ -3,8 +3,9 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-from telemetry_collector.models import TemperatureReading
-from telemetry_collector.storage import TelemetryStore
+from personal_edge_lab.domain.telemetry import TemperatureReading
+from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import SqliteTelemetryRepository
 
 
 def reading() -> TemperatureReading:
@@ -23,8 +24,7 @@ def reading() -> TemperatureReading:
 
 def test_schema_initialization(tmp_path) -> None:
     database = tmp_path / "nested" / "telemetry.db"
-    with TelemetryStore(database):
-        pass
+    run_migrations(database)
     with sqlite3.connect(database) as connection:
         names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
     assert "temperature_readings" in names
@@ -32,13 +32,15 @@ def test_schema_initialization(tmp_path) -> None:
 
 
 def test_insert_and_retrieve(tmp_path) -> None:
-    with TelemetryStore(tmp_path / "telemetry.db") as store:
+    database = tmp_path / "telemetry.db"
+    run_migrations(database)
+    with SqliteTelemetryRepository(database) as store:
         row_id = store.insert(reading())
-        row = store.latest()
+        row = store.latest("node-1")
         assert store.count() == 1
     assert row_id == 1
     assert row is not None
-    assert row["device_id"] == "node-1"
-    assert row["temperature_c"] == 21.5
-    assert row["received_at_utc"] == "2026-07-21T12:00:00+00:00"
-    assert row["estimated_sample_at_utc"] == "2026-07-21T11:59:59.500000+00:00"
+    assert row.device_id == "node-1"
+    assert row.temperature_c == 21.5
+    assert row.received_at.isoformat() == "2026-07-21T12:00:00+00:00"
+    assert row.estimated_sample_at.isoformat() == "2026-07-21T11:59:59.500000+00:00"

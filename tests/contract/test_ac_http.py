@@ -5,8 +5,11 @@ import json
 import httpx
 import pytest
 
-from ac_control.client import MAX_RESPONSE_BODY_CHARS, AcCommandClient
-from ac_control.models import AcState, CommandOutcome
+from personal_edge_lab.domain.ac import AcState, CommandOutcome
+from personal_edge_lab.infrastructure.esp32.ac_controller import (
+    MAX_RESPONSE_BODY_CHARS,
+    AcCommandClient,
+)
 
 
 def state() -> AcState:

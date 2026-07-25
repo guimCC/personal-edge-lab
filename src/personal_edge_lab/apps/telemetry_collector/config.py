@@ -1,4 +1,4 @@
-"""Environment-based service configuration."""
+"""Environment-based telemetry collector configuration."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 
 class ConfigurationError(ValueError):
-    """Raised when environment configuration is invalid."""
+    """Raised when telemetry configuration is invalid."""
 
 
 @dataclass(frozen=True, slots=True)

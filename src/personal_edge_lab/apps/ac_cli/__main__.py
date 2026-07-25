@@ -1,4 +1,4 @@
-"""AC command-line entry point."""
+"""AC CLI composition root and entry point."""
 
 from __future__ import annotations
 
@@ -11,11 +11,19 @@ from typing import TextIO
 
 import httpx
 
-from ac_control.client import AcCommandClient
-from ac_control.commands import CommandService
-from ac_control.config import ConfigurationError, Settings
-from ac_control.models import AcState, CommandExecution, CommandOutcome, ValidationError
-from ac_control.storage import CommandAuditStore
+from personal_edge_lab.apps.ac_cli.config import ConfigurationError, Settings
+from personal_edge_lab.domain.ac import (
+    AcState,
+    CommandExecution,
+    CommandOutcome,
+    ValidationError,
+)
+from personal_edge_lab.infrastructure.esp32.ac_controller import AcCommandClient
+from personal_edge_lab.infrastructure.persistence.sqlite.command_audit import (
+    SqliteCommandAuditRepository,
+)
+from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+from personal_edge_lab.modules.home import CommandService
 
 EXIT_BY_OUTCOME = {
     CommandOutcome.CONFIRMED_SUCCESS: 0,
@@ -28,7 +36,7 @@ EXIT_BY_OUTCOME = {
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m ac_control")
+    parser = argparse.ArgumentParser(prog="python -m personal_edge_lab.apps.ac_cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     set_parser = subparsers.add_parser("set", help="transmit a complete AC state")
@@ -65,19 +73,25 @@ def main(
     )
 
     try:
-        with CommandAuditStore(settings.database_path) as store:
+        run_migrations(settings.database_path)
+        with SqliteCommandAuditRepository(settings.database_path) as audit_repository:
             if args.command == "history":
-                return _show_history(store, args.limit, stdout=stdout, stderr=stderr)
+                return _show_history(
+                    audit_repository,
+                    args.limit,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
 
             with AcCommandClient(
                 base_url=settings.node_base_url,
                 timeout_seconds=settings.command_timeout_seconds,
                 transport=transport,
-            ) as client:
+            ) as controller:
                 service = CommandService(
                     device_id=settings.device_id,
-                    client=client,
-                    store=store,
+                    controller=controller,
+                    audit_repository=audit_repository,
                 )
                 if args.command == "set":
                     execution = _run_set(args, service, stdout=stdout)
@@ -131,10 +145,7 @@ def _show_result(
 ) -> int:
     result = execution.result
     output = stdout if result.outcome is CommandOutcome.CONFIRMED_SUCCESS else stderr
-    print(
-        f"Command {execution.command_id}: {result.outcome.value}",
-        file=output,
-    )
+    print(f"Command {execution.command_id}: {result.outcome.value}", file=output)
     if result.http_status is not None:
         print(f"HTTP status: {result.http_status}", file=output)
     if result.error_message:
@@ -143,7 +154,7 @@ def _show_result(
 
 
 def _show_history(
-    store: CommandAuditStore,
+    audit_repository: SqliteCommandAuditRepository,
     limit: int,
     *,
     stdout: TextIO,
@@ -152,15 +163,15 @@ def _show_history(
     if not 1 <= limit <= 100:
         print("--limit must be from 1 through 100", file=stderr)
         return 2
-    rows = store.history(limit=limit)
-    if not rows:
+    entries = audit_repository.history(limit=limit)
+    if not entries:
         print("No AC command attempts recorded.", file=stdout)
         return 0
     print("ID  REQUESTED_AT_UTC                    OUTCOME                 COMMAND", file=stdout)
-    for row in rows:
+    for entry in entries:
         print(
-            f"{row['id']:<3} {row['requested_at_utc']:<35} "
-            f"{row['outcome']:<23} {row['command_type']}",
+            f"{entry.id:<3} {entry.requested_at_utc.isoformat():<35} "
+            f"{entry.outcome.value:<23} {entry.command_type}",
             file=stdout,
         )
     return 0

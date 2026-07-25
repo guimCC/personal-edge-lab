@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+
+from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+
+
+def object_names(database) -> set[str]:
+    with sqlite3.connect(database) as connection:
+        return {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'index')"
+            )
+        }
+
+
+def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
+    database = tmp_path / "empty.db"
+    run_migrations(database)
+
+    assert {
+        "schema_migrations",
+        "temperature_readings",
+        "idx_temperature_device_received",
+        "ac_command_audit",
+        "idx_ac_command_device_requested",
+    } <= object_names(database)
+    with sqlite3.connect(database) as connection:
+        versions = list(connection.execute("SELECT version FROM schema_migrations"))
+    assert versions == [("001_initial",)]
+
+
+def test_migration_preserves_existing_tables_rows_and_indexes(tmp_path) -> None:
+    database = tmp_path / "existing.db"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE temperature_readings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                sensor_type TEXT NOT NULL,
+                received_at_utc TEXT NOT NULL,
+                estimated_sample_at_utc TEXT NOT NULL,
+                temperature_c REAL NOT NULL,
+                raw_adc INTEGER NOT NULL,
+                age_ms INTEGER NOT NULL,
+                sample_interval_ms INTEGER NOT NULL
+            );
+            CREATE INDEX idx_temperature_device_received
+            ON temperature_readings (device_id, received_at_utc);
+            CREATE TABLE ac_command_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                command_type TEXT NOT NULL,
+                command_payload_json TEXT NOT NULL,
+                requested_at_utc TEXT NOT NULL,
+                completed_at_utc TEXT,
+                outcome TEXT NOT NULL,
+                http_status INTEGER,
+                response_body TEXT,
+                error_category TEXT,
+                error_message TEXT
+            );
+            CREATE INDEX idx_ac_command_device_requested
+            ON ac_command_audit (device_id, requested_at_utc);
+            INSERT INTO temperature_readings VALUES (
+                7, 'node-1', 'thermistor', '2026-07-21T12:00:00+00:00',
+                '2026-07-21T11:59:59.500000+00:00', 21.5, 1700, 500, 2000
+            );
+            INSERT INTO ac_command_audit VALUES (
+                9, 'node-1', 'power_off', '{"power":false}',
+                '2026-07-21T12:01:00+00:00', '2026-07-21T12:01:01+00:00',
+                'confirmed_success', 200, '{}', NULL, NULL
+            );
+            """
+        )
+
+    before_names = object_names(database)
+    run_migrations(database)
+
+    with sqlite3.connect(database) as connection:
+        telemetry = connection.execute(
+            "SELECT id, temperature_c FROM temperature_readings"
+        ).fetchall()
+        commands = connection.execute("SELECT id, outcome FROM ac_command_audit").fetchall()
+    assert telemetry == [(7, 21.5)]
+    assert commands == [(9, "confirmed_success")]
+    assert before_names <= object_names(database)
+
+
+def test_concurrent_app_startup_applies_migration_once(tmp_path) -> None:
+    database = tmp_path / "race.db"
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: run_migrations(database), range(8)))
+
+    with sqlite3.connect(database) as connection:
+        migration_count = connection.execute(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = '001_initial'"
+        ).fetchone()
+    assert migration_count == (1,)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ac_control.models import AcMode, AcState, FanSpeed, ValidationError, VerticalVane
+from personal_edge_lab.domain.ac import AcMode, AcState, FanSpeed, ValidationError, VerticalVane
 
 
 def make_state(**overrides: object) -> AcState:

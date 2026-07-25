@@ -19,25 +19,16 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = [
-  "services/ac-control/src/ac_control",
-  "services/telemetry-collector/src/telemetry_collector",
-]
+packages = ["src/personal_edge_lab"]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
-testpaths = [
-  "services/ac-control/tests",
-  "services/telemetry-collector/tests",
-]
+testpaths = ["tests"]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = [
-  "services/ac-control/src",
-  "services/telemetry-collector/src",
-]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

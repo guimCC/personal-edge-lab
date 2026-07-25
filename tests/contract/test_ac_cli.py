@@ -6,7 +6,7 @@ import sqlite3
 import httpx
 import pytest
 
-from ac_control.__main__ import main
+from personal_edge_lab.apps.ac_cli.__main__ import main
 
 
 @pytest.fixture
