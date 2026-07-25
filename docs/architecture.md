@@ -15,13 +15,14 @@ apps -> application/ports <- infrastructure
   modules.
 - `application/ports` contains the narrow protocols required by use cases: a temperature source,
   telemetry repository, AC controller, and command-audit repository.
-- `modules/telemetry` collects and stores exactly one reading.
-- `modules/home` rejects, sends, and audits one AC command.
+- `modules/telemetry` collects one reading and provides bounded telemetry queries and freshness.
+- `modules/home` rejects, sends, and audits one AC command and provides audit-history queries.
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
 - `infrastructure/persistence/sqlite` owns migrations and maps SQLite rows to domain objects.
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
   consecutive-failure counter.
 - `apps/ac_cli` owns parsing, output, configuration, composition, and exit codes.
+- `apps/api` exposes typed, read-only HTTP queries and opens one SQLite repository per request.
 
 Architecture tests parse imports to keep domain isolated and prevent modules from importing HTTP
 or SQLite implementations.
@@ -50,6 +51,17 @@ operator -> validate complete state -> begin audit -> one HTTP request -> comple
 
 Timeouts and malformed HTTP 200 responses remain unknown outcomes because IR transmission may
 have happened. Even a confirmed response is not physical-state confirmation.
+
+The local API is a separate process:
+
+```text
+trusted-LAN client -> FastAPI response models -> query use cases -> SQLite repositories
+```
+
+It performs no ESP32 requests and has no physical-control route. Migrations run before the API
+accepts requests. Each synchronous request owns its SQLite connection, so web worker threads never
+share a connection. Telemetry freshness is derived from the latest stored receipt timestamp rather
+than process coupling to the collector.
 
 ## Adding capability
 
@@ -90,7 +102,7 @@ process lifecycle or presentation. Business rules should remain reusable outside
 
 ## Future architecture, not current packages
 
-Future slices may introduce an HTTP API, Telegram, speech, email, a task worker, identity and
+Future slices may introduce a dashboard, Telegram, speech, email, a task worker, identity and
 permissions, and worker registration. They should reuse domain models and use cases through ports.
 No empty placeholder packages exist for these ideas. A package is added only with its first
 end-to-end behavior and tests.

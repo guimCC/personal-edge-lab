@@ -157,3 +157,59 @@ journalctl -u "$SERVICE" -n 100 --no-pager
 ```
 
 Confirm that the old service produces a new reading before closing the rollback.
+
+## Stage 1 read-only API rollout
+
+The API is a second service and does not require stopping the collector. Capture the installed
+commit, API unit state if it exists, SQLite integrity, row counts, and the latest telemetry row.
+Back up `.env`, `telemetry.db`, and any existing API unit.
+
+Add the API settings from `.env.example` to the real `.env`, then install and verify:
+
+```bash
+cd /home/ubuntu/personal-edge-lab
+source .venv/bin/activate
+set -a
+source .env
+set +a
+python -m pip install -e '.[dev]'
+python -m pytest
+python -m ruff check .
+sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
+```
+
+Install the reviewed unit:
+
+```bash
+sudo cp deploy/systemd/personal-edge-lab-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now personal-edge-lab-api.service
+systemctl status personal-edge-lab-api.service --no-pager
+journalctl -u personal-edge-lab-api.service -n 100 --no-pager
+```
+
+Verify from the RUBIK and then another trusted-LAN device:
+
+```bash
+curl --fail --show-error http://127.0.0.1:8000/health
+curl --fail --show-error http://192.168.1.81:8000/health
+curl --fail --show-error http://192.168.1.81:8000/api/v1/telemetry/latest
+curl --fail --show-error 'http://192.168.1.81:8000/api/v1/telemetry/history?limit=5'
+curl --fail --show-error 'http://192.168.1.81:8000/api/v1/ac/history?limit=5'
+```
+
+Open `http://192.168.1.81:8000/docs` from the LAN. Confirm no mutating operations appear. While
+querying the API, confirm the collector stays active and writes several new readings at its normal
+cadence. The stored endpoints must continue working if the ESP32 is briefly unavailable.
+
+Reboot the RUBIK and verify both services are enabled and active:
+
+```bash
+systemctl is-enabled telemetry-collector.service personal-edge-lab-api.service
+systemctl is-active telemetry-collector.service personal-edge-lab-api.service
+journalctl -u personal-edge-lab-api.service -b --no-pager
+```
+
+If acceptance fails, stop and disable only `personal-edge-lab-api.service`, restore the previous
+package and API unit if necessary, reload systemd, and confirm telemetry continues. Stage 1 adds no
+SQLite migration, so restore the database only if integrity or row-count evidence shows damage.

@@ -76,9 +76,30 @@ Exit codes remain:
 | 4 | timeout or unexpected success response; final state unknown |
 | 5 | node-reported HTTP failure |
 
+## Query the local API
+
+The read-only API runs independently from the collector and never contacts the ESP32:
+
+```bash
+python -m personal_edge_lab.apps.api
+```
+
+By default it listens on port 8000 on the trusted LAN:
+
+```bash
+curl http://rubik-edge-01:8000/health
+curl http://rubik-edge-01:8000/api/v1/telemetry/latest
+curl 'http://rubik-edge-01:8000/api/v1/telemetry/history?limit=100'
+curl 'http://rubik-edge-01:8000/api/v1/ac/history?limit=20'
+```
+
+Interactive documentation is available at `http://rubik-edge-01:8000/docs`. Stage 1 has no
+write routes, authentication, CORS, TLS, dashboard, or public-internet exposure. See the
+[versioned API contract](docs/contracts/platform-api-v1.md).
+
 ## Data and migrations
 
-Both applications run the same standard-library migration runner before opening a repository.
+All applications run the same standard-library migration runner before opening a repository.
 It creates `schema_migrations` and recognizes the existing `temperature_readings` and
 `ac_command_audit` tables and indexes with `IF NOT EXISTS`. Existing rows stay in place. SQLite
 uses one `data/telemetry.db`; there is no ORM or second database process.
@@ -97,7 +118,8 @@ python -m personal_edge_lab.apps.ac_cli history --limit 20
 
 See [the development roadmap and log](docs/roadmap.md), the
 [architecture guide](docs/architecture.md), the
-[ESP32 contract](docs/contracts/ac-controller-01.md), and the
+[ESP32 contract](docs/contracts/ac-controller-01.md), the
+[platform API contract](docs/contracts/platform-api-v1.md), and the
 [Raspberry cutover runbook](docs/deployment.md).
 
 The old `python -m telemetry_collector` and `python -m ac_control` entrypoints have intentionally

@@ -46,7 +46,7 @@ automation.
 | --- | --- | --- |
 | 0. Modular foundation | Done | Telemetry and AC control share one modular package |
 | 0A. Deployment housekeeping | Done | Live configuration captured and reboot accepted |
-| 1. Read-only local API | Next | Safe programmatic access to platform data |
+| 1. Read-only local API | In progress | Implemented locally; RUBIK acceptance pending |
 | 2. Dashboard and service health | Planned | Useful browser view of temperature and platform status |
 | 3. Authenticated dashboard AC control | Planned | Safe physical control through the browser |
 | 4. Stale telemetry and availability alerts | Planned | Actionable failure and recovery notifications |
@@ -98,6 +98,8 @@ Stage 0A was completed on 2026-07-25:
 
 ## Stage 1 — Read-only local API
 
+**Status:** Implemented locally; RUBIK acceptance pending
+
 **Goal:** expose useful platform data over HTTP from the RUBIK without adding a new physical-control
 surface.
 
@@ -106,14 +108,14 @@ The local platform API will expose validated platform data to browsers and futur
 
 ### Initial HTTP surface
 
-Candidate endpoints:
+Implemented endpoints:
 
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /health` | API, database, collector freshness, and platform version |
-| `GET /telemetry/latest` | Latest reading for a device |
-| `GET /telemetry/history` | Bounded recent readings for charts or inspection |
-| `GET /ac/history` | Bounded recent AC command audit entries |
+| `GET /api/v1/telemetry/latest` | Latest reading for a device |
+| `GET /api/v1/telemetry/history` | Bounded recent readings for charts or inspection |
+| `GET /api/v1/ac/history` | Bounded recent AC command audit entries |
 
 The first version has no `POST`, `PUT`, `PATCH`, or `DELETE` routes.
 
@@ -128,14 +130,14 @@ The first version has no `POST`, `PUT`, `PATCH`, or `DELETE` routes.
 - Add a separate service only after its bind address, port, user, environment, restart policy, and
   network exposure are intentionally chosen.
 
-### Open decisions
+### Decisions
 
-- API framework and dependency footprint.
-- Bind only to localhost or expose it to the trusted LAN.
-- Port and hostname.
-- Maximum history window and whether cursor pagination is needed initially.
-- How `/health` learns collector freshness without coupling to the collector process.
-- Whether API documentation is available on the LAN or only locally.
+- Use FastAPI, Pydantic, and one Uvicorn worker.
+- Bind to `0.0.0.0:8000` on the trusted LAN.
+- Use recent bounded lists: telemetry 1–1000 and AC history 1–100.
+- Derive freshness from the latest stored reading; more than 45 seconds is stale.
+- Return HTTP 200 with `degraded` for stale or absent telemetry and 503 only for SQLite failure.
+- Expose `/docs` and `/openapi.json` on the trusted LAN.
 
 ### Acceptance criteria
 
@@ -419,3 +421,40 @@ changed, how it was verified, decisions made, and what remains.
 
 - Begin Stage 1 by deciding API exposure, framework, port, health semantics, and bounded query
   contracts.
+
+### 2026-07-25 — Read-only API implemented
+
+**Stage:** 1
+**Status:** Implemented locally; RUBIK acceptance pending
+
+**Delivered**
+
+- Added reusable telemetry and AC audit query use cases.
+- Added versioned read-only HTTP endpoints, health semantics, OpenAPI, and interactive docs.
+- Added a separate `personal-edge-lab-api.service` with no dependency on the collector.
+- Published the API contract and controlled rollout/rollback procedure.
+
+**Decisions**
+
+- Trust the home LAN for Stage 1 and expose port 8000 without authentication or CORS.
+- Keep the API read-only and independent from ESP32 connectivity.
+- Use one SQLite connection per request and one Uvicorn worker.
+- Defer pagination, time ranges, dashboard UI, alerts, TLS, and control routes.
+
+**Verification**
+
+- Unit, integration, HTTP contract, architecture, configuration, and real-process tests pass in
+  development.
+- Mutating HTTP methods cannot create AC audit records or reach command use cases.
+- Existing collector and AC CLI behaviors remain covered by the full regression suite.
+
+**Known limitations**
+
+- The API has not yet completed service, trusted-LAN, concurrent-load, ESP32-offline, and reboot
+  acceptance on the RUBIK.
+- The API must not be forwarded to the public internet.
+
+**Next**
+
+- Deploy Stage 1 to the RUBIK using `docs/deployment.md` and record the acceptance evidence before
+  marking the stage done.
