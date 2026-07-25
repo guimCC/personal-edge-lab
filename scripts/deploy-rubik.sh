@@ -191,6 +191,11 @@ if ((${#SYSTEM_PACKAGES[@]})); then
     sudo apt-get install -y "${SYSTEM_PACKAGES[@]}"
 fi
 
+sqlite_live() {
+    # Collector and alert-evaluator writes are brief; wait for them instead of failing deployment.
+    sqlite3 -cmd ".timeout 15000" "$DATABASE_FILE" "$@"
+}
+
 log "Backing up configuration, database, and deployed units"
 DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DEPLOY_BACKUP="/home/ubuntu/backups/personal-edge-lab/$DEPLOY_STAMP"
@@ -200,16 +205,16 @@ git rev-parse HEAD >"$DEPLOY_BACKUP/installed-commit.txt"
 git status --short >"$DEPLOY_BACKUP/working-tree.txt"
 
 if [[ -f "$DATABASE_FILE" ]]; then
-    sqlite3 "$DATABASE_FILE" ".backup '$DEPLOY_BACKUP/telemetry.db'"
-    sqlite3 "$DATABASE_FILE" 'PRAGMA integrity_check;' | grep -qx 'ok'
-    sqlite3 "$DATABASE_FILE" \
+    sqlite_live ".backup '$DEPLOY_BACKUP/telemetry.db'"
+    sqlite_live 'PRAGMA integrity_check;' | grep -qx 'ok'
+    sqlite_live \
         'SELECT "temperature_readings", COUNT(*) FROM temperature_readings
          UNION ALL SELECT "ac_command_audit", COUNT(*) FROM ac_command_audit;' \
         >"$DEPLOY_BACKUP/row-counts.txt"
-    if sqlite3 "$DATABASE_FILE" \
+    if sqlite_live \
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='alert_incidents';" \
         | grep -qx '1'; then
-        sqlite3 "$DATABASE_FILE" \
+        sqlite_live \
             'SELECT "alert_incidents", COUNT(*) FROM alert_incidents
              UNION ALL SELECT "alert_states", COUNT(*) FROM alert_states
              UNION ALL SELECT "alert_transition_events", COUNT(*)
@@ -342,7 +347,7 @@ from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_m
 
 run_migrations(Path(os.environ["DATABASE_PATH"]))
 PY
-sqlite3 "$DATABASE_FILE" 'PRAGMA integrity_check;' | grep -qx 'ok'
+sqlite_live 'PRAGMA integrity_check;' | grep -qx 'ok'
 
 log "Updating systemd and Nginx configuration"
 sudo install -d -m 0755 /etc/systemd/system/telemetry-collector.service.d
@@ -392,7 +397,7 @@ EVALUATOR_RESULT="$(
 [[ "$EVALUATOR_RESULT" == "success" ]] || {
     fail "initial operational alert evaluation failed (result: $EVALUATOR_RESULT)"
 }
-sqlite3 "$DATABASE_FILE" \
+sqlite_live \
     "SELECT COUNT(*) FROM alert_runtime_status
      WHERE singleton_id = 1
        AND last_outcome = 'success'
