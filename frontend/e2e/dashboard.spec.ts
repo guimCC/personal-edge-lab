@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({
       json: {
         status: "healthy",
-        version: "0.4.0",
+        version: "0.5.0",
         checked_at_utc: NOW,
         database: { status: "healthy" },
         telemetry: {
@@ -47,9 +47,31 @@ test.beforeEach(async ({ page }) => {
           last_failure_category: null,
           last_failure_message: null,
         },
+        alerts: {
+          status: "healthy",
+          active_count: 0,
+          suspect_count: 0,
+          latest_transition_at_utc: null,
+          evaluator_last_run_at_utc: NOW,
+          evaluator_age_seconds: 0,
+        },
       },
     });
   });
+  await page.route("**/api/v1/alerts?status=all&limit=20", (route) =>
+    route.fulfill({
+      json: {
+        device_id: "ac-controller-01",
+        status: "healthy",
+        evaluator_last_run_at_utc: NOW,
+        evaluator_age_seconds: 0,
+        count: 0,
+        limit: 20,
+        states: [],
+        incidents: [],
+      },
+    }),
+  );
   await page.route("**/api/v1/telemetry/latest", (route) =>
     route.fulfill({
       json: {
@@ -90,6 +112,7 @@ test("renders the phone-first health overview without horizontal overflow", asyn
   await expect(page.getByText("Online")).toBeVisible();
   await expect(page.getByText("running", { exact: true })).toBeVisible();
   await expect(page.getByText("reachable", { exact: true })).toBeVisible();
+  await expect(page.getByText("No active operational incidents")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

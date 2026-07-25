@@ -9,7 +9,7 @@ const NOW = "2026-07-25T14:00:00Z";
 
 const health = {
   status: "healthy",
-  version: "0.4.0",
+  version: "0.5.0",
   checked_at_utc: NOW,
   database: { status: "healthy" },
   telemetry: {
@@ -40,6 +40,14 @@ const health = {
     last_failure_category: null,
     last_failure_message: null,
   },
+  alerts: {
+    status: "healthy",
+    active_count: 0,
+    suspect_count: 0,
+    latest_transition_at_utc: null,
+    evaluator_last_run_at_utc: NOW,
+    evaluator_age_seconds: 0,
+  },
 };
 
 const latest = {
@@ -51,6 +59,42 @@ const latest = {
   raw_adc: 1700,
   age_ms: 1000,
   sample_interval_ms: 2000,
+};
+
+const alerts = {
+  device_id: "node-1",
+  status: "healthy",
+  evaluator_last_run_at_utc: NOW,
+  evaluator_age_seconds: 0,
+  count: 0,
+  limit: 20,
+  states: [
+    {
+      device_id: "node-1",
+      alert_type: "edge_unavailable",
+      lifecycle: "healthy",
+      suspect_started_at_utc: null,
+      active_incident_id: null,
+      recovered_at_utc: null,
+      recovery_display_until_utc: null,
+      last_observed_at_utc: NOW,
+      evidence_category: "reachable",
+      evidence_message: "The latest collection attempt succeeded",
+    },
+    {
+      device_id: "node-1",
+      alert_type: "telemetry_stale",
+      lifecycle: "healthy",
+      suspect_started_at_utc: null,
+      active_incident_id: null,
+      recovered_at_utc: null,
+      recovery_display_until_utc: null,
+      last_observed_at_utc: NOW,
+      evidence_category: "fresh",
+      evidence_message: "Fresh telemetry is available",
+    },
+  ],
+  incidents: [],
 };
 
 function response(body: unknown, status = 200): Response {
@@ -68,6 +112,39 @@ function renderApp() {
     <QueryClientProvider client={queryClient}>
       <App />
     </QueryClientProvider>,
+  );
+}
+
+function stubReadOnlyDashboard(alertData: unknown, selectedHealth: unknown = health) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/auth/session"))
+        return Promise.resolve(
+          response({
+            authenticated: false,
+            auth_enabled: false,
+            controls_enabled: false,
+          }),
+        );
+      if (url === "/health") return Promise.resolve(response(selectedHealth));
+      if (url.includes("/latest")) return Promise.resolve(response(latest));
+      if (url.includes("/alerts")) return Promise.resolve(response(alertData));
+      if (url.includes("/series"))
+        return Promise.resolve(
+          response({
+            device_id: "node-1",
+            window: "6h",
+            start_at_utc: "2026-07-25T08:00:00Z",
+            end_at_utc: NOW,
+            bucket_seconds: 300,
+            sample_count: 0,
+            items: [],
+          }),
+        );
+      return Promise.resolve(response({ count: 0, limit: 10, items: [] }));
+    }),
   );
 }
 
@@ -104,6 +181,7 @@ describe("dashboard", () => {
           );
         if (url === "/health") return Promise.resolve(response(health));
         if (url.includes("/latest")) return Promise.resolve(response(latest));
+        if (url.includes("/alerts")) return Promise.resolve(response(alerts));
         if (url.includes("/series"))
           return Promise.resolve(
             response({
@@ -154,6 +232,7 @@ describe("dashboard", () => {
           );
         if (url === "/health") return Promise.resolve(response(degraded));
         if (url.includes("/latest")) return Promise.resolve(response(latest));
+        if (url.includes("/alerts")) return Promise.resolve(response(alerts));
         if (url.includes("/series"))
           return Promise.resolve(
             response({
@@ -175,6 +254,146 @@ describe("dashboard", () => {
     expect(screen.getByText("unreachable")).toBeInTheDocument();
   });
 
+  it("shows a durable active incident separately from current health", async () => {
+    const activeAlerts = {
+      ...alerts,
+      status: "alerting",
+      count: 1,
+      states: [
+        {
+          ...alerts.states[1],
+          lifecycle: "alerting",
+          suspect_started_at_utc: "2026-07-25T13:56:00Z",
+          active_incident_id: 9,
+          evidence_category: "stale",
+          evidence_message: "Telemetry has remained stale",
+        },
+      ],
+      incidents: [
+        {
+          id: 9,
+          device_id: "node-1",
+          alert_type: "telemetry_stale",
+          status: "active",
+          suspect_started_at_utc: "2026-07-25T13:56:00Z",
+          alerting_at_utc: "2026-07-25T13:57:00Z",
+          recovered_at_utc: null,
+          last_observed_at_utc: NOW,
+          duration_seconds: 180,
+          evidence_category: "stale",
+          evidence_message: "Telemetry has remained stale",
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/auth/session"))
+          return Promise.resolve(
+            response({
+              authenticated: false,
+              auth_enabled: false,
+              controls_enabled: false,
+            }),
+          );
+        if (url === "/health") return Promise.resolve(response(health));
+        if (url.includes("/latest")) return Promise.resolve(response(latest));
+        if (url.includes("/alerts")) return Promise.resolve(response(activeAlerts));
+        if (url.includes("/series"))
+          return Promise.resolve(
+            response({
+              device_id: "node-1",
+              window: "6h",
+              start_at_utc: "2026-07-25T08:00:00Z",
+              end_at_utc: NOW,
+              bucket_seconds: 300,
+              sample_count: 0,
+              items: [],
+            }),
+          );
+        return Promise.resolve(response({ count: 0, limit: 10, items: [] }));
+      }),
+    );
+
+    renderApp();
+    expect(await screen.findByRole("heading", { name: "Operational incidents" })).toBeVisible();
+    expect(await screen.findByText("Active · telemetry stale")).toBeVisible();
+    expect(screen.getByText("Telemetry has remained stale")).toBeVisible();
+    expect(screen.getByText("3 minutes")).toBeVisible();
+    expect(screen.getAllByText("fresh", { exact: true }).length).toBeGreaterThan(0);
+  });
+
+  it("labels suspect evidence before an incident becomes active", async () => {
+    stubReadOnlyDashboard({
+      ...alerts,
+      status: "suspect",
+      states: [
+        {
+          ...alerts.states[1],
+          lifecycle: "suspect",
+          suspect_started_at_utc: "2026-07-25T13:59:30Z",
+          evidence_category: "stale",
+          evidence_message: "Telemetry has remained stale",
+        },
+      ],
+    });
+
+    renderApp();
+    expect(await screen.findByText("Suspect · telemetry stale")).toBeVisible();
+    expect(screen.queryByText("Active · telemetry stale")).not.toBeInTheDocument();
+  });
+
+  it("shows recovered history without presenting it as an active incident", async () => {
+    stubReadOnlyDashboard({
+      ...alerts,
+      status: "recovered",
+      count: 1,
+      states: [
+        {
+          ...alerts.states[1],
+          lifecycle: "recovered",
+          recovered_at_utc: "2026-07-25T13:59:30Z",
+          recovery_display_until_utc: "2026-07-25T14:04:30Z",
+          evidence_category: "fresh",
+          evidence_message: "Fresh telemetry is available",
+        },
+      ],
+      incidents: [
+        {
+          id: 10,
+          device_id: "node-1",
+          alert_type: "telemetry_stale",
+          status: "recovered",
+          suspect_started_at_utc: "2026-07-25T13:55:00Z",
+          alerting_at_utc: "2026-07-25T13:57:00Z",
+          recovered_at_utc: "2026-07-25T13:59:30Z",
+          last_observed_at_utc: "2026-07-25T13:59:30Z",
+          duration_seconds: 150,
+          evidence_category: "fresh",
+          evidence_message: "Fresh telemetry is available",
+        },
+      ],
+    });
+
+    renderApp();
+    expect(await screen.findByText("Recovered")).toBeVisible();
+    expect(screen.getByText("No active operational incidents")).toBeVisible();
+    expect(screen.queryByText("Active · telemetry stale")).not.toBeInTheDocument();
+  });
+
+  it("makes an overdue evaluator visible as unknown alert state", async () => {
+    stubReadOnlyDashboard({
+      ...alerts,
+      status: "unknown",
+      evaluator_age_seconds: 120,
+    });
+
+    renderApp();
+    expect(await screen.findByRole("heading", { name: "Operational incidents" })).toBeVisible();
+    expect(await screen.findByText("unknown", { exact: true })).toBeVisible();
+  });
+
   it("requests a new bounded series when the chart window changes", async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -188,6 +407,7 @@ describe("dashboard", () => {
         );
       if (url === "/health") return Promise.resolve(response(health));
       if (url.includes("/latest")) return Promise.resolve(response(latest));
+      if (url.includes("/alerts")) return Promise.resolve(response(alerts));
       if (url.includes("/series"))
         return Promise.resolve(
           response({
@@ -231,7 +451,7 @@ describe("dashboard", () => {
       ),
     );
     renderApp();
-    expect(await screen.findByRole("alert")).toHaveTextContent("did not answer");
+    expect(await screen.findByText(/did not answer/)).toBeVisible();
     expect(screen.getByText("Unreachable")).toBeInTheDocument();
   });
 
@@ -271,6 +491,7 @@ describe("dashboard", () => {
       }
       if (url === "/health") return Promise.resolve(response(health));
       if (url.includes("/latest")) return Promise.resolve(response(latest));
+      if (url.includes("/alerts")) return Promise.resolve(response(alerts));
       if (url.includes("/series"))
         return Promise.resolve(
           response({
@@ -314,6 +535,7 @@ describe("dashboard", () => {
         );
       if (url === "/health") return Promise.resolve(response(health));
       if (url.includes("/latest")) return Promise.resolve(response(latest));
+      if (url.includes("/alerts")) return Promise.resolve(response(alerts));
       if (url.includes("/series"))
         return Promise.resolve(
           response({

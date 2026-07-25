@@ -45,6 +45,52 @@ export const healthSchema = z.object({
     last_failure_category: z.string().nullable(),
     last_failure_message: z.string().nullable(),
   }),
+  alerts: z.object({
+    status: z.enum(["healthy", "suspect", "alerting", "recovered", "unknown"]),
+    active_count: z.number().int().nonnegative(),
+    suspect_count: z.number().int().nonnegative(),
+    latest_transition_at_utc: optionalTimestamp,
+    evaluator_last_run_at_utc: optionalTimestamp,
+    evaluator_age_seconds: z.number().nullable(),
+  }),
+});
+
+export const alertStateSchema = z.object({
+  device_id: z.string(),
+  alert_type: z.enum(["telemetry_stale", "edge_unavailable"]),
+  lifecycle: z.enum(["healthy", "suspect", "alerting", "recovered"]),
+  suspect_started_at_utc: optionalTimestamp,
+  active_incident_id: z.number().int().nullable(),
+  recovered_at_utc: optionalTimestamp,
+  recovery_display_until_utc: optionalTimestamp,
+  last_observed_at_utc: z.string().datetime(),
+  evidence_category: z.string(),
+  evidence_message: z.string(),
+});
+
+export const alertIncidentSchema = z.object({
+  id: z.number().int().positive(),
+  device_id: z.string(),
+  alert_type: z.enum(["telemetry_stale", "edge_unavailable"]),
+  status: z.enum(["active", "recovered"]),
+  suspect_started_at_utc: z.string().datetime(),
+  alerting_at_utc: z.string().datetime(),
+  recovered_at_utc: optionalTimestamp,
+  last_observed_at_utc: z.string().datetime(),
+  duration_seconds: z.number().nonnegative(),
+  evidence_category: z.string(),
+  evidence_message: z.string(),
+});
+
+export const alertsSchema = z.object({
+  device_id: z.string(),
+  status: z.enum(["healthy", "suspect", "alerting", "recovered", "unknown"]),
+  evaluator_last_run_at_utc: optionalTimestamp,
+  evaluator_age_seconds: z.number().nullable(),
+  count: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  states: z.array(alertStateSchema),
+  incidents: z.array(alertIncidentSchema),
 });
 
 export const readingSchema = z.object({
@@ -107,6 +153,7 @@ export const commandResponseSchema = z.object({
 
 export type Session = z.infer<typeof sessionSchema>;
 export type Health = z.infer<typeof healthSchema>;
+export type Alerts = z.infer<typeof alertsSchema>;
 export type Reading = z.infer<typeof readingSchema>;
 export type Series = z.infer<typeof seriesSchema>;
 export type CommandHistory = z.infer<typeof commandHistorySchema>;
@@ -192,6 +239,8 @@ export async function logout(csrfToken: string): Promise<void> {
 }
 
 export const getHealth = () => request("/health", healthSchema);
+
+export const getAlerts = () => request("/api/v1/alerts?status=all&limit=20", alertsSchema);
 
 export async function getLatest(): Promise<Reading | null> {
   try {

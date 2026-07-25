@@ -11,6 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   ApiError,
+  getAlerts,
   getCommandHistory,
   getHealth,
   getLatest,
@@ -20,6 +21,7 @@ import {
   logout,
   sendCommand,
   type BrowserCommand,
+  type Alerts,
   type CommandHistory,
   type CommandResponse,
   type Fan,
@@ -74,7 +76,11 @@ function humanize(value: string): string {
 }
 
 function statusTone(value: string): StatusTone {
-  if (["healthy", "fresh", "running", "reachable", "confirmed_success"].includes(value)) {
+  if (
+    ["healthy", "recovered", "fresh", "running", "reachable", "confirmed_success"].includes(
+      value,
+    )
+  ) {
     return "good";
   }
   if (
@@ -84,18 +90,31 @@ function statusTone(value: string): StatusTone {
       "rejected_locally",
       "node_unreachable",
       "node_reported_failure",
+      "alerting",
     ].includes(value)
   ) {
     return "bad";
   }
   if (
-    ["degraded", "stale", "pending", "no_data", "timeout_unknown", "response_unknown"].includes(
-      value,
-    )
+    [
+      "degraded",
+      "suspect",
+      "stale",
+      "pending",
+      "no_data",
+      "timeout_unknown",
+      "response_unknown",
+    ].includes(value)
   ) {
     return "warn";
   }
   return "unknown";
+}
+
+function duration(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)} seconds`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`;
+  return `${(seconds / 3600).toFixed(1)} hours`;
 }
 
 function StatusCard({ label, value, detail, tone }: StatusCardProps) {
@@ -169,6 +188,125 @@ function serviceCards(health: Health | undefined, disconnected: boolean): Status
       tone: statusTone(health.telemetry.status),
     },
   ];
+}
+
+function AlertPanel({
+  data,
+  pending,
+  failed,
+  timezone,
+}: {
+  data: Alerts | undefined;
+  pending: boolean;
+  failed: boolean;
+  timezone: string;
+}) {
+  const active = data?.incidents.filter((incident) => incident.status === "active") ?? [];
+  const recovered =
+    data?.incidents.filter((incident) => incident.status === "recovered").slice(0, 5) ?? [];
+  const suspect = data?.states.filter((state) => state.lifecycle === "suspect") ?? [];
+
+  return (
+    <section className="panel alert-panel" aria-labelledby="alert-title">
+      <div className="panel-heading">
+        <div>
+          <p className="section-label">DURABLE ALERTS</p>
+          <h2 id="alert-title">Operational incidents</h2>
+          <p className="panel-note">
+            Sustained problems only · Current health above may change before an incident opens ·
+            Times shown in {timezone}
+          </p>
+        </div>
+        <span
+          className={`freshness-chip status-${statusTone(
+            failed ? "unknown" : (data?.status ?? "unknown"),
+          )}`}
+        >
+          {failed ? "connection lost" : humanize(data?.status ?? "checking")}
+        </span>
+      </div>
+
+      {pending && !data ? (
+        <div className="alert-state">Loading operational alert state…</div>
+      ) : failed && !data ? (
+        <div className="alert-state chart-error" role="alert">
+          Alert state is unavailable.
+        </div>
+      ) : (
+        <>
+          {failed && (
+            <div className="alert-retained-warning" role="alert">
+              RUBIK did not return the latest alert refresh. The last confirmed incidents remain
+              visible.
+            </div>
+          )}
+
+          {active.map((incident) => (
+            <article className="active-incident" role="alert" key={incident.id}>
+              <div>
+                <span className="incident-label">Active · {humanize(incident.alert_type)}</span>
+                <strong>{incident.evidence_message}</strong>
+              </div>
+              <dl>
+                <div>
+                  <dt>Started</dt>
+                  <dd>{formatDateTime(incident.alerting_at_utc)}</dd>
+                </div>
+                <div>
+                  <dt>Duration</dt>
+                  <dd>{duration(incident.duration_seconds)}</dd>
+                </div>
+                <div>
+                  <dt>Device</dt>
+                  <dd>{incident.device_id}</dd>
+                </div>
+              </dl>
+            </article>
+          ))}
+
+          {suspect.map((state) => (
+            <article className="suspect-incident" key={state.alert_type}>
+              <span className="incident-label">Suspect · {humanize(state.alert_type)}</span>
+              <strong>{state.evidence_message}</strong>
+              <small>Observed {formatDateTime(state.last_observed_at_utc)}</small>
+            </article>
+          ))}
+
+          {active.length === 0 && suspect.length === 0 && (
+            <div className="alert-clear-state">
+              <strong>No active operational incidents</strong>
+              <span>
+                Evaluator last ran {formatDateTime(data?.evaluator_last_run_at_utc)}
+              </span>
+            </div>
+          )}
+
+          <div className="incident-history">
+            <h3>Recent recoveries</h3>
+            {recovered.length === 0 ? (
+              <p>No recovered incidents have been recorded.</p>
+            ) : (
+              recovered.map((incident) => (
+                <details key={incident.id} className="incident-row">
+                  <summary>
+                    <span>
+                      <strong>{humanize(incident.alert_type)}</strong>
+                      <small>Recovered {formatDateTime(incident.recovered_at_utc)}</small>
+                    </span>
+                    <span className="outcome status-good">Recovered</span>
+                  </summary>
+                  <p>
+                    Active for {duration(incident.duration_seconds)} ·{" "}
+                    {incident.evidence_message}
+                  </p>
+                </details>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 function LoginScreen({
@@ -557,6 +695,11 @@ function Dashboard({
     queryFn: getLatest,
     refetchInterval: 15_000,
   });
+  const alerts = useQuery({
+    queryKey: ["alerts"],
+    queryFn: getAlerts,
+    refetchInterval: 30_000,
+  });
   const series = useQuery({
     queryKey: ["series", windowOption],
     queryFn: () => getSeries(windowOption),
@@ -589,6 +732,7 @@ function Dashboard({
     latest.dataUpdatedAt,
     series.dataUpdatedAt,
     commands.dataUpdatedAt,
+    alerts.dataUpdatedAt,
   );
 
   return (
@@ -660,6 +804,13 @@ function Dashboard({
           <StatusCard key={status.label} {...status} />
         ))}
       </section>
+
+      <AlertPanel
+        data={alerts.data}
+        pending={alerts.isPending}
+        failed={alerts.isError}
+        timezone={timezone}
+      />
 
       {session.controls_enabled && session.csrf_token && (
         <ControlPanel
