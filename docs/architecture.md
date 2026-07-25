@@ -94,6 +94,24 @@ The local API is a separate process:
 owner browser -> Nginx TLS -> FastAPI + React assets -> use cases -> SQLite repositories
 ```
 
+The React frontend follows the same capability-first shape:
+
+```text
+App session gate -> lab shell -> feature workspaces
+                              -> Climate
+                              -> Activity
+                              -> Operations
+
+feature UI -> typed API client -> validated Zod contracts
+```
+
+`App` owns authentication loss and session cleanup. The lab shell owns identity, navigation, and
+global workspace actions without containing device logic. Feature directories own their
+interactions and presentation; shared formatting and status semantics remain independent of React.
+Climate is the first module, not the product identity, so later energy, automation, integration, or
+local-AI workspaces can join without expanding one root component. Styles are split into tokens,
+base behavior, shell, feature surfaces, and responsive policy rather than one global stylesheet.
+
 Read routes never contact the ESP32. The single authenticated command route composes the same AC
 command service as the CLI and performs one adapter call only after its audit reservation is
 durable. Migrations run before the API accepts requests. Each synchronous request owns its SQLite

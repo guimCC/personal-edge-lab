@@ -111,12 +111,13 @@ Uvicorn listens only on loopback. Nginx terminates local HTTPS and exposes the a
 https://rubik-edge-01.local/
 ```
 
-The phone-first dashboard separates API, collector, ESP32, and telemetry health, and offers
-cool-mode Set State and separate Power Off controls after owner authentication. Every action has
-a normalized review step, idempotency key, audit attribution, one in-flight device lock, and no
-automatic physical retry. The HTTPS CA must be trusted manually on the owner's phone and computer.
-There is no CORS or public-internet exposure. Production `/docs` is disabled. See the [versioned
-API contract](docs/contracts/platform-api-v1.md).
+The phone-first Personal Edge Lab console treats Climate as its first feature module: current
+temperature and intentional AC control are primary, temperature history provides context, recent
+commands form a compact activity record, and healthy system diagnostics remain secondary. Every
+action has a normalized review step, idempotency key, audit attribution, one in-flight device
+lock, and no automatic physical retry. The HTTPS CA must be trusted manually on the owner's phone
+and computer. There is no CORS or public-internet exposure. Production `/docs` is disabled. See
+the [versioned API contract](docs/contracts/platform-api-v1.md).
 
 An independent one-shot evaluator runs every 30 seconds on RUBIK:
 

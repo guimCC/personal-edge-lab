@@ -51,6 +51,7 @@ automation.
 | 3. Authenticated dashboard AC control | Done | HTTPS owner access and intentional AC control accepted on RUBIK |
 | 4. Stale telemetry and availability alerts | Done | Durable failure and recovery incidents accepted on RUBIK |
 | 4.5. Platform consolidation | Implemented | Backend boundaries and automated quality gates ready for RUBIK acceptance |
+| 4.6. Modular lab console | Implemented | Extensible frontend shell with Climate as its first module |
 | 5. External interfaces and automation | Later | Telegram, rules, speech, and local AI, in that order |
 
 `Planned` does not mean committed scope. Before each stage starts, its open decisions are resolved
@@ -76,6 +77,28 @@ This maintenance release prepares multiple delivery adapters without adding a ne
   disabled until the bounded maintenance capability is implemented and accepted.
 
 The frontend component refactor is deliberately outside this consolidation stage.
+
+## Stage 4.6 — Modular lab console
+
+**Status:** Implemented locally as `0.6.0`; pending RUBIK acceptance.
+
+The dashboard is now the first workspace of Personal Edge Lab rather than a climate-specific
+product shell:
+
+- a neutral lab shell owns RUBIK identity, navigation, session actions, and global status;
+- Climate is the first feature module and currently receives the primary workspace;
+- current temperature and intentional AC control share the main operational surface;
+- temperature history is the principal supporting view;
+- command audit is presented as compact cross-lab activity, never as physical state;
+- system health and recovered incident history stay collapsed while healthy;
+- active and suspect incidents remain immediately visible above the current module;
+- API contracts, authentication, climate, activity, operations, shared formatting, tests, and
+  styles have explicit frontend boundaries;
+- a development-only preview supplies representative data without entering the production build;
+- phone and desktop behavior retain the existing accessibility and safety contracts.
+
+Future modules can join the shell without changing Climate internals or turning the root component
+back into a dashboard monolith.
 
 ## Stage 0 — Modular foundation
 
