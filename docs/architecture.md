@@ -18,7 +18,7 @@ future APIs, automation, dashboards, observability, management, AI agents
 
 Firmware lives outside this repository. An edge node owns sampling schedules, raw hardware interaction, derived hardware values, connectivity, and actuator behavior. The platform owns contract consumption, validation, receipt timestamps, durable history, and eventually cross-device coordination.
 
-## Current vertical slice
+## Current vertical slices
 
 The telemetry collector polls one configurable HTTP endpoint and accepts the current temperature contract. Its layers are intentionally concrete:
 
@@ -32,3 +32,17 @@ SQLite is appropriate for a single-host initial service and requires no separate
 
 The service does not introduce a generic device framework. The base URL, device ID, and temperature path are configuration inputs, and the HTTP/domain boundary is narrow enough to add a new capability beside this one without coupling it to all firmware endpoints.
 
+The AC control slice is separate from ingestion:
+
+```text
+operator intent
+    -> local complete-state validation
+    -> pending SQLite audit record
+    -> exactly one ESP32 HTTP command
+    -> confirmed, failed, unreachable, or unknown audit outcome
+```
+
+The platform sends high-level states only. The ESP32 owns Mitsubishi IR encoding and transmission.
+Commands are on demand, have no automatic retries, and do not modify the telemetry collector.
+Timeouts and malformed success responses remain unknown because transmission may have occurred.
+Even confirmed transmission is not physical-state confirmation: the AC has no return channel.

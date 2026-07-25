@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "personal-edge-lab"
 version = "0.1.0"
-description = "Local telemetry collection for the personal edge lab"
+description = "Local telemetry and device control for the personal edge lab"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -19,16 +19,25 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["services/telemetry-collector/src/telemetry_collector"]
+packages = [
+  "services/ac-control/src/ac_control",
+  "services/telemetry-collector/src/telemetry_collector",
+]
 
 [tool.pytest.ini_options]
-testpaths = ["services/telemetry-collector/tests"]
+addopts = ["--import-mode=importlib"]
+testpaths = [
+  "services/ac-control/tests",
+  "services/telemetry-collector/tests",
+]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["services/telemetry-collector/src"]
+src = [
+  "services/ac-control/src",
+  "services/telemetry-collector/src",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-
