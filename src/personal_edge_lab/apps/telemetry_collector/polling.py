@@ -43,7 +43,7 @@ class TelemetryPollingLoop:
             LOGGER.info("Edge node recovered after %d failed attempts", self._consecutive_failures)
         self._consecutive_failures = 0
         reading = receipt.reading
-        LOGGER.info(
+        LOGGER.debug(
             "Stored reading id=%d device=%s temperature_c=%.2f age_ms=%d",
             receipt.row_id,
             reading.device_id,

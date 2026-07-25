@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-
-class ConfigurationError(ValueError):
-    """Raised when API configuration is invalid."""
+from personal_edge_lab.apps.configuration import (
+    ConfigurationError,
+    read_bool,
+    read_file_path,
+    read_http_url,
+    read_log_level,
+    read_nonblank,
+    read_port,
+    read_positive_float,
+    read_positive_int,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,52 +47,46 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
-        host = os.getenv("API_HOST", "127.0.0.1").strip()
-        if not host:
-            raise ConfigurationError("API_HOST must not be empty")
-
-        port = _port("API_PORT", "8000")
-        stale_after = _positive_float("API_TELEMETRY_STALE_AFTER_SECONDS", "45")
-        collector_stale_after = _positive_float(
+        host = read_nonblank("API_HOST", "127.0.0.1")
+        port = read_port("API_PORT", "8000")
+        stale_after = read_positive_float("API_TELEMETRY_STALE_AFTER_SECONDS", "45")
+        collector_stale_after = read_positive_float(
             "API_COLLECTOR_STALE_AFTER_SECONDS",
             "45",
         )
-        alert_evaluator_stale_after = _positive_float(
+        alert_evaluator_stale_after = read_positive_float(
             "ALERT_EVALUATOR_STALE_AFTER_SECONDS",
             "90",
         )
-        docs_enabled = _boolean("API_DOCS_ENABLED", "true")
-        public_origin = os.getenv("PUBLIC_ORIGIN", "https://rubik-edge-01.local").rstrip("/")
+        docs_enabled = read_bool("API_DOCS_ENABLED", "true")
+        public_origin = read_http_url(
+            "PUBLIC_ORIGIN",
+            "https://rubik-edge-01.local",
+        )
         origin = urlparse(public_origin)
         if origin.scheme not in {"http", "https"} or not origin.netloc:
             raise ConfigurationError("PUBLIC_ORIGIN must be an absolute HTTP(S) origin")
         if origin.path or origin.params or origin.query or origin.fragment:
             raise ConfigurationError("PUBLIC_ORIGIN must not contain a path")
 
-        auth_enabled = _boolean("API_AUTH_ENABLED", "false")
-        ac_control_enabled = _boolean("API_AC_CONTROL_ENABLED", "false")
-        owner_id = os.getenv("AUTH_OWNER_ID", "owner").strip()
-        if not owner_id:
-            raise ConfigurationError("AUTH_OWNER_ID must not be empty")
-        password_hash_file = Path(
-            os.getenv(
-                "AUTH_PASSWORD_HASH_FILE",
-                "./secrets/owner-password.hash",
-            )
-        ).expanduser()
-        session_idle_seconds = _positive_int("AUTH_SESSION_IDLE_SECONDS", "86400")
-        session_absolute_seconds = _positive_int("AUTH_SESSION_ABSOLUTE_SECONDS", "604800")
-        login_max_failures = _positive_int("AUTH_LOGIN_MAX_FAILURES", "5")
-        login_window_seconds = _positive_int("AUTH_LOGIN_WINDOW_SECONDS", "900")
-        login_block_seconds = _positive_int("AUTH_LOGIN_BLOCK_SECONDS", "900")
-        command_rate_limit = _positive_int("API_AC_COMMAND_RATE_LIMIT_PER_MINUTE", "6")
-        ac_node_base_url = os.getenv("AC_NODE_BASE_URL", "http://ac-controller-01.local").rstrip(
-            "/"
+        auth_enabled = read_bool("API_AUTH_ENABLED", "false")
+        ac_control_enabled = read_bool("API_AC_CONTROL_ENABLED", "false")
+        owner_id = read_nonblank("AUTH_OWNER_ID", "owner")
+        password_hash_file = read_file_path(
+            "AUTH_PASSWORD_HASH_FILE",
+            "./secrets/owner-password.hash",
         )
-        node_url = urlparse(ac_node_base_url)
-        if node_url.scheme not in {"http", "https"} or not node_url.netloc:
-            raise ConfigurationError("AC_NODE_BASE_URL must be an absolute HTTP(S) URL")
-        ac_command_timeout_seconds = _positive_float("AC_COMMAND_TIMEOUT_SECONDS", "5")
+        session_idle_seconds = read_positive_int("AUTH_SESSION_IDLE_SECONDS", "86400")
+        session_absolute_seconds = read_positive_int("AUTH_SESSION_ABSOLUTE_SECONDS", "604800")
+        login_max_failures = read_positive_int("AUTH_LOGIN_MAX_FAILURES", "5")
+        login_window_seconds = read_positive_int("AUTH_LOGIN_WINDOW_SECONDS", "900")
+        login_block_seconds = read_positive_int("AUTH_LOGIN_BLOCK_SECONDS", "900")
+        command_rate_limit = read_positive_int("API_AC_COMMAND_RATE_LIMIT_PER_MINUTE", "6")
+        ac_node_base_url = read_http_url(
+            "AC_NODE_BASE_URL",
+            "http://ac-controller-01.local",
+        )
+        ac_command_timeout_seconds = read_positive_float("AC_COMMAND_TIMEOUT_SECONDS", "5")
 
         if session_idle_seconds > session_absolute_seconds:
             raise ConfigurationError(
@@ -111,18 +111,9 @@ class Settings:
             if docs_enabled:
                 raise ConfigurationError("AC controls require API_DOCS_ENABLED=false")
 
-        database_path = Path(os.getenv("DATABASE_PATH", "./data/telemetry.db")).expanduser()
-        if database_path.exists() and database_path.is_dir():
-            raise ConfigurationError("DATABASE_PATH must name a file, not a directory")
-
-        device_id = os.getenv("DEVICE_ID", "ac-controller-01").strip()
-        if not device_id:
-            raise ConfigurationError("DEVICE_ID must not be empty")
-
-        level_name = os.getenv("LOG_LEVEL", "INFO").upper()
-        level = logging.getLevelNamesMapping().get(level_name)
-        if level is None:
-            raise ConfigurationError(f"LOG_LEVEL is invalid: {level_name}")
+        database_path = read_file_path("DATABASE_PATH", "./data/telemetry.db")
+        device_id = read_nonblank("DEVICE_ID", "ac-controller-01")
+        level, level_name = read_log_level()
 
         return cls(
             host=host,
@@ -149,45 +140,3 @@ class Settings:
             ac_node_base_url=ac_node_base_url,
             ac_command_timeout_seconds=ac_command_timeout_seconds,
         )
-
-
-def _port(name: str, default: str) -> int:
-    raw_value = os.getenv(name, default)
-    try:
-        value = int(raw_value)
-    except ValueError as error:
-        raise ConfigurationError(f"{name} must be an integer") from error
-    if not 1 <= value <= 65535:
-        raise ConfigurationError(f"{name} must be from 1 through 65535")
-    return value
-
-
-def _positive_float(name: str, default: str) -> float:
-    raw_value = os.getenv(name, default)
-    try:
-        value = float(raw_value)
-    except ValueError as error:
-        raise ConfigurationError(f"{name} must be a number") from error
-    if value <= 0:
-        raise ConfigurationError(f"{name} must be greater than zero")
-    return value
-
-
-def _positive_int(name: str, default: str) -> int:
-    raw_value = os.getenv(name, default)
-    try:
-        value = int(raw_value)
-    except ValueError as error:
-        raise ConfigurationError(f"{name} must be an integer") from error
-    if value <= 0:
-        raise ConfigurationError(f"{name} must be greater than zero")
-    return value
-
-
-def _boolean(name: str, default: str) -> bool:
-    raw_value = os.getenv(name, default).strip().lower()
-    if raw_value in {"1", "true", "yes", "on"}:
-        return True
-    if raw_value in {"0", "false", "no", "off"}:
-        return False
-    raise ConfigurationError(f"{name} must be true or false")

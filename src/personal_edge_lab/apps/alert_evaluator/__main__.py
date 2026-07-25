@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from personal_edge_lab.application.ports.alerting import AlertEvaluationRepositoryFactory
 from personal_edge_lab.apps.alert_evaluator.config import ConfigurationError, Settings
+from personal_edge_lab.apps.logging_config import configure_logging
 from personal_edge_lab.infrastructure.persistence.sqlite.alert_evaluation import (
     SqliteAlertEvaluationRepository,
 )
@@ -30,10 +31,7 @@ def main(
         LOGGER.error("Invalid configuration: %s", error)
         return 2
 
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(settings.log_level)
     factory = repository_factory or (
         lambda: SqliteAlertEvaluationRepository(settings.database_path)
     )
@@ -48,7 +46,8 @@ def main(
     except (OSError, sqlite3.Error, RuntimeError, ValueError) as error:
         LOGGER.error("Operational alert evaluation failed: %s", type(error).__name__)
         return 1
-    LOGGER.info(
+    completion_logger = LOGGER.info if result.transitions else LOGGER.debug
+    completion_logger(
         "Operational alert evaluation completed device=%s transitions=%d",
         result.device_id,
         len(result.transitions),

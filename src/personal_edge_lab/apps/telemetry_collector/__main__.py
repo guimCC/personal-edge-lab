@@ -9,6 +9,7 @@ import threading
 
 import httpx
 
+from personal_edge_lab.apps.logging_config import configure_logging
 from personal_edge_lab.apps.telemetry_collector.config import (
     ConfigurationError,
     Settings,
@@ -39,10 +40,7 @@ def main(
         LOGGER.error("Invalid configuration: %s", error)
         return 2
 
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(settings.log_level)
     shutdown = stop_event or threading.Event()
 
     def request_shutdown(signum: int, _frame: object) -> None:

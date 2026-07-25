@@ -99,6 +99,22 @@ def test_polling_reports_failure_reminders_and_recovery(caplog) -> None:
     assert any("recovered after 20 failed attempts" in message for message in messages)
 
 
+def test_successful_reading_detail_is_debug_only(caplog) -> None:
+    polling = TelemetryPollingLoop(
+        collect_once=lambda: CollectionReceipt(7, valid_reading()),
+        interval_seconds=15,
+        stop_event=threading.Event(),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        assert polling.collect_once() is True
+
+    record = next(
+        record for record in caplog.records if "Stored reading id=7" in record.getMessage()
+    )
+    assert record.levelno == logging.DEBUG
+
+
 def test_polling_stops_without_collecting_when_shutdown_was_requested(caplog) -> None:
     stop_event = threading.Event()
     stop_event.set()

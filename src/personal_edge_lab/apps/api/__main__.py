@@ -8,6 +8,7 @@ import uvicorn
 
 from personal_edge_lab.apps.api.application import create_app
 from personal_edge_lab.apps.api.config import ConfigurationError, Settings
+from personal_edge_lab.apps.logging_config import configure_logging
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,10 +21,7 @@ def main() -> int:
         LOGGER.error("Invalid configuration: %s", error)
         return 2
 
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(settings.log_level)
     uvicorn.run(
         create_app(settings),
         host=settings.host,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import logging
 import sqlite3
 import sys
 from collections.abc import Sequence
@@ -12,6 +11,7 @@ from typing import TextIO
 import httpx
 
 from personal_edge_lab.apps.ac_cli.config import ConfigurationError, Settings
+from personal_edge_lab.apps.logging_config import configure_logging
 from personal_edge_lab.domain.ac import (
     AcState,
     CommandExecution,
@@ -71,10 +71,7 @@ def main(
         print(f"Configuration error: {error}", file=stderr)
         return 2
 
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(settings.log_level)
 
     try:
         run_migrations(settings.database_path)
