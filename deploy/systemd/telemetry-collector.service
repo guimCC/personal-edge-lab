@@ -1,0 +1,18 @@
+[Unit]
+Description=Personal Edge Lab telemetry collector
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/personal-edge-lab
+EnvironmentFile=/home/ubuntu/personal-edge-lab/.env
+ExecStart=/home/ubuntu/personal-edge-lab/.venv/bin/python -m telemetry_collector
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

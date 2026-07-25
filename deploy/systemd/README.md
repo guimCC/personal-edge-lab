@@ -1,12 +1,21 @@
-# Captured systemd unit
+# Captured systemd configuration
 
-Before device deployment, place the exact output-derived unit from
-`systemctl cat telemetry-collector.service` in this directory. Preserve all discovered operational
-settings and change only `ExecStart` to:
+This directory records the configuration captured from `rubik-edge-01` on 2026-07-25:
 
-```text
-/real/path/to/.venv/bin/python -m personal_edge_lab.apps.telemetry_collector
+- `telemetry-collector.service` is the original base unit.
+- `telemetry-collector.service.d/override.conf` is the active drop-in that resets `ExecStart` and
+  selects the modular collector.
+
+Together they preserve the discovered user, group, working directory, environment file, network
+ordering, hardening, and restart policy while changing only the executable module.
+
+The effective configuration was verified after a full RUBIK reboot. To compare the deployed
+configuration with this capture:
+
+```bash
+systemctl cat telemetry-collector.service
+systemctl show telemetry-collector.service \
+  -p User -p Group -p WorkingDirectory -p EnvironmentFiles -p ExecStart -p Restart -p RestartSec
 ```
 
-No service file is committed yet because the real Raspberry unit, user, paths, environment, and
-restart policy are not available in this development workspace. See `docs/deployment.md`.
+See `docs/deployment.md` for backup, installation, verification, and rollback.

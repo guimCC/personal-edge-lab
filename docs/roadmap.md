@@ -45,8 +45,8 @@ automation.
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | 0. Modular foundation | Done | Telemetry and AC control share one modular package |
-| 0A. Deployment housekeeping | Next | Capture the live unit and complete reboot acceptance |
-| 1. Read-only local API | Planned | Safe programmatic access to platform data |
+| 0A. Deployment housekeeping | Done | Live configuration captured and reboot accepted |
+| 1. Read-only local API | Next | Safe programmatic access to platform data |
 | 2. Dashboard and service health | Planned | Useful browser view of temperature and platform status |
 | 3. Authenticated dashboard AC control | Planned | Safe physical control through the browser |
 | 4. Stale telemetry and availability alerts | Planned | Actionable failure and recovery notifications |
@@ -85,15 +85,16 @@ python -m personal_edge_lab.apps.ac_cli
 - The old package entrypoints were removed.
 - The new CLI and collector entrypoint were manually exercised on the RUBIK.
 
-### Remaining deployment housekeeping
+### Deployment acceptance
 
-Before Stage 1, finish and record:
+Stage 0A was completed on 2026-07-25:
 
-- capture the real base unit and active override under `deploy/systemd`;
-- verify the service is enabled and starts automatically after a RUBIK reboot;
-- verify several post-reboot readings approximately 15 seconds apart;
-- record the installed commit and migration version;
-- retain the pre-refactor unit backup until reboot acceptance passes.
+- the real base unit and active override were captured under `deploy/systemd`;
+- the service remained enabled and started automatically after a full RUBIK reboot;
+- the process used `personal_edge_lab.apps.telemetry_collector`;
+- readings `21579` through `21584` were stored successfully at approximately 15-second intervals;
+- the installed application commit was `744dc795982b827392da7e217c126dd93e47a2ec`;
+- migration `001_initial` was present, applied at `2026-07-25T14:39:01.556849+00:00`.
 
 ## Stage 1 — Read-only local API
 
@@ -356,7 +357,7 @@ changed, how it was verified, decisions made, and what remains.
 ### 2026-07-25 — Modular foundation deployed
 
 **Stage:** 0  
-**Status:** Done; deployment housekeeping remains
+**Status:** Done
 
 **Delivered**
 
@@ -380,11 +381,41 @@ changed, how it was verified, decisions made, and what remains.
 
 **Known limitations**
 
-- Reboot acceptance and the checked-in capture of the live service configuration are not yet
-  recorded.
 - No RUBIK-hosted API or browser interface exists.
 
 **Next**
 
-- Complete deployment housekeeping, then resolve Stage 1 API decisions and freeze its first
-  read-only HTTP contract.
+- Resolve Stage 1 API decisions and freeze its first read-only HTTP contract.
+
+### 2026-07-25 — Reboot acceptance completed
+
+**Stage:** 0A
+**Status:** Done
+
+**Delivered**
+
+- Captured the real `telemetry-collector.service` and active `override.conf`.
+- Preserved all operational settings and changed only the effective `ExecStart`.
+
+**Decisions**
+
+- Keep the original base unit and version the modular entrypoint as a systemd drop-in.
+- Treat the live base unit and override together as the deployable configuration.
+
+**Verification**
+
+- `telemetry-collector.service` was enabled and active after a full RUBIK reboot.
+- The service started at `2026-07-25 16:52:29 CEST` using the modular entrypoint.
+- Readings `21579` through `21584` were stored without errors at the expected cadence.
+- Deployed commit `744dc795982b827392da7e217c126dd93e47a2ec` was recorded.
+- SQLite migration `001_initial` was confirmed.
+
+**Known limitations**
+
+- The deployment uses fixed `/home/ubuntu/personal-edge-lab` paths and is specific to the current
+  RUBIK host.
+
+**Next**
+
+- Begin Stage 1 by deciding API exposure, framework, port, health semantics, and bounded query
+  contracts.
