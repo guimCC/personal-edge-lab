@@ -466,9 +466,9 @@ cd /home/ubuntu/personal-edge-lab
 The script runs as `ubuntu` and requests `sudo` only for operating-system configuration and service
 operations. It backs up the live configuration and database, reuses frontend and Python build
 dependencies when their lock/configuration files are unchanged, builds and inspects the dashboard
-wheel, applies idempotent migrations, updates systemd/Nginx configuration, restarts the API
-without interrupting the collector, and verifies HTTPS. It installs Nginx, Avahi, SQLite CLI, or
-curl only when missing.
+wheel, applies idempotent migrations, updates systemd/Nginx configuration, runs one initial alert
+evaluation, enables its 30-second timer, restarts the API without interrupting the collector, and
+verifies HTTPS. It installs Nginx, Avahi, SQLite CLI, or curl only when missing.
 
 For a rapid iteration that has already passed the full checks:
 
@@ -480,3 +480,44 @@ This still builds and inspects the frontend and wheel, backs up SQLite, applies 
 configuration, restarts the API/Nginx, and performs runtime health checks. It skips only frontend
 lint/unit tests and Python tests/lint. Run the default command before treating a revision as an
 accepted release.
+
+## Stage 4 alert evaluator rollout and acceptance
+
+Before deploying `0.5.0`, add the `ALERT_*` values from `.env.example` to the live `.env`. The
+deployment refuses an interval other than 30 seconds so configuration cannot silently disagree
+with the systemd timer.
+
+The regular deployment command backs up any previous evaluator units and alert row counts, applies
+additive migration `004_operational_alerts`, installs the one-shot service and timer, performs one
+evaluation, and verifies its durable runtime status. It does not restart the collector.
+
+After deployment, inspect the scheduler and recent transitions:
+
+```bash
+systemctl status personal-edge-lab-alert-evaluator.timer --no-pager
+systemctl list-timers personal-edge-lab-alert-evaluator.timer
+journalctl -u personal-edge-lab-alert-evaluator.service -n 100 --no-pager
+sqlite3 data/telemetry.db \
+  'SELECT device_id, alert_type, lifecycle, last_observed_at_utc FROM alert_states;'
+sqlite3 data/telemetry.db \
+  'SELECT id, alert_type, status, alerting_at_utc, recovered_at_utc FROM alert_incidents ORDER BY id DESC LIMIT 20;'
+```
+
+Acceptance requires observing normal clear state, one sustained telemetry-stale incident, one
+recovery from a genuinely newer reading, one repeated-failure ESP32 incident, and one recovery.
+Repeated evaluations must retain one active incident. During those checks, telemetry cadence must
+remain approximately 15 seconds and dashboard/API traffic must send no AC command.
+
+Reboot RUBIK and verify the collector, API, Nginx, Avahi, and alert timer start independently. The
+one-shot evaluator service is normally inactive between runs; its `Result` must be `success`, while
+the timer itself must be active.
+
+To roll back, stop the alert scheduler before reinstalling `0.4.0`:
+
+```bash
+sudo systemctl disable --now personal-edge-lab-alert-evaluator.timer
+```
+
+Restore the retained `0.4.0` wheel, previous `.env`, API unit, and any prior proxy configuration,
+then restart only affected services. Migration `004` may remain because `0.4.0` ignores its
+additive tables. Restore SQLite only if integrity evidence proves actual corruption.

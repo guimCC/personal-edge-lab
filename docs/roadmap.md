@@ -49,7 +49,7 @@ automation.
 | 1. Read-only local API | Done | Stored telemetry and audit data available on the trusted LAN |
 | 2. Dashboard and service health | Done | Phone-first telemetry and operational health on RUBIK |
 | 3. Authenticated dashboard AC control | Done | HTTPS owner access and intentional AC control accepted on RUBIK |
-| 4. Stale telemetry and availability alerts | Planned | Actionable failure and recovery notifications |
+| 4. Stale telemetry and availability alerts | Implemented locally | Durable dashboard incidents; RUBIK acceptance pending |
 | 5. External interfaces and automation | Later | Telegram, rules, speech, and local AI, in that order |
 
 `Planned` does not mean committed scope. Before each stage starts, its open decisions are resolved
@@ -261,6 +261,8 @@ Stage 3 was accepted on 2026-07-25 as release `0.4.0`:
 
 ## Stage 4 — Stale telemetry and ESP32 availability alerts
 
+**Status:** Implemented locally; RUBIK acceptance pending
+
 **Goal:** notify the operator about sustained problems without producing repetitive noise.
 
 The implementation proposal is maintained in
@@ -289,13 +291,18 @@ system. Alert state and deduplication need explicit ownership.
 Begin with structured logs and a visible dashboard alert. Add one external notification channel
 only after thresholds and recovery behavior are trustworthy.
 
-### Open decisions
+### Recorded implementation decisions
 
-- Freshness and sustained-failure thresholds.
-- Whether alert evaluation belongs in the API, a timer-driven app, or a future worker.
-- Durable alert state and acknowledgement needs.
-- Quiet hours, reminder cadence, and recovery notification behavior.
-- First external delivery channel.
+- A hardened one-shot app is invoked by a 30-second systemd timer and never contacts the network.
+- Telemetry becomes suspect above 45 seconds and alerting after sustained 180-second staleness.
+- ESP32 availability becomes alerting only after at least four consecutive failures sustained for
+  45 seconds while the collector heartbeat remains current.
+- SQLite owns evaluator runtime, current state, incident deduplication, and transition history.
+- Recovery requires evidence newer than the active incident and remains highlighted for five
+  minutes.
+- `/health` and a protected bounded `/api/v1/alerts` query expose evaluator and incident state.
+- Initial delivery is structured transition logging plus the authenticated dashboard. External
+  delivery, acknowledgement, reminders, and quiet hours remain Stage 5 concerns.
 
 ### Acceptance criteria
 
@@ -306,6 +313,15 @@ only after thresholds and recovery behavior are trustworthy.
 - Alert evaluation survives process restarts without losing essential state.
 - Tests use controlled time and do not wait in real time.
 - Telemetry collection continues independently if alert delivery fails.
+
+### Local implementation verification
+
+- Migration `004_operational_alerts` is additive and rollback-compatible with `0.4.0`.
+- Deterministic tests cover threshold boundaries, deduplication, recovery, evaluator staleness,
+  filtering, concurrency, and authenticated HTTP contracts.
+- The React dashboard distinguishes clear, suspect, active, recovered, and retained-data states.
+- The release is not `Done` until the timer, failure/recovery behavior, reboot independence,
+  telemetry cadence, and rollback have been accepted on the real RUBIK.
 
 ## Stage 5 — External interfaces and automation
 

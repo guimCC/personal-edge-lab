@@ -20,6 +20,8 @@ apps -> application/ports <- infrastructure
 - `modules/home` rejects, sends, and audits one AC command and provides audit-history queries.
 - `modules/authentication` owns owner login throttling, opaque sessions, expiry, and credential
   rotation semantics without importing FastAPI or SQLite.
+- `modules/alerting` evaluates stored operational evidence into durable alert transitions and
+  exposes bounded alert queries without importing FastAPI, systemd, or SQLite.
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
 - `infrastructure/persistence/sqlite` owns migrations and maps SQLite rows to domain objects.
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
@@ -28,6 +30,8 @@ apps -> application/ports <- infrastructure
 - `apps/api` protects typed HTTP queries, serves the compiled React dashboard, enforces
   origin/CSRF controls, and composes the existing command use case for authenticated writes.
 - `apps/auth_cli` manages the owner Argon2id hash and session revocation locally.
+- `apps/alert_evaluator` is the one-shot composition root scheduled by systemd every 30 seconds.
+  It has no network adapter and records evaluator health independently from the collector and API.
 
 Architecture tests parse imports to keep domain isolated and prevent modules from importing HTTP
 or SQLite implementations.
@@ -90,6 +94,20 @@ connection, so web worker threads never share a connection. Nginx redirects HTTP
 Uvicorn remains loopback-only. Vite is build-time only and no Node process serves production
 traffic.
 
+Operational alert evaluation is a separate scheduled process:
+
+```text
+systemd timer -> alert evaluator -> telemetry + collector status in SQLite
+                                -> alert state + incidents + transitions in SQLite
+
+owner browser -> Nginx TLS -> protected alert query -> SQLite
+```
+
+The state machine is `healthy -> suspect -> alerting -> recovered -> healthy`. A database
+transaction serializes evaluation, and a partial unique index permits only one active incident per
+device and alert type. Evaluator failure cannot stop telemetry collection, and stale evaluator
+runtime is visible as unknown alert health.
+
 ## Adding capability
 
 ### Add a domain model
@@ -129,9 +147,10 @@ process lifecycle or presentation. Business rules should remain reusable outside
 
 ## Future architecture, not current packages
 
-Future slices may introduce alerts, Telegram, speech, email, a task worker, multiple identities
+Future slices may introduce Telegram delivery, speech, email, a task worker, multiple identities
 and permissions, and worker registration. They should reuse domain models and use cases through
-ports.
+ports. Stage 4 intentionally stops at persisted alerts, structured transition logs, and the
+dashboard; it has no external delivery adapter.
 No empty placeholder packages exist for these ideas. A package is added only with its first
 end-to-end behavior and tests.
 

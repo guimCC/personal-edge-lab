@@ -108,6 +108,27 @@ set +a
 [[ "${API_COLLECTOR_STALE_AFTER_SECONDS:-}" == "45" ]] || {
     fail "API_COLLECTOR_STALE_AFTER_SECONDS must be 45"
 }
+[[ "${ALERT_EVALUATION_INTERVAL_SECONDS:-}" == "30" ]] || {
+    fail "ALERT_EVALUATION_INTERVAL_SECONDS must match the 30-second systemd timer"
+}
+[[ "${ALERT_TELEMETRY_SUSPECT_AFTER_SECONDS:-}" == "45" ]] || {
+    fail "ALERT_TELEMETRY_SUSPECT_AFTER_SECONDS must be 45"
+}
+[[ "${ALERT_TELEMETRY_ALERT_AFTER_SECONDS:-}" == "180" ]] || {
+    fail "ALERT_TELEMETRY_ALERT_AFTER_SECONDS must be 180"
+}
+[[ "${ALERT_EDGE_MIN_CONSECUTIVE_FAILURES:-}" == "4" ]] || {
+    fail "ALERT_EDGE_MIN_CONSECUTIVE_FAILURES must be 4"
+}
+[[ "${ALERT_EDGE_ALERT_AFTER_SECONDS:-}" == "45" ]] || {
+    fail "ALERT_EDGE_ALERT_AFTER_SECONDS must be 45"
+}
+[[ "${ALERT_RECOVERY_DISPLAY_SECONDS:-}" == "300" ]] || {
+    fail "ALERT_RECOVERY_DISPLAY_SECONDS must be 300"
+}
+[[ "${ALERT_EVALUATOR_STALE_AFTER_SECONDS:-}" == "90" ]] || {
+    fail "ALERT_EVALUATOR_STALE_AFTER_SECONDS must be 90"
+}
 [[ -n "${DATABASE_PATH:-}" ]] || fail "DATABASE_PATH is missing from .env"
 
 log "Checking administrator access"
@@ -185,6 +206,16 @@ if [[ -f "$DATABASE_FILE" ]]; then
         'SELECT "temperature_readings", COUNT(*) FROM temperature_readings
          UNION ALL SELECT "ac_command_audit", COUNT(*) FROM ac_command_audit;' \
         >"$DEPLOY_BACKUP/row-counts.txt"
+    if sqlite3 "$DATABASE_FILE" \
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='alert_incidents';" \
+        | grep -qx '1'; then
+        sqlite3 "$DATABASE_FILE" \
+            'SELECT "alert_incidents", COUNT(*) FROM alert_incidents
+             UNION ALL SELECT "alert_states", COUNT(*) FROM alert_states
+             UNION ALL SELECT "alert_transition_events", COUNT(*)
+             FROM alert_transition_events;' \
+            >>"$DEPLOY_BACKUP/row-counts.txt"
+    fi
 fi
 
 if [[ -n "${AUTH_PASSWORD_HASH_FILE:-}" && -f "$AUTH_PASSWORD_HASH_FILE" ]]; then
@@ -193,7 +224,11 @@ if [[ -n "${AUTH_PASSWORD_HASH_FILE:-}" && -f "$AUTH_PASSWORD_HASH_FILE" ]]; the
 fi
 sudo cp -a "$TLS_DIRECTORY" "$DEPLOY_BACKUP/tls"
 
-for unit in telemetry-collector.service personal-edge-lab-api.service; do
+for unit in \
+    telemetry-collector.service \
+    personal-edge-lab-api.service \
+    personal-edge-lab-alert-evaluator.service \
+    personal-edge-lab-alert-evaluator.timer; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
         systemctl cat "$unit" >"$DEPLOY_BACKUP/$unit"
     fi
@@ -294,6 +329,7 @@ wheel = Path(argv[1])
 required_suffixes = (
     "personal_edge_lab/apps/api/static/dashboard/index.html",
     "personal_edge_lab/apps/api/static/dashboard/.vite/manifest.json",
+    "personal_edge_lab/apps/alert_evaluator/__main__.py",
 )
 with ZipFile(wheel) as archive:
     names = set(archive.namelist())
@@ -329,6 +365,12 @@ sudo install -m 0644 \
     deploy/systemd/personal-edge-lab-api.service \
     /etc/systemd/system/personal-edge-lab-api.service
 sudo install -m 0644 \
+    deploy/systemd/personal-edge-lab-alert-evaluator.service \
+    /etc/systemd/system/personal-edge-lab-alert-evaluator.service
+sudo install -m 0644 \
+    deploy/systemd/personal-edge-lab-alert-evaluator.timer \
+    /etc/systemd/system/personal-edge-lab-alert-evaluator.timer
+sudo install -m 0644 \
     deploy/nginx/personal-edge-lab.conf \
     /etc/nginx/sites-available/personal-edge-lab
 sudo ln -sfn /etc/nginx/sites-available/personal-edge-lab \
@@ -341,6 +383,8 @@ sudo nginx -t
 log "Restarting application services"
 sudo systemctl enable telemetry-collector.service personal-edge-lab-api.service >/dev/null
 sudo systemctl restart personal-edge-lab-api.service
+sudo systemctl start personal-edge-lab-alert-evaluator.service
+sudo systemctl enable --now personal-edge-lab-alert-evaluator.timer >/dev/null
 sudo systemctl enable --now avahi-daemon.service nginx.service >/dev/null
 sudo systemctl reload nginx.service
 
@@ -348,10 +392,24 @@ log "Verifying services and HTTPS endpoints"
 for service in \
     telemetry-collector.service \
     personal-edge-lab-api.service \
+    personal-edge-lab-alert-evaluator.timer \
     avahi-daemon.service \
     nginx.service; do
     systemctl is-active --quiet "$service" || fail "$service is not active"
 done
+
+EVALUATOR_RESULT="$(
+    systemctl show personal-edge-lab-alert-evaluator.service --property=Result --value
+)"
+[[ "$EVALUATOR_RESULT" == "success" ]] || {
+    fail "initial operational alert evaluation failed (result: $EVALUATOR_RESULT)"
+}
+sqlite3 "$DATABASE_FILE" \
+    "SELECT COUNT(*) FROM alert_runtime_status
+     WHERE singleton_id = 1
+       AND last_outcome = 'success'
+       AND last_finished_at_utc IS NOT NULL;" \
+    | grep -qx '1' || fail "alert evaluator did not persist a successful runtime status"
 
 HEALTH_OK=false
 for _attempt in {1..15}; do

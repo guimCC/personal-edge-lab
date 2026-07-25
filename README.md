@@ -2,7 +2,7 @@
 
 `personal-edge-lab` is the Python platform running on the RUBIK Pi 3 between independently
 operating edge nodes and local services. It contains telemetry, authenticated owner access, and
-audited air-conditioner control.
+audited air-conditioner control, plus durable operational alerts.
 
 ```text
 apps -> application/ports <- infrastructure
@@ -118,14 +118,25 @@ automatic physical retry. The HTTPS CA must be trusted manually on the owner's p
 There is no CORS or public-internet exposure. Production `/docs` is disabled. See the [versioned
 API contract](docs/contracts/platform-api-v1.md).
 
+An independent one-shot evaluator runs every 30 seconds on RUBIK:
+
+```bash
+python -m personal_edge_lab.apps.alert_evaluator
+```
+
+It reads only SQLite, never contacts the ESP32, and persists transitions for stale telemetry and
+repeated ESP32 collection failures. The dashboard shows suspect, active, and recently recovered
+states. Repeated evaluations update one durable incident instead of creating notification noise.
+
 ## Data and migrations
 
 All applications run the same standard-library migration runner before opening a repository.
 It creates `schema_migrations` and recognizes the existing telemetry/audit schema. Migration
 `002_collector_runtime_status` adds operational status. `003_authenticated_control` adds sessions,
-durable login throttling, audit attribution/idempotency, and a leased web-command lock. Existing
-telemetry and audit rows stay in place. SQLite uses one `data/telemetry.db`; there is no ORM or
-second database process.
+durable login throttling, audit attribution/idempotency, and a leased web-command lock.
+`004_operational_alerts` adds evaluator runtime, alert states, incidents, and transition events.
+Existing telemetry and audit rows stay in place. SQLite uses one `data/telemetry.db`; there is no
+ORM or second database process.
 
 Useful diagnostics:
 
@@ -165,5 +176,6 @@ Provision the local certificate first from a trusted workstation:
 ```
 
 The deployment script preserves a pre-deployment backup, validates the TLS/security prerequisites,
-and skips dependency installation when lockfiles are unchanged. Use `--skip-tests` only for a
-quick iteration that will receive a full checked deployment later.
+installs and verifies the independent alert-evaluator timer, and skips dependency installation when
+lockfiles are unchanged. It does not restart the collector. Use `--skip-tests` only for a quick
+iteration that will receive a full checked deployment later.

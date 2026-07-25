@@ -1,5 +1,7 @@
 # Stage 4 — Durable telemetry and availability alerts
 
+**Implementation status:** complete locally as release `0.5.0`; RUBIK acceptance is still required.
+
 ## Summary
 
 Release `0.5.0` will add durable, low-noise alert evaluation for two operational conditions:

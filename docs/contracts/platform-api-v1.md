@@ -39,6 +39,7 @@ These routes return HTTP 401 without a valid owner session:
 | Route | Contract |
 | --- | --- |
 | `GET /health` | API/database, telemetry freshness, collector and ESP32 health |
+| `GET /api/v1/alerts` | Current alert states and bounded incident history |
 | `GET /api/v1/telemetry/latest` | Latest complete device reading; optional `device_id`; 404 if empty |
 | `GET /api/v1/telemetry/history` | Newest-first readings; `limit` 1–1000, default 100 |
 | `GET /api/v1/telemetry/series` | `1h`, `6h`, or `24h` aggregated buckets including explicit gaps |
@@ -47,6 +48,22 @@ These routes return HTTP 401 without a valid owner session:
 Operational degradation still returns HTTP 200 from `/health`; only SQLite failure returns 503.
 Audit items include nullable `actor_id`, `idempotency_key`, and `request_source` (`dashboard` or
 `local_cli`). Audit history is never evidence of the AC's physical current state.
+
+`/health` includes an `alerts` summary with status `healthy`, `suspect`, `alerting`, `recovered`,
+or `unknown`, plus active/suspect counts and evaluator timing. The response is degraded while an
+alert is suspect or active, or when the evaluator has never run or is older than 90 seconds.
+
+`GET /api/v1/alerts` accepts:
+
+- optional nonblank `device_id`, defaulting to the configured device;
+- `status=active|recovered|all`, default `all`;
+- `limit` from 1 to 100, default 20.
+
+It returns current state for both alert types and newest-first incident history. Active incident
+duration is measured through the API check time; recovered duration ends at recovery. Evidence
+contains only stable categories and sanitized operator-facing text. The evaluator creates alert
+state from stored telemetry and collector status; this read route never contacts the ESP32 or
+systemd.
 
 ## Authenticated AC command
 
