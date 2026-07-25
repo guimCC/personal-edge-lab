@@ -37,19 +37,36 @@ function formatDateTime(value: number): string {
 
 export default function TemperatureChart({ data, windowLabel }: TemperatureChartProps) {
   return (
-    <div className="chart" aria-label={`${windowLabel} temperature chart`}>
+    <div className="temperature-chart" aria-label={`${windowLabel} temperature chart`}>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={data} margin={{ top: 16, right: 12, bottom: 4, left: 0 }}>
-          <CartesianGrid strokeDasharray="2 6" vertical={false} />
+        <ComposedChart data={data} margin={{ top: 18, right: 8, bottom: 0, left: -14 }}>
+          <CartesianGrid stroke="var(--line-subtle)" vertical={false} />
           <XAxis
             dataKey="timestamp"
             type="number"
             domain={["dataMin", "dataMax"]}
             tickFormatter={formatTime}
             minTickGap={44}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "var(--muted)", fontSize: 11 }}
           />
-          <YAxis width={50} unit="°" domain={["auto", "auto"]} />
+          <YAxis
+            width={48}
+            unit="°"
+            domain={["auto", "auto"]}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "var(--muted)", fontSize: 11 }}
+          />
           <Tooltip
+            contentStyle={{
+              background: "var(--ink)",
+              border: 0,
+              borderRadius: 0,
+              color: "var(--paper)",
+              fontSize: 12,
+            }}
             labelFormatter={(value) => formatDateTime(Number(value))}
             formatter={(value, name) => {
               if (name === "range" && Array.isArray(value)) {
@@ -67,8 +84,8 @@ export default function TemperatureChart({ data, windowLabel }: TemperatureChart
           />
           <Line
             dataKey="average"
-            stroke="var(--chart-line)"
-            strokeWidth={2.5}
+            stroke="var(--module-accent)"
+            strokeWidth={2}
             dot={false}
             connectNulls={false}
             isAnimationActive={false}

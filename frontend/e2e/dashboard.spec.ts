@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({
       json: {
         status: "healthy",
-        version: "0.5.0",
+        version: "0.6.0",
         checked_at_utc: NOW,
         database: { status: "healthy" },
         telemetry: {
@@ -105,14 +105,22 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("renders the phone-first health overview without horizontal overflow", async ({ page }) => {
+test("renders the phone-first health overview without horizontal overflow", async (
+  { page },
+  testInfo,
+) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Room telemetry" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Room climate" })).toBeVisible();
   await expect(page.getByText("24.5")).toBeVisible();
-  await expect(page.getByText("Online")).toBeVisible();
-  await expect(page.getByText("running", { exact: true })).toBeVisible();
-  await expect(page.getByText("reachable", { exact: true })).toBeVisible();
-  await expect(page.getByText("No active operational incidents")).toBeVisible();
+  if (testInfo.project.name === "phone") {
+    await expect(page.getByLabel("All systems operational")).toBeVisible();
+  } else {
+    await expect(
+      page.locator(".rail-status").getByText("All systems operational"),
+    ).toBeVisible();
+  }
+  await expect(page.getByRole("heading", { name: "Recent activity" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

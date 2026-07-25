@@ -1,0 +1,387 @@
+.climate-hero {
+  display: grid;
+  min-height: 510px;
+  scroll-margin-top: 24px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+  border: 1px solid var(--line);
+}
+
+.climate-readout {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: clamp(28px, 5vw, 56px);
+  border-right: 1px solid var(--line);
+  background: var(--paper-raised);
+}
+
+.module-heading,
+.control-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.inline-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.reading-body {
+  margin: auto 0;
+  padding: 42px 0;
+}
+
+.reading-label {
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.temperature-value {
+  font-size: clamp(6rem, 12vw, 10.5rem);
+  font-weight: 430;
+  line-height: 0.72;
+  letter-spacing: -0.095em;
+  font-variant-numeric: tabular-nums;
+}
+
+.temperature-value span {
+  margin-left: 0.15em;
+  color: var(--module-accent);
+  font-size: 0.22em;
+  font-weight: 600;
+  letter-spacing: 0;
+  vertical-align: top;
+}
+
+.temperature-empty {
+  color: var(--muted);
+}
+
+.reading-time {
+  margin: 28px 0 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+}
+
+.temperature-loading {
+  width: min(460px, 75%);
+  height: 116px;
+  background: var(--line-subtle);
+  animation: loading 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes loading {
+  to {
+    opacity: 0.42;
+  }
+}
+
+.reading-metadata {
+  display: grid;
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--line-subtle);
+}
+
+.reading-metadata div {
+  min-width: 0;
+  padding-top: 14px;
+}
+
+.reading-metadata dt,
+.reading-metadata dd {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reading-metadata dt {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reading-metadata dd {
+  font-size: 0.76rem;
+}
+
+.climate-control {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: clamp(26px, 4vw, 42px);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.climate-control .overline,
+.control-disclaimer {
+  color: color-mix(in srgb, var(--paper), transparent 35%);
+}
+
+.climate-control h2 {
+  font-size: clamp(1.4rem, 3vw, 2.25rem);
+}
+
+.mode-label {
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--paper), transparent 68%);
+  color: var(--control-accent);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+}
+
+.control-disclaimer {
+  margin: 14px 0 24px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.control-warning {
+  margin-bottom: 22px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--warn);
+  background: color-mix(in srgb, var(--warn), transparent 78%);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.temperature-control {
+  padding: 26px 0;
+  border-top: 1px solid color-mix(in srgb, var(--paper), transparent 78%);
+  border-bottom: 1px solid color-mix(in srgb, var(--paper), transparent 78%);
+}
+
+.temperature-control > span {
+  display: block;
+  margin-bottom: 18px;
+  color: color-mix(in srgb, var(--paper), transparent 38%);
+  font-size: 0.7rem;
+}
+
+.temperature-control > div {
+  display: grid;
+  align-items: center;
+  grid-template-columns: 38px 1fr 38px;
+}
+
+.temperature-control button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--paper), transparent 64%);
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.25rem;
+}
+
+.temperature-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.temperature-control output {
+  text-align: center;
+  font-size: clamp(3rem, 7vw, 5.2rem);
+  font-weight: 430;
+  letter-spacing: -0.08em;
+  line-height: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+.temperature-control output small {
+  margin-left: 5px;
+  color: var(--control-accent);
+  font-size: 0.28em;
+  letter-spacing: 0;
+  vertical-align: top;
+}
+
+.control-options {
+  display: grid;
+  gap: 16px;
+  padding: 22px 0;
+  grid-template-columns: 1fr 1fr;
+}
+
+.control-options label {
+  color: color-mix(in srgb, var(--paper), transparent 42%);
+  font-size: 0.65rem;
+}
+
+.control-options select {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--paper), transparent 65%);
+  border-radius: 0;
+  background: var(--ink);
+  color: var(--paper);
+  text-transform: capitalize;
+}
+
+.control-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+  grid-template-columns: 1fr auto;
+}
+
+.control-primary {
+  border-color: var(--control-accent);
+  background: var(--control-accent);
+  color: var(--control-accent-ink);
+}
+
+.control-off {
+  border-color: color-mix(in srgb, var(--paper), transparent 65%);
+  color: var(--paper);
+}
+
+.control-disabled {
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.command-result {
+  margin-top: 16px;
+  padding: 12px;
+  border-left: 3px solid currentColor;
+  background: color-mix(in srgb, currentColor, transparent 88%);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.command-result p {
+  margin: 5px 0 0;
+}
+
+.result-completed {
+  color: var(--good);
+}
+
+.result-unknown {
+  color: var(--warn);
+}
+
+.result-error {
+  color: var(--bad);
+}
+
+.temperature-history {
+  margin-top: 72px;
+  padding-bottom: 54px;
+  border-bottom: 1px solid var(--line);
+}
+
+.window-selector {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+}
+
+.window-selector button {
+  min-width: 54px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.67rem;
+}
+
+.window-selector button[aria-pressed="true"] {
+  margin-bottom: -1px;
+  border-bottom: 3px solid var(--module-accent);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.temperature-chart {
+  width: 100%;
+  height: 330px;
+  margin-top: 28px;
+}
+
+.sample-count {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.61rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  overflow-y: auto;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 9, 7, 0.75);
+}
+
+.review-dialog {
+  width: min(520px, 100%);
+  padding: clamp(26px, 5vw, 44px);
+  border-top: 5px solid var(--lab-signal);
+  background: var(--paper-raised);
+  color: var(--ink);
+}
+
+.review-dialog > p:not(.overline) {
+  margin: 18px 0 24px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.review-command {
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+.review-command div {
+  display: grid;
+  padding: 10px 0;
+  grid-template-columns: 130px 1fr;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.review-command dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.review-command dd {
+  margin: 0;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 28px;
+}

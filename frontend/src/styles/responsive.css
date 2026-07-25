@@ -1,0 +1,212 @@
+@media (max-width: 1040px) {
+  :root {
+    --rail-width: 198px;
+  }
+
+  .climate-hero {
+    grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  }
+
+  .service-ledger {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .service-ledger article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .service-ledger article:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 820px) {
+  .lab-shell {
+    display: block;
+  }
+
+  .lab-rail {
+    display: none;
+  }
+
+  .mobile-header {
+    display: flex;
+    min-height: 64px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--line);
+    background: var(--paper-muted);
+  }
+
+  .mobile-brand .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .workspace-bar {
+    min-height: 50px;
+    padding: 0 18px;
+  }
+
+  .workspace {
+    padding: 24px 18px 44px;
+  }
+
+  .climate-hero {
+    display: block;
+  }
+
+  .climate-readout {
+    min-height: 440px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .temperature-value {
+    font-size: clamp(6rem, 24vw, 9rem);
+  }
+
+  .climate-control {
+    min-height: 500px;
+  }
+
+  .lab-footer {
+    margin: 0 18px;
+  }
+
+  .operational-notice article {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+}
+
+@media (max-width: 560px) {
+  .workspace-actions {
+    gap: 12px;
+  }
+
+  .workspace-bar > div:first-child span {
+    display: none;
+  }
+
+  .climate-readout,
+  .climate-control {
+    padding: 24px 20px;
+  }
+
+  .climate-readout {
+    min-height: 420px;
+  }
+
+  .module-heading {
+    display: grid;
+  }
+
+  .reading-body {
+    padding: 36px 0;
+  }
+
+  .temperature-value {
+    font-size: clamp(5.8rem, 28vw, 8rem);
+  }
+
+  .control-options,
+  .control-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .section-heading {
+    display: grid;
+    align-items: start;
+  }
+
+  .window-selector {
+    width: 100%;
+  }
+
+  .window-selector button {
+    flex: 1;
+  }
+
+  .temperature-history {
+    margin-top: 52px;
+  }
+
+  .temperature-chart {
+    height: 270px;
+  }
+
+  .activity-row > summary {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .event-outcome {
+    grid-column: 2;
+  }
+
+  .activity-detail {
+    margin-left: 0;
+  }
+
+  .operations-disclosure > summary {
+    display: grid;
+  }
+
+  .operations-summary {
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .service-ledger {
+    grid-template-columns: 1fr;
+  }
+
+  .service-ledger article,
+  .service-ledger article:nth-child(2) {
+    min-height: 110px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .service-ledger article:last-child {
+    border-bottom: 0;
+  }
+
+  .modal-actions {
+    display: grid;
+  }
+
+  .review-command div {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .lab-footer {
+    display: grid;
+  }
+
+  .login-shell {
+    padding: 0;
+  }
+
+  .login-layout {
+    min-height: 100vh;
+    grid-template-columns: 1fr;
+    border: 0;
+  }
+
+  .login-identity {
+    min-height: 250px;
+    padding: 28px;
+  }
+
+  .login-manifesto {
+    margin: 42px 0;
+    font-size: 2rem;
+  }
+
+  .login-form {
+    padding: 36px 28px 48px;
+  }
+}

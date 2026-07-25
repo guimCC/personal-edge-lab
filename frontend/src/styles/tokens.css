@@ -1,0 +1,64 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    "Helvetica Neue", "Avenir Next", Avenir, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  color: #1b1c19;
+  background: #e8e7e0;
+  --paper: #f4f3ed;
+  --paper-raised: #fbfaf5;
+  --paper-muted: #e8e7e0;
+  --ink: #1b1c19;
+  --ink-soft: #353732;
+  --muted: #6d7068;
+  --line: #b9bbb2;
+  --line-subtle: #d9d9d1;
+  --module-accent: #3658d9;
+  --module-accent-soft: #dde4ff;
+  --lab-signal: #d7ff52;
+  --control-accent: #d7ff52;
+  --control-accent-ink: #15170f;
+  --good: #2f725a;
+  --good-soft: #dceae2;
+  --warn: #9b671b;
+  --warn-soft: #f3e5c6;
+  --bad: #aa3f35;
+  --bad-soft: #f1d9d5;
+  --unknown: #74776f;
+  --unknown-soft: #e2e2dc;
+  --chart-range: rgba(54, 88, 217, 0.15);
+  --rail-width: 238px;
+  --mono:
+    "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, "Liberation Mono",
+    monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #ecece5;
+    background: #151612;
+    --paper: #181914;
+    --paper-raised: #20211c;
+    --paper-muted: #11120f;
+    --ink: #ecece5;
+    --ink-soft: #d0d1c9;
+    --muted: #a0a399;
+    --line: #46483f;
+    --line-subtle: #30322b;
+    --module-accent: #89a0ff;
+    --module-accent-soft: #27305a;
+    --lab-signal: #d7ff52;
+    --control-accent: #3658d9;
+    --control-accent-ink: #fff;
+    --good: #7fc4a7;
+    --good-soft: #243e34;
+    --warn: #e1b267;
+    --warn-soft: #473719;
+    --bad: #ee8a81;
+    --bad-soft: #482824;
+    --unknown: #a7aaa1;
+    --unknown-soft: #30322c;
+    --chart-range: rgba(137, 160, 255, 0.16);
+  }
+}

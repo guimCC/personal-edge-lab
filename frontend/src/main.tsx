@@ -16,10 +16,19 @@ const queryClient = new QueryClient({
   },
 });
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </StrictMode>,
-);
+async function renderApplication() {
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has("preview")) {
+    const { installPreviewApi } = await import("./dev/previewApi");
+    installPreviewApi();
+  }
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+void renderApplication();
