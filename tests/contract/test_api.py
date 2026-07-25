@@ -12,7 +12,9 @@ from personal_edge_lab.apps.api.config import Settings
 from personal_edge_lab.domain.ac import CommandOutcome, CommandResult
 from personal_edge_lab.domain.alerting import AlertPolicy
 from personal_edge_lab.domain.telemetry import TemperatureReading
-from personal_edge_lab.infrastructure.persistence.sqlite.alerting import SqliteAlertRepository
+from personal_edge_lab.infrastructure.persistence.sqlite.alert_evaluation import (
+    SqliteAlertEvaluationRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.collector_status import (
     SqliteCollectorStatusRepository,
 )
@@ -76,7 +78,7 @@ def seed_running_collector(database) -> None:
 
 def evaluate_alerts(database, *, now: datetime = NOW) -> None:
     EvaluateOperationalAlerts(
-        lambda: SqliteAlertRepository(database),
+        lambda: SqliteAlertEvaluationRepository(database),
         device_id="node-1",
         policy=AlertPolicy(
             telemetry_suspect_after_seconds=45,

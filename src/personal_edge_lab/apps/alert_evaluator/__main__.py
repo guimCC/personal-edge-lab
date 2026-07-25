@@ -7,9 +7,11 @@ import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from personal_edge_lab.application.ports.alerting import AlertRepositoryFactory
+from personal_edge_lab.application.ports.alerting import AlertEvaluationRepositoryFactory
 from personal_edge_lab.apps.alert_evaluator.config import ConfigurationError, Settings
-from personal_edge_lab.infrastructure.persistence.sqlite.alerting import SqliteAlertRepository
+from personal_edge_lab.infrastructure.persistence.sqlite.alert_evaluation import (
+    SqliteAlertEvaluationRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
 from personal_edge_lab.modules.alerting import EvaluateOperationalAlerts
 
@@ -19,7 +21,7 @@ LOGGER = logging.getLogger(__name__)
 def main(
     *,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
-    repository_factory: AlertRepositoryFactory | None = None,
+    repository_factory: AlertEvaluationRepositoryFactory | None = None,
 ) -> int:
     try:
         settings = Settings.from_env()
@@ -32,7 +34,9 @@ def main(
         level=settings.log_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    factory = repository_factory or (lambda: SqliteAlertRepository(settings.database_path))
+    factory = repository_factory or (
+        lambda: SqliteAlertEvaluationRepository(settings.database_path)
+    )
     try:
         run_migrations(settings.database_path)
         result = EvaluateOperationalAlerts(

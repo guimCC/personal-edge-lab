@@ -34,8 +34,8 @@ from personal_edge_lab.apps.api.schemas import (
 from personal_edge_lab.domain.ac import CommandRequestContext
 from personal_edge_lab.domain.auth import AuthenticatedSession
 from personal_edge_lab.infrastructure.esp32.ac_controller import AcCommandClient
-from personal_edge_lab.infrastructure.persistence.sqlite.alerting import (
-    SqliteAlertRepository,
+from personal_edge_lab.infrastructure.persistence.sqlite.alert_queries import (
+    SqliteAlertQueryRepository,
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.auth import (
     SqliteAuthRepository,
@@ -336,7 +336,9 @@ def create_app(
             collector_repository_factory=lambda: SqliteCollectorStatusRepository(
                 settings.database_path
             ),
-            alert_repository_factory=lambda: SqliteAlertRepository(settings.database_path),
+            alert_repository_factory=lambda: SqliteAlertQueryRepository(
+                settings.database_path
+            ),
             device_id=settings.device_id,
             telemetry_stale_after_seconds=settings.telemetry_stale_after_seconds,
             collector_stale_after_seconds=settings.collector_stale_after_seconds,
@@ -364,7 +366,7 @@ def create_app(
     ) -> AlertListResponse:
         checked_at = clock()
         overview = GetOperationalAlerts(
-            lambda: SqliteAlertRepository(settings.database_path),
+            lambda: SqliteAlertQueryRepository(settings.database_path),
             evaluator_stale_after_seconds=settings.alert_evaluator_stale_after_seconds,
             clock=lambda: checked_at,
         ).execute(

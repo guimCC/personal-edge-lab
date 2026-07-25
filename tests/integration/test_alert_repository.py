@@ -15,7 +15,12 @@ from personal_edge_lab.domain.alerting import (
     EvaluatorOutcome,
 )
 from personal_edge_lab.domain.telemetry import TemperatureReading
-from personal_edge_lab.infrastructure.persistence.sqlite.alerting import SqliteAlertRepository
+from personal_edge_lab.infrastructure.persistence.sqlite.alert_evaluation import (
+    SqliteAlertEvaluationRepository,
+)
+from personal_edge_lab.infrastructure.persistence.sqlite.alert_queries import (
+    SqliteAlertQueryRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.collector_status import (
     SqliteCollectorStatusRepository,
 )
@@ -56,7 +61,7 @@ def reading(received_at: datetime) -> TemperatureReading:
 
 def evaluate(database, now: datetime):
     return EvaluateOperationalAlerts(
-        lambda: SqliteAlertRepository(database),
+        lambda: SqliteAlertEvaluationRepository(database),
         device_id="node-1",
         policy=POLICY,
         clock=lambda: now,
@@ -64,7 +69,7 @@ def evaluate(database, now: datetime):
 
 
 def state(database, alert_type: AlertType):
-    with SqliteAlertRepository(database) as repository:
+    with SqliteAlertEvaluationRepository(database) as repository:
         return repository.get_state("node-1", alert_type)
 
 
@@ -93,7 +98,7 @@ def test_telemetry_boundaries_deduplicate_and_recover(tmp_path) -> None:
     assert active.active_incident_id is not None
 
     evaluate(database, alert_at + timedelta(seconds=30))
-    with SqliteAlertRepository(database) as repository:
+    with SqliteAlertQueryRepository(database) as repository:
         incidents = repository.incidents(
             "node-1",
             status=AlertIncidentStatus.ACTIVE,
@@ -185,7 +190,7 @@ def test_concurrent_evaluations_create_one_active_incident(tmp_path) -> None:
             )
         )
 
-    with SqliteAlertRepository(database) as repository:
+    with SqliteAlertQueryRepository(database) as repository:
         incidents = repository.incidents(
             "node-1",
             status=AlertIncidentStatus.ACTIVE,
@@ -204,7 +209,7 @@ def test_alert_overview_filters_history_and_detects_stale_evaluator(tmp_path) ->
     evaluate(database, NOW + timedelta(seconds=30))
 
     overview = GetOperationalAlerts(
-        lambda: SqliteAlertRepository(database),
+        lambda: SqliteAlertQueryRepository(database),
         evaluator_stale_after_seconds=90,
         clock=lambda: NOW + timedelta(seconds=60),
     ).execute(
@@ -217,7 +222,7 @@ def test_alert_overview_filters_history_and_detects_stale_evaluator(tmp_path) ->
     assert len(overview.incidents) == 1
 
     stale = GetOperationalAlerts(
-        lambda: SqliteAlertRepository(database),
+        lambda: SqliteAlertQueryRepository(database),
         evaluator_stale_after_seconds=90,
         clock=lambda: NOW + timedelta(seconds=121),
     ).execute("node-1")
@@ -227,7 +232,7 @@ def test_alert_overview_filters_history_and_detects_stale_evaluator(tmp_path) ->
 def test_all_history_never_hides_an_old_active_incident(tmp_path) -> None:
     database = tmp_path / "active-priority.db"
     run_migrations(database)
-    with SqliteAlertRepository(database) as repository:
+    with SqliteAlertEvaluationRepository(database) as repository:
         repository.begin_evaluation()
         active = repository.create_incident(
             device_id="node-1",
@@ -255,21 +260,22 @@ def test_all_history_never_hides_an_old_active_incident(tmp_path) -> None:
         repository.commit()
 
     overview = GetOperationalAlerts(
-        lambda: SqliteAlertRepository(database),
+        lambda: SqliteAlertQueryRepository(database),
         evaluator_stale_after_seconds=90,
         clock=lambda: NOW + timedelta(minutes=1),
     ).execute("node-1", history_filter=AlertHistoryFilter.ALL, limit=20)
 
     assert any(incident.id == active.id for incident in overview.incidents)
-    assert sum(
-        incident.status is AlertIncidentStatus.RECOVERED for incident in overview.incidents
-    ) == 20
+    assert (
+        sum(incident.status is AlertIncidentStatus.RECOVERED for incident in overview.incidents)
+        == 20
+    )
 
 
 def test_alert_transaction_rollback_leaves_no_partial_incident(tmp_path) -> None:
     database = tmp_path / "rollback.db"
     run_migrations(database)
-    with SqliteAlertRepository(database) as repository:
+    with SqliteAlertEvaluationRepository(database) as repository:
         repository.record_evaluator_started(NOW)
         repository.begin_evaluation()
         repository.create_incident(
@@ -290,7 +296,7 @@ def test_failed_evaluation_records_sanitized_evaluator_health(tmp_path) -> None:
     database = tmp_path / "failed-evaluator.db"
     run_migrations(database)
 
-    class FailingAlertRepository(SqliteAlertRepository):
+    class FailingAlertRepository(SqliteAlertEvaluationRepository):
         def latest_temperature(self, device_id: str):
             raise sqlite3.OperationalError(f"cannot read {device_id} at /private/database.db")
 
@@ -304,7 +310,7 @@ def test_failed_evaluation_records_sanitized_evaluator_health(tmp_path) -> None:
     with pytest.raises(sqlite3.OperationalError):
         evaluator.execute()
 
-    with SqliteAlertRepository(database) as repository:
+    with SqliteAlertQueryRepository(database) as repository:
         runtime = repository.evaluator_runtime()
         assert runtime is not None
         assert runtime.last_outcome is EvaluatorOutcome.FAILURE

@@ -4,7 +4,12 @@ from datetime import UTC, datetime, timedelta
 
 from personal_edge_lab.domain.alerting import AlertPolicy
 from personal_edge_lab.domain.telemetry import TemperatureReading
-from personal_edge_lab.infrastructure.persistence.sqlite.alerting import SqliteAlertRepository
+from personal_edge_lab.infrastructure.persistence.sqlite.alert_evaluation import (
+    SqliteAlertEvaluationRepository,
+)
+from personal_edge_lab.infrastructure.persistence.sqlite.alert_queries import (
+    SqliteAlertQueryRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.collector_status import (
     SqliteCollectorStatusRepository,
 )
@@ -43,7 +48,7 @@ def platform_health(database, now: datetime = NOW):
     return GetPlatformHealth(
         telemetry_repository_factory=lambda: SqliteTelemetryRepository(database),
         collector_repository_factory=lambda: SqliteCollectorStatusRepository(database),
-        alert_repository_factory=lambda: SqliteAlertRepository(database),
+        alert_repository_factory=lambda: SqliteAlertQueryRepository(database),
         device_id="node-1",
         telemetry_stale_after_seconds=45,
         collector_stale_after_seconds=45,
@@ -61,7 +66,7 @@ def test_platform_health_is_reusable_without_http_framework(tmp_path) -> None:
         repository.start("node-1", started_at=NOW - timedelta(minutes=1))
         repository.record_success("node-1", attempted_at=NOW)
     EvaluateOperationalAlerts(
-        lambda: SqliteAlertRepository(database),
+        lambda: SqliteAlertEvaluationRepository(database),
         device_id="node-1",
         policy=POLICY,
         clock=lambda: NOW,
