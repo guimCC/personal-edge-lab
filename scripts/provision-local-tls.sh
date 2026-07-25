@@ -45,9 +45,10 @@ command -v mkcert >/dev/null || {
     printf 'mkcert v1.4.4 is required on this trusted workstation.\n' >&2
     exit 1
 }
-[[ "$(mkcert -version)" == "$EXPECTED_MKCERT_VERSION" ]] || {
+INSTALLED_MKCERT_VERSION="$(mkcert -version)"
+[[ "v${INSTALLED_MKCERT_VERSION#v}" == "$EXPECTED_MKCERT_VERSION" ]] || {
     printf 'Expected mkcert %s, found %s.\n' \
-        "$EXPECTED_MKCERT_VERSION" "$(mkcert -version)" >&2
+        "$EXPECTED_MKCERT_VERSION" "$INSTALLED_MKCERT_VERSION" >&2
     exit 1
 }
 
