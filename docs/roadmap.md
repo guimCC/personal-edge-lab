@@ -49,7 +49,7 @@ automation.
 | 1. Read-only local API | Done | Stored telemetry and audit data available on the trusted LAN |
 | 2. Dashboard and service health | Done | Phone-first telemetry and operational health on RUBIK |
 | 3. Authenticated dashboard AC control | Done | HTTPS owner access and intentional AC control accepted on RUBIK |
-| 4. Stale telemetry and availability alerts | Implemented locally | Durable dashboard incidents; RUBIK acceptance pending |
+| 4. Stale telemetry and availability alerts | Done | Durable failure and recovery incidents accepted on RUBIK |
 | 5. External interfaces and automation | Later | Telegram, rules, speech, and local AI, in that order |
 
 `Planned` does not mean committed scope. Before each stage starts, its open decisions are resolved
@@ -261,7 +261,7 @@ Stage 3 was accepted on 2026-07-25 as release `0.4.0`:
 
 ## Stage 4 — Stale telemetry and ESP32 availability alerts
 
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Done
 
 **Goal:** notify the operator about sustained problems without producing repetitive noise.
 
@@ -320,8 +320,25 @@ only after thresholds and recovery behavior are trustworthy.
 - Deterministic tests cover threshold boundaries, deduplication, recovery, evaluator staleness,
   filtering, concurrency, and authenticated HTTP contracts.
 - The React dashboard distinguishes clear, suspect, active, recovered, and retained-data states.
-- The release is not `Done` until the timer, failure/recovery behavior, reboot independence,
-  telemetry cadence, and rollback have been accepted on the real RUBIK.
+
+### Recorded RUBIK acceptance
+
+Stage 4 was accepted on 2026-07-26 as release `0.5.0`:
+
+- the hardened one-shot evaluator completed successfully and its 30-second systemd timer remained
+  enabled and active independently from the collector and API;
+- the normal dashboard state reported no active operational incidents;
+- stopping only the collector produced stopped/unknown operational health, progressed stored
+  telemetry through suspect to one active stale-telemetry incident, and created one recovery after
+  the collector resumed and stored a genuinely newer reading;
+- disconnecting only the ESP32 while leaving the collector running progressed repeated collection
+  failures through suspect to one active edge-unavailable incident, then created one recovery
+  after the ESP32 reconnected and the next collection succeeded;
+- recovery history remained visible without being presented as current failure state;
+- after a full RUBIK reboot, collector, API, Nginx, Avahi, and the evaluator timer were enabled and
+  active, the evaluator result was successful, the authenticated dashboard loaded, and the owner
+  session remained valid;
+- SQLite passed its integrity check and telemetry returned to its approximately 15-second cadence.
 
 ## Stage 5 — External interfaces and automation
 

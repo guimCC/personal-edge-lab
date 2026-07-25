@@ -1,10 +1,10 @@
 # Stage 4 — Durable telemetry and availability alerts
 
-**Implementation status:** complete locally as release `0.5.0`; RUBIK acceptance is still required.
+**Implementation status:** accepted on RUBIK as release `0.5.0` on 2026-07-26.
 
 ## Summary
 
-Release `0.5.0` will add durable, low-noise alert evaluation for two operational conditions:
+Release `0.5.0` adds durable, low-noise alert evaluation for two operational conditions:
 
 - stored telemetry has remained stale for a sustained period;
 - the collector is running but repeated ESP32 collection attempts are failing.
