@@ -26,10 +26,14 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         "idx_temperature_device_received",
         "ac_command_audit",
         "idx_ac_command_device_requested",
+        "collector_runtime_status",
     } <= object_names(database)
     with sqlite3.connect(database) as connection:
         versions = list(connection.execute("SELECT version FROM schema_migrations"))
-    assert versions == [("001_initial",)]
+    assert versions == [
+        ("001_initial",),
+        ("002_collector_runtime_status",),
+    ]
 
 
 def test_migration_preserves_existing_tables_rows_and_indexes(tmp_path) -> None:
@@ -96,7 +100,10 @@ def test_concurrent_app_startup_applies_migration_once(tmp_path) -> None:
         list(pool.map(lambda _: run_migrations(database), range(8)))
 
     with sqlite3.connect(database) as connection:
-        migration_count = connection.execute(
-            "SELECT COUNT(*) FROM schema_migrations WHERE version = '001_initial'"
-        ).fetchone()
-    assert migration_count == (1,)
+        migration_counts = connection.execute(
+            "SELECT version, COUNT(*) FROM schema_migrations GROUP BY version ORDER BY version"
+        ).fetchall()
+    assert migration_counts == [
+        ("001_initial", 1),
+        ("002_collector_runtime_status", 1),
+    ]

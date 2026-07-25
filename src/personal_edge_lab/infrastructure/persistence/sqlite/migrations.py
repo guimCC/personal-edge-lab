@@ -59,6 +59,31 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version="002_collector_runtime_status",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS collector_runtime_status (
+                device_id TEXT PRIMARY KEY,
+                process_started_at_utc TEXT NOT NULL,
+                heartbeat_at_utc TEXT NOT NULL,
+                stopped_at_utc TEXT,
+                last_attempt_at_utc TEXT,
+                last_attempt_outcome TEXT,
+                last_success_at_utc TEXT,
+                last_failure_at_utc TEXT,
+                last_failure_category TEXT,
+                last_failure_message TEXT,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0
+                    CHECK (consecutive_failures >= 0),
+                CHECK (
+                    last_attempt_outcome IS NULL
+                    OR last_attempt_outcome IN ('success', 'failure')
+                )
+            )
+            """,
+        ),
+    ),
 )
 
 

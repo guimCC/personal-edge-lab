@@ -98,4 +98,7 @@ def test_api_process_starts_migrates_and_stops_cleanly(tmp_path) -> None:
     assert health["telemetry"]["status"] == "no_data"
     with sqlite3.connect(database) as connection:
         versions = list(connection.execute("SELECT version FROM schema_migrations"))
-    assert versions == [("001_initial",)]
+    assert versions == [
+        ("001_initial",),
+        ("002_collector_runtime_status",),
+    ]

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from personal_edge_lab.domain.telemetry import TemperatureReading
+from personal_edge_lab.domain.telemetry import TemperatureBucket, TemperatureReading
 
 
 class SqliteTelemetryRepository:
@@ -74,6 +74,53 @@ class SqliteTelemetryRepository:
             (device_id, limit),
         )
         return [_reading_from_row(row) for row in rows]
+
+    def series(
+        self,
+        device_id: str,
+        *,
+        start_at: datetime,
+        end_at: datetime,
+        bucket_seconds: int,
+    ) -> list[TemperatureBucket]:
+        rows = self._connection.execute(
+            """
+            SELECT
+                CAST(
+                    (unixepoch(received_at_utc) - unixepoch(?)) / ?
+                    AS INTEGER
+                ) AS bucket_index,
+                COUNT(*) AS sample_count,
+                MIN(temperature_c) AS minimum_c,
+                AVG(temperature_c) AS average_c,
+                MAX(temperature_c) AS maximum_c
+            FROM temperature_readings
+            WHERE device_id = ?
+              AND received_at_utc >= ?
+              AND received_at_utc < ?
+            GROUP BY bucket_index
+            ORDER BY bucket_index ASC
+            """,
+            (
+                start_at.isoformat(),
+                bucket_seconds,
+                device_id,
+                start_at.isoformat(),
+                end_at.isoformat(),
+            ),
+        )
+        return [
+            TemperatureBucket(
+                start_at=start_at + timedelta(seconds=int(row["bucket_index"]) * bucket_seconds),
+                end_at=start_at
+                + timedelta(seconds=(int(row["bucket_index"]) + 1) * bucket_seconds),
+                sample_count=int(row["sample_count"]),
+                minimum_c=float(row["minimum_c"]),
+                average_c=float(row["average_c"]),
+                maximum_c=float(row["maximum_c"]),
+            )
+            for row in rows
+        ]
 
     def count(self) -> int:
         row = self._connection.execute(

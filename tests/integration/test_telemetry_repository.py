@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from personal_edge_lab.domain.telemetry import TemperatureReading
+from personal_edge_lab.domain.telemetry import TemperatureBucket, TemperatureReading
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
 from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import SqliteTelemetryRepository
 
@@ -81,6 +81,58 @@ def test_history_returns_empty_list_for_unknown_device(tmp_path) -> None:
     run_migrations(database)
     with SqliteTelemetryRepository(database) as store:
         assert store.history("unknown", limit=100) == []
+
+
+def test_series_filters_device_aggregates_and_returns_domain_buckets(tmp_path) -> None:
+    database = tmp_path / "telemetry.db"
+    run_migrations(database)
+    start = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
+    with SqliteTelemetryRepository(database) as store:
+        store.insert(reading(received_at=start + timedelta(seconds=10), temperature_c=20))
+        store.insert(reading(received_at=start + timedelta(seconds=40), temperature_c=22))
+        store.insert(
+            reading(
+                device_id="node-2",
+                received_at=start + timedelta(seconds=20),
+                temperature_c=30,
+            )
+        )
+        store.insert(reading(received_at=start + timedelta(seconds=70), temperature_c=24))
+        buckets = store.series(
+            "node-1",
+            start_at=start,
+            end_at=start + timedelta(minutes=2),
+            bucket_seconds=60,
+        )
+
+    assert all(isinstance(bucket, TemperatureBucket) for bucket in buckets)
+    assert [bucket.sample_count for bucket in buckets] == [2, 1]
+    assert buckets[0].minimum_c == 20
+    assert buckets[0].average_c == 21
+    assert buckets[0].maximum_c == 22
+    assert buckets[1].start_at == start + timedelta(minutes=1)
+
+
+def test_series_range_filter_uses_device_received_index(tmp_path) -> None:
+    database = tmp_path / "telemetry.db"
+    run_migrations(database)
+    with sqlite3.connect(database) as connection:
+        plan = connection.execute(
+            """
+            EXPLAIN QUERY PLAN
+            SELECT temperature_c
+            FROM temperature_readings
+            WHERE device_id = ?
+              AND received_at_utc >= ?
+              AND received_at_utc < ?
+            """,
+            (
+                "node-1",
+                "2026-07-21T12:00:00+00:00",
+                "2026-07-21T13:00:00+00:00",
+            ),
+        ).fetchall()
+    assert any("idx_temperature_device_received" in str(row) for row in plan)
 
 
 def test_separate_connections_support_collection_and_api_reads(tmp_path) -> None:

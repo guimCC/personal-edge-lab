@@ -5,11 +5,42 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Any
 
 
 class ValidationError(ValueError):
     """Raised when a temperature payload violates the domain contract."""
+
+
+class CollectionAttemptOutcome(StrEnum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
+@dataclass(frozen=True, slots=True)
+class TemperatureBucket:
+    start_at: datetime
+    end_at: datetime
+    sample_count: int
+    minimum_c: float | None
+    average_c: float | None
+    maximum_c: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class CollectorRuntimeStatus:
+    device_id: str
+    process_started_at: datetime
+    heartbeat_at: datetime
+    stopped_at: datetime | None
+    last_attempt_at: datetime | None
+    last_attempt_outcome: CollectionAttemptOutcome | None
+    last_success_at: datetime | None
+    last_failure_at: datetime | None
+    last_failure_category: str | None
+    last_failure_message: str | None
+    consecutive_failures: int
 
 
 @dataclass(frozen=True, slots=True)

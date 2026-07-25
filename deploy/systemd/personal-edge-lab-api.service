@@ -1,5 +1,5 @@
 [Unit]
-Description=Personal Edge Lab read-only API
+Description=Personal Edge Lab read-only API and dashboard
 Wants=network-online.target
 After=network-online.target
 

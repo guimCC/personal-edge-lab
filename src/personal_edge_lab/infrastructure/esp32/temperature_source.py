@@ -7,7 +7,10 @@ from typing import Any
 
 import httpx
 
-from personal_edge_lab.application.ports.telemetry import TemperatureSourceError
+from personal_edge_lab.application.ports.telemetry import (
+    SourceFailureCategory,
+    TemperatureSourceError,
+)
 from personal_edge_lab.domain.telemetry import TemperatureReading, ValidationError
 
 
@@ -39,15 +42,25 @@ class EdgeNodeClient:
             response.raise_for_status()
             payload = response.json()
         except httpx.TimeoutException as error:
-            raise TemperatureSourceError(f"request timed out: {error}") from error
+            raise TemperatureSourceError(
+                "temperature request timed out",
+                category=SourceFailureCategory.TIMEOUT,
+            ) from error
         except httpx.RequestError as error:
-            raise TemperatureSourceError(f"request failed: {error}") from error
+            raise TemperatureSourceError(
+                "temperature node connection failed",
+                category=SourceFailureCategory.CONNECTION,
+            ) from error
         except httpx.HTTPStatusError as error:
             raise TemperatureSourceError(
-                f"unexpected HTTP status {error.response.status_code}"
+                f"unexpected HTTP status {error.response.status_code}",
+                category=SourceFailureCategory.HTTP_STATUS,
             ) from error
         except ValueError as error:
-            raise TemperatureSourceError("response body is not valid JSON") from error
+            raise TemperatureSourceError(
+                "response body is not valid JSON",
+                category=SourceFailureCategory.INVALID_JSON,
+            ) from error
 
         received_at = datetime.now(UTC)
         try:
@@ -57,4 +70,7 @@ class EdgeNodeClient:
                 received_at=received_at,
             )
         except ValidationError as error:
-            raise TemperatureSourceError(f"invalid temperature response: {error}") from error
+            raise TemperatureSourceError(
+                "invalid temperature response",
+                category=SourceFailureCategory.INVALID_PAYLOAD,
+            ) from error

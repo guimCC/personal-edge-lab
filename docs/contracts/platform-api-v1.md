@@ -3,10 +3,10 @@
 The RUBIK API exposes stored platform data to trusted-LAN clients. It never calls the ESP32 and
 contains no endpoint that can change physical state.
 
-Default address:
+Default RUBIK address:
 
 ```text
-http://rubik-edge-01:8000
+http://rubik-edge-01.local
 ```
 
 All timestamps are RFC 3339 UTC values. Invalid query parameters return HTTP 422. SQLite failures
@@ -23,7 +23,7 @@ Example:
 ```json
 {
   "status": "healthy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "checked_at_utc": "2026-07-25T14:00:00Z",
   "database": {"status": "healthy"},
   "telemetry": {
@@ -32,13 +32,37 @@ Example:
     "last_received_at_utc": "2026-07-25T13:59:45Z",
     "age_seconds": 15.0,
     "stale_after_seconds": 45.0
+  },
+  "collector": {
+    "status": "running",
+    "device_id": "ac-controller-01",
+    "process_started_at_utc": "2026-07-25T13:00:00Z",
+    "heartbeat_at_utc": "2026-07-25T13:59:58Z",
+    "heartbeat_age_seconds": 2.0,
+    "stale_after_seconds": 45.0,
+    "stopped_at_utc": null,
+    "last_attempt_at_utc": "2026-07-25T13:59:58Z",
+    "last_success_at_utc": "2026-07-25T13:59:58Z",
+    "consecutive_failures": 0
+  },
+  "edge_node": {
+    "status": "reachable",
+    "device_id": "ac-controller-01",
+    "last_attempt_at_utc": "2026-07-25T13:59:58Z",
+    "last_success_at_utc": "2026-07-25T13:59:58Z",
+    "last_failure_at_utc": null,
+    "last_failure_category": null,
+    "last_failure_message": null
   }
 }
 ```
 
 `fresh` includes readings exactly 45 seconds old. A greater age is `stale`. Missing readings are
-`no_data`. Both `stale` and `no_data` produce overall `degraded` with HTTP 200 because the API and
-database are still available. Only a database failure produces HTTP 503.
+`no_data`. Collector heartbeat is likewise valid through 45 seconds. Collector status is
+`running`, `stopped`, `stale`, or `no_data`; edge-node status is `reachable`, `unreachable`, or
+`unknown`. Overall health is healthy only when telemetry is fresh, the collector is running, and
+the latest collection attempt reached the ESP32. Operational degradation returns HTTP 200. Only a
+database failure produces HTTP 503.
 
 ## Latest telemetry
 
@@ -76,7 +100,41 @@ returns an empty list.
 {"count": 0, "limit": 100, "items": []}
 ```
 
-Each item has the same schema as the latest reading. Stage 1 has no cursor or time-range query.
+Each item has the same schema as the latest reading. This endpoint has no cursor or time-range
+query.
+
+## Temperature series
+
+```http
+GET /api/v1/telemetry/series
+GET /api/v1/telemetry/series?device_id=ac-controller-01&window=24h
+```
+
+`window` is `1h`, `6h` (default), or `24h`. Results are chronological and contain 60-, 300-, or
+900-second buckets respectively. Each bucket reports sample count and nullable minimum, average,
+and maximum temperatures. Missing intervals are explicit zero-sample buckets with null
+measurements, so chart clients do not join unrelated samples across an outage.
+
+```json
+{
+  "device_id": "ac-controller-01",
+  "window": "1h",
+  "start_at_utc": "2026-07-25T13:00:00Z",
+  "end_at_utc": "2026-07-25T14:00:00Z",
+  "bucket_seconds": 60,
+  "sample_count": 3,
+  "items": [
+    {
+      "bucket_start_at_utc": "2026-07-25T13:00:00Z",
+      "bucket_end_at_utc": "2026-07-25T13:01:00Z",
+      "sample_count": 3,
+      "temperature_minimum_c": 25.7,
+      "temperature_average_c": 25.9,
+      "temperature_maximum_c": 26.1
+    }
+  ]
+}
+```
 
 ## AC audit history
 
@@ -115,5 +173,6 @@ is structured JSON; pending records retain null completion and result fields.
 Interactive documentation is at `/docs` and the OpenAPI document at `/openapi.json` when
 `API_DOCS_ENABLED=true`.
 
-There are no POST, PUT, PATCH, or DELETE operations. Stage 1 has no authentication, CORS, TLS,
-dashboard, alerts, or internet exposure. The API must remain limited to the trusted home network.
+There are no POST, PUT, PATCH, or DELETE operations. The dashboard at `/` uses the same origin and
+does not add CORS. There is no authentication, TLS, alerting, or internet exposure. The API must
+remain limited to the trusted home network.

@@ -22,8 +22,19 @@ Python 3.12 or later is required. From the repository root:
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e '.[dev]'
 cp .env.example .env
+```
+
+Build the dashboard with Node.js 24 before installing the Python package:
+
+```bash
+cd frontend
+npm ci
+npm run lint
+npm test
+npm run build
+cd ..
+python -m pip install -e '.[dev]'
 ```
 
 The applications read the existing environment variable names directly and do not load `.env`
@@ -84,25 +95,28 @@ The read-only API runs independently from the collector and never contacts the E
 python -m personal_edge_lab.apps.api
 ```
 
-By default it listens on port 8000 on the trusted LAN:
+By default Uvicorn listens on loopback port 8000. On RUBIK, Nginx exposes the same application to
+the trusted LAN:
 
 ```bash
-curl http://rubik-edge-01:8000/health
-curl http://rubik-edge-01:8000/api/v1/telemetry/latest
-curl 'http://rubik-edge-01:8000/api/v1/telemetry/history?limit=100'
-curl 'http://rubik-edge-01:8000/api/v1/ac/history?limit=20'
+curl http://rubik-edge-01.local/health
+curl http://rubik-edge-01.local/api/v1/telemetry/latest
+curl 'http://rubik-edge-01.local/api/v1/telemetry/series?window=6h'
+curl 'http://rubik-edge-01.local/api/v1/ac/history?limit=20'
 ```
 
-Interactive documentation is available at `http://rubik-edge-01:8000/docs`. Stage 1 has no
-write routes, authentication, CORS, TLS, dashboard, or public-internet exposure. See the
-[versioned API contract](docs/contracts/platform-api-v1.md).
+The phone-first dashboard is at `http://rubik-edge-01.local/`, with interactive documentation at
+`/docs`. It separates API, collector, ESP32, and telemetry health using stored operational state.
+It has no write routes, authentication, CORS, TLS, or public-internet exposure. See the [versioned
+API contract](docs/contracts/platform-api-v1.md).
 
 ## Data and migrations
 
 All applications run the same standard-library migration runner before opening a repository.
-It creates `schema_migrations` and recognizes the existing `temperature_readings` and
-`ac_command_audit` tables and indexes with `IF NOT EXISTS`. Existing rows stay in place. SQLite
-uses one `data/telemetry.db`; there is no ORM or second database process.
+It creates `schema_migrations` and recognizes the existing telemetry/audit schema. Migration
+`002_collector_runtime_status` adds one operational-status row per configured collector device;
+existing telemetry and audit rows stay in place. SQLite uses one `data/telemetry.db`; there is no
+ORM or second database process.
 
 Useful diagnostics:
 
@@ -110,6 +124,7 @@ Useful diagnostics:
 python -m pytest
 python -m ruff check .
 python -m ruff format --check .
+(cd frontend && npm run lint && npm test && npm run build)
 sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
 sqlite3 data/telemetry.db \
   'SELECT device_id, received_at_utc, temperature_c, age_ms FROM temperature_readings ORDER BY id DESC LIMIT 10;'

@@ -6,10 +6,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from starlette.testclient import TestClient
 
+from personal_edge_lab.application.ports.telemetry import SourceFailureCategory
 from personal_edge_lab.apps.api.application import create_app
 from personal_edge_lab.apps.api.config import Settings
 from personal_edge_lab.domain.ac import CommandOutcome, CommandResult
 from personal_edge_lab.domain.telemetry import TemperatureReading
+from personal_edge_lab.infrastructure.persistence.sqlite.collector_status import (
+    SqliteCollectorStatusRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.command_audit import (
     SqliteCommandAuditRepository,
 )
@@ -60,16 +64,24 @@ def seed_telemetry(database, *values: TemperatureReading) -> None:
             repository.insert(value)
 
 
+def seed_running_collector(database) -> None:
+    run_migrations(database)
+    with SqliteCollectorStatusRepository(database) as repository:
+        repository.start("node-1", started_at=NOW - timedelta(hours=1))
+        repository.record_success("node-1", attempted_at=NOW - timedelta(seconds=5))
+
+
 def test_health_reports_fresh_telemetry(tmp_path) -> None:
     database = tmp_path / "telemetry.db"
     seed_telemetry(database, reading())
+    seed_running_collector(database)
     with TestClient(create_app(settings(database), clock=lambda: NOW)) as client:
         response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {
         "status": "healthy",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "checked_at_utc": "2026-07-25T14:00:00Z",
         "database": {"status": "healthy"},
         "telemetry": {
@@ -78,6 +90,27 @@ def test_health_reports_fresh_telemetry(tmp_path) -> None:
             "last_received_at_utc": "2026-07-25T13:59:30Z",
             "age_seconds": 30.0,
             "stale_after_seconds": 45.0,
+        },
+        "collector": {
+            "status": "running",
+            "device_id": "node-1",
+            "process_started_at_utc": "2026-07-25T13:00:00Z",
+            "heartbeat_at_utc": "2026-07-25T13:59:55Z",
+            "heartbeat_age_seconds": 5.0,
+            "stale_after_seconds": 45.0,
+            "stopped_at_utc": None,
+            "last_attempt_at_utc": "2026-07-25T13:59:55Z",
+            "last_success_at_utc": "2026-07-25T13:59:55Z",
+            "consecutive_failures": 0,
+        },
+        "edge_node": {
+            "status": "reachable",
+            "device_id": "node-1",
+            "last_attempt_at_utc": "2026-07-25T13:59:55Z",
+            "last_success_at_utc": "2026-07-25T13:59:55Z",
+            "last_failure_at_utc": None,
+            "last_failure_category": None,
+            "last_failure_message": None,
         },
     }
 
@@ -102,6 +135,29 @@ def test_health_reports_degraded_telemetry(
     assert response.status_code == 200
     assert response.json()["status"] == "degraded"
     assert response.json()["telemetry"]["status"] == expected_status
+
+
+def test_health_distinguishes_running_collector_from_unreachable_edge_node(tmp_path) -> None:
+    database = tmp_path / "telemetry.db"
+    seed_telemetry(database, reading(received_at=NOW - timedelta(minutes=2)))
+    with SqliteCollectorStatusRepository(database) as repository:
+        repository.start("node-1", started_at=NOW - timedelta(hours=1))
+        repository.record_failure(
+            "node-1",
+            attempted_at=NOW - timedelta(seconds=5),
+            category=SourceFailureCategory.TIMEOUT,
+            message="temperature request timed out",
+        )
+    with TestClient(create_app(settings(database), clock=lambda: NOW)) as client:
+        response = client.get("/health")
+
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert payload["collector"]["status"] == "running"
+    assert payload["collector"]["consecutive_failures"] == 1
+    assert payload["edge_node"]["status"] == "unreachable"
+    assert payload["edge_node"]["last_failure_category"] == "timeout"
+    assert "node.local" not in response.text
 
 
 def test_latest_temperature_contract_and_device_override(tmp_path) -> None:
@@ -169,6 +225,30 @@ def test_empty_histories_return_lists(tmp_path) -> None:
     assert commands.json() == {"count": 0, "limit": 20, "items": []}
 
 
+def test_telemetry_series_returns_chronological_buckets_and_gaps(tmp_path) -> None:
+    database = tmp_path / "telemetry.db"
+    seed_telemetry(
+        database,
+        reading(received_at=NOW - timedelta(minutes=10), temperature_c=20),
+        reading(received_at=NOW - timedelta(minutes=9, seconds=30), temperature_c=22),
+    )
+    with TestClient(create_app(settings(database), clock=lambda: NOW)) as client:
+        response = client.get("/api/v1/telemetry/series", params={"window": "1h"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["window"] == "1h"
+    assert payload["bucket_seconds"] == 60
+    assert payload["sample_count"] == 2
+    assert len(payload["items"]) == 60
+    populated = [item for item in payload["items"] if item["sample_count"]]
+    assert len(populated) == 1
+    assert populated[0]["temperature_minimum_c"] == 20.0
+    assert populated[0]["temperature_average_c"] == 21.0
+    assert populated[0]["temperature_maximum_c"] == 22.0
+    assert payload["items"][0]["bucket_start_at_utc"] < payload["items"][-1]["bucket_start_at_utc"]
+
+
 def test_stored_queries_work_without_esp32_connectivity(tmp_path, monkeypatch) -> None:
     database = tmp_path / "telemetry.db"
     seed_telemetry(database, reading())
@@ -229,6 +309,7 @@ def test_ac_history_returns_structured_payload_and_pending_nulls(tmp_path) -> No
         ("/api/v1/telemetry/latest", {"device_id": "   "}),
         ("/api/v1/telemetry/history", {"limit": 0}),
         ("/api/v1/telemetry/history", {"limit": 1001}),
+        ("/api/v1/telemetry/series", {"window": "week"}),
         ("/api/v1/ac/history", {"limit": 0}),
         ("/api/v1/ac/history", {"limit": 101}),
     ],
@@ -268,9 +349,32 @@ def test_docs_and_openapi_expose_only_read_routes(tmp_path) -> None:
         "/health",
         "/api/v1/telemetry/latest",
         "/api/v1/telemetry/history",
+        "/api/v1/telemetry/series",
         "/api/v1/ac/history",
     }
     assert all(set(operations) == {"get"} for operations in schema["paths"].values())
+
+
+def test_dashboard_is_served_with_restrictive_headers_and_not_in_openapi(tmp_path) -> None:
+    database = tmp_path / "telemetry.db"
+    run_migrations(database)
+    with TestClient(create_app(settings(database), clock=lambda: NOW)) as client:
+        dashboard = client.get("/")
+        schema = client.get("/openapi.json").json()
+        asset_path = next(
+            path
+            for path in dashboard.text.split('"')
+            if path.startswith("/assets/") and path.endswith(".js")
+        )
+        asset = client.get(asset_path)
+
+    assert dashboard.status_code == 200
+    assert "RUBIK · Edge Lab" in dashboard.text
+    assert dashboard.headers["cache-control"] == "no-cache"
+    assert "default-src 'self'" in dashboard.headers["content-security-policy"]
+    assert "/" not in schema["paths"]
+    assert asset.status_code == 200
+    assert "immutable" in asset.headers["cache-control"]
 
 
 def test_docs_can_be_disabled(tmp_path) -> None:

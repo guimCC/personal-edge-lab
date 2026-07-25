@@ -37,6 +37,7 @@ API_VARIABLES = (
     "API_HOST",
     "API_PORT",
     "API_TELEMETRY_STALE_AFTER_SECONDS",
+    "API_COLLECTOR_STALE_AFTER_SECONDS",
     "API_DOCS_ENABLED",
     "DATABASE_PATH",
     "DEVICE_ID",
@@ -104,9 +105,10 @@ def test_ac_environment_overrides_are_preserved(monkeypatch, tmp_path) -> None:
 def test_api_environment_defaults(monkeypatch) -> None:
     clear(monkeypatch, API_VARIABLES)
     settings = ApiSettings.from_env()
-    assert settings.host == "0.0.0.0"
+    assert settings.host == "127.0.0.1"
     assert settings.port == 8000
     assert settings.telemetry_stale_after_seconds == 45
+    assert settings.collector_stale_after_seconds == 45
     assert settings.docs_enabled is True
     assert str(settings.database_path) == "data/telemetry.db"
     assert settings.device_id == "ac-controller-01"
@@ -118,6 +120,7 @@ def test_api_environment_overrides(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("API_HOST", "127.0.0.1")
     monkeypatch.setenv("API_PORT", "8080")
     monkeypatch.setenv("API_TELEMETRY_STALE_AFTER_SECONDS", "60.5")
+    monkeypatch.setenv("API_COLLECTOR_STALE_AFTER_SECONDS", "75")
     monkeypatch.setenv("API_DOCS_ENABLED", "off")
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "edge.db"))
     monkeypatch.setenv("DEVICE_ID", "sensor-7")
@@ -126,6 +129,7 @@ def test_api_environment_overrides(monkeypatch, tmp_path) -> None:
     assert settings.host == "127.0.0.1"
     assert settings.port == 8080
     assert settings.telemetry_stale_after_seconds == 60.5
+    assert settings.collector_stale_after_seconds == 75
     assert settings.docs_enabled is False
     assert settings.database_path == tmp_path / "edge.db"
     assert settings.device_id == "sensor-7"
@@ -185,6 +189,7 @@ def test_invalid_ac_environment_is_rejected(
         ("API_PORT", "0", "1 through 65535"),
         ("API_PORT", "65536", "1 through 65535"),
         ("API_TELEMETRY_STALE_AFTER_SECONDS", "0", "greater than zero"),
+        ("API_COLLECTOR_STALE_AFTER_SECONDS", "0", "greater than zero"),
         ("API_DOCS_ENABLED", "sometimes", "true or false"),
         ("DEVICE_ID", " ", "must not be empty"),
         ("LOG_LEVEL", "LOUD", "invalid"),

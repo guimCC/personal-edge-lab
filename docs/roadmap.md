@@ -46,8 +46,8 @@ automation.
 | --- | --- | --- |
 | 0. Modular foundation | Done | Telemetry and AC control share one modular package |
 | 0A. Deployment housekeeping | Done | Live configuration captured and reboot accepted |
-| 1. Read-only local API | In progress | Implemented locally; RUBIK acceptance pending |
-| 2. Dashboard and service health | Planned | Useful browser view of temperature and platform status |
+| 1. Read-only local API | Done | Stored telemetry and audit data available on the trusted LAN |
+| 2. Dashboard and service health | In progress | Implemented locally; RUBIK acceptance pending |
 | 3. Authenticated dashboard AC control | Planned | Safe physical control through the browser |
 | 4. Stale telemetry and availability alerts | Planned | Actionable failure and recovery notifications |
 | 5. External interfaces and automation | Later | Telegram, rules, speech, and local AI, in that order |
@@ -98,7 +98,7 @@ Stage 0A was completed on 2026-07-25:
 
 ## Stage 1 — Read-only local API
 
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Done
 
 **Goal:** expose useful platform data over HTTP from the RUBIK without adding a new physical-control
 surface.
@@ -153,6 +153,8 @@ The first version has no `POST`, `PUT`, `PATCH`, or `DELETE` routes.
 
 ## Stage 2 — Temperature dashboard and service-health view
 
+**Status:** Implemented locally; RUBIK acceptance pending
+
 **Goal:** make current conditions and platform health understandable from a browser.
 
 ### First useful screen
@@ -173,12 +175,13 @@ The first version has no `POST`, `PUT`, `PATCH`, or `DELETE` routes.
 - The interface must work on a phone-sized screen on the local network.
 - Charts must preserve UTC data and present time clearly in the viewer's local timezone.
 
-### Open decisions
+### Recorded decisions
 
-- Server-rendered HTML or a small client application.
-- Chart library and asset strategy.
-- Whether the dashboard is served by the API process or as a separate static app.
-- Expected browsers and local-network naming.
+- React/TypeScript is compiled with Vite on RUBIK and packaged into the Python wheel.
+- FastAPI serves the dashboard assets; no Node process runs in production.
+- Nginx exposes the app at `http://rubik-edge-01.local/`, published through Avahi.
+- The chart uses server-side 1-hour, 6-hour, and 24-hour aggregation.
+- Collector heartbeat and attempt outcomes distinguish collector state from ESP32 reachability.
 
 ### Acceptance criteria
 

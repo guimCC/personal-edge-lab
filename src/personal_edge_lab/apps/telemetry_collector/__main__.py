@@ -15,11 +15,14 @@ from personal_edge_lab.apps.telemetry_collector.config import (
 )
 from personal_edge_lab.apps.telemetry_collector.polling import TelemetryPollingLoop
 from personal_edge_lab.infrastructure.esp32.temperature_source import EdgeNodeClient
+from personal_edge_lab.infrastructure.persistence.sqlite.collector_status import (
+    SqliteCollectorStatusRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
 from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import (
     SqliteTelemetryRepository,
 )
-from personal_edge_lab.modules.telemetry import CollectTemperature
+from personal_edge_lab.modules.telemetry import CollectorStatusMonitor, CollectTemperature
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,6 +56,7 @@ def main(
         run_migrations(settings.database_path)
         with (
             SqliteTelemetryRepository(settings.database_path) as repository,
+            SqliteCollectorStatusRepository(settings.database_path) as status_repository,
             EdgeNodeClient(
                 url=settings.temperature_url,
                 device_id=settings.device_id,
@@ -65,6 +69,10 @@ def main(
                 collect_once=use_case.execute,
                 interval_seconds=settings.collection_interval_seconds,
                 stop_event=shutdown,
+                status_monitor=CollectorStatusMonitor(
+                    status_repository,
+                    device_id=settings.device_id,
+                ),
             ).run()
     except (OSError, sqlite3.Error) as error:
         LOGGER.error("Unable to initialize collector: %s", error)

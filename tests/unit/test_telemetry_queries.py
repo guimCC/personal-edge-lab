@@ -4,13 +4,23 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from personal_edge_lab.domain.telemetry import TemperatureReading
+from personal_edge_lab.domain.telemetry import (
+    CollectionAttemptOutcome,
+    CollectorRuntimeStatus,
+    TemperatureBucket,
+    TemperatureReading,
+)
 from personal_edge_lab.modules.telemetry import (
+    CollectorHealthStatus,
+    EdgeNodeHealthStatus,
     GetLatestTemperature,
+    GetOperationalHealth,
     GetTelemetryHealth,
+    GetTemperatureSeries,
     ListTemperatureHistory,
     TelemetryFreshness,
     TelemetryQueryError,
+    TelemetryWindow,
 )
 
 NOW = datetime(2026, 7, 25, 14, 0, tzinfo=UTC)
@@ -48,6 +58,32 @@ class Repository:
     def history(self, device_id: str, *, limit: int) -> list[TemperatureReading]:
         self.history_request = (device_id, limit)
         return [item for item in self.readings if item.device_id == device_id][:limit]
+
+    def series(
+        self,
+        device_id: str,
+        *,
+        start_at: datetime,
+        end_at: datetime,
+        bucket_seconds: int,
+    ) -> list[TemperatureBucket]:
+        matching = [
+            item
+            for item in self.readings
+            if item.device_id == device_id and start_at <= item.received_at < end_at
+        ]
+        if not matching:
+            return []
+        return [
+            TemperatureBucket(
+                start_at=start_at,
+                end_at=start_at + timedelta(seconds=bucket_seconds),
+                sample_count=len(matching),
+                minimum_c=min(item.temperature_c for item in matching),
+                average_c=sum(item.temperature_c for item in matching) / len(matching),
+                maximum_c=max(item.temperature_c for item in matching),
+            )
+        ]
 
 
 def test_latest_normalizes_device_id_and_returns_domain_reading() -> None:
@@ -118,3 +154,99 @@ def test_health_requires_timezone_aware_clock() -> None:
             stale_after_seconds=45,
             clock=lambda: datetime(2026, 7, 25, 14, 0),
         ).execute()
+
+
+def test_series_builds_fixed_windows_and_empty_buckets() -> None:
+    series = GetTemperatureSeries(
+        Repository([reading(seconds_old=30)]),
+        clock=lambda: NOW,
+    ).execute("node-1", window=TelemetryWindow.ONE_HOUR)
+    assert series.start_at == NOW - timedelta(hours=1)
+    assert series.end_at == NOW
+    assert series.bucket_seconds == 60
+    assert len(series.items) == 60
+    assert series.sample_count == 1
+    assert sum(item.sample_count for item in series.items) == 1
+
+
+class StatusRepository:
+    def __init__(self, status: CollectorRuntimeStatus | None) -> None:
+        self.status = status
+
+    def latest(self, device_id: str) -> CollectorRuntimeStatus | None:
+        return self.status
+
+
+def runtime_status(
+    *,
+    heartbeat_age: float,
+    outcome: CollectionAttemptOutcome | None = CollectionAttemptOutcome.SUCCESS,
+    stopped: bool = False,
+) -> CollectorRuntimeStatus:
+    return CollectorRuntimeStatus(
+        device_id="node-1",
+        process_started_at=NOW - timedelta(hours=1),
+        heartbeat_at=NOW - timedelta(seconds=heartbeat_age),
+        stopped_at=NOW if stopped else None,
+        last_attempt_at=NOW - timedelta(seconds=heartbeat_age),
+        last_attempt_outcome=outcome,
+        last_success_at=NOW - timedelta(seconds=heartbeat_age),
+        last_failure_at=None,
+        last_failure_category=None,
+        last_failure_message=None,
+        consecutive_failures=0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("runtime", "collector_status", "edge_status"),
+    [
+        (
+            runtime_status(heartbeat_age=45),
+            CollectorHealthStatus.RUNNING,
+            EdgeNodeHealthStatus.REACHABLE,
+        ),
+        (
+            runtime_status(heartbeat_age=45.001),
+            CollectorHealthStatus.STALE,
+            EdgeNodeHealthStatus.UNKNOWN,
+        ),
+        (
+            runtime_status(
+                heartbeat_age=5,
+                outcome=CollectionAttemptOutcome.FAILURE,
+            ),
+            CollectorHealthStatus.RUNNING,
+            EdgeNodeHealthStatus.UNREACHABLE,
+        ),
+        (
+            runtime_status(heartbeat_age=5, stopped=True),
+            CollectorHealthStatus.STOPPED,
+            EdgeNodeHealthStatus.UNKNOWN,
+        ),
+    ],
+)
+def test_operational_health_distinguishes_collector_and_edge_node(
+    runtime: CollectorRuntimeStatus,
+    collector_status: CollectorHealthStatus,
+    edge_status: EdgeNodeHealthStatus,
+) -> None:
+    health = GetOperationalHealth(
+        StatusRepository(runtime),
+        device_id="node-1",
+        stale_after_seconds=45,
+        clock=lambda: NOW,
+    ).execute()
+    assert health.collector.status is collector_status
+    assert health.edge_node.status is edge_status
+
+
+def test_operational_health_reports_no_status_data() -> None:
+    health = GetOperationalHealth(
+        StatusRepository(None),
+        device_id="node-1",
+        stale_after_seconds=45,
+        clock=lambda: NOW,
+    ).execute()
+    assert health.collector.status is CollectorHealthStatus.NO_DATA
+    assert health.edge_node.status is EdgeNodeHealthStatus.UNKNOWN

@@ -4,12 +4,21 @@ import logging
 import threading
 from datetime import UTC, datetime, timedelta
 
-from personal_edge_lab.application.ports.telemetry import TemperatureSourceError
+from personal_edge_lab.application.ports.telemetry import (
+    SourceFailureCategory,
+    TemperatureSourceError,
+)
 from personal_edge_lab.apps.telemetry_collector.polling import TelemetryPollingLoop
 from personal_edge_lab.domain.telemetry import TemperatureReading
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
 from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import SqliteTelemetryRepository
-from personal_edge_lab.modules.telemetry import CollectionReceipt, CollectTemperature
+from personal_edge_lab.modules.telemetry import (
+    CollectionReceipt,
+    CollectorStatusMonitor,
+    CollectTemperature,
+)
+
+NOW = datetime(2026, 7, 25, 14, 0, tzinfo=UTC)
 
 
 def valid_reading() -> TemperatureReading:
@@ -109,3 +118,85 @@ def test_polling_stops_without_collecting_when_shutdown_was_requested(caplog) ->
 
     assert calls == 0
     assert "Telemetry collector stopped" in caplog.messages
+
+
+class StatusRepository:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, datetime, object | None]] = []
+
+    def start(self, device_id: str, *, started_at: datetime) -> None:
+        self.events.append(("start", started_at, None))
+
+    def record_success(self, device_id: str, *, attempted_at: datetime) -> None:
+        self.events.append(("success", attempted_at, None))
+
+    def record_failure(
+        self,
+        device_id: str,
+        *,
+        attempted_at: datetime,
+        category: SourceFailureCategory,
+        message: str,
+    ) -> None:
+        self.events.append(("failure", attempted_at, (category, message)))
+
+    def stop(self, device_id: str, *, stopped_at: datetime) -> None:
+        self.events.append(("stop", stopped_at, None))
+
+
+def test_polling_records_status_lifecycle_with_injected_clock() -> None:
+    timestamps = iter(
+        [
+            datetime(2026, 7, 25, 14, 0, 0, tzinfo=UTC),
+            datetime(2026, 7, 25, 14, 0, 1, tzinfo=UTC),
+            datetime(2026, 7, 25, 14, 0, 2, tzinfo=UTC),
+        ]
+    )
+    status_repository = StatusRepository()
+    stop_event = threading.Event()
+
+    def collect() -> CollectionReceipt:
+        stop_event.set()
+        return CollectionReceipt(1, valid_reading())
+
+    polling = TelemetryPollingLoop(
+        collect_once=collect,
+        interval_seconds=15,
+        stop_event=stop_event,
+        status_monitor=CollectorStatusMonitor(
+            status_repository,
+            device_id="node-1",
+            clock=lambda: next(timestamps),
+        ),
+    )
+    polling.run()
+
+    assert [event[0] for event in status_repository.events] == ["start", "success", "stop"]
+
+
+def test_polling_records_sanitized_failure_status() -> None:
+    status_repository = StatusRepository()
+    monitor = CollectorStatusMonitor(
+        status_repository,
+        device_id="node-1",
+        clock=lambda: NOW,
+    )
+
+    def fail() -> CollectionReceipt:
+        raise TemperatureSourceError(
+            "temperature request timed out",
+            category=SourceFailureCategory.TIMEOUT,
+        )
+
+    polling = TelemetryPollingLoop(
+        collect_once=fail,
+        interval_seconds=15,
+        stop_event=threading.Event(),
+        status_monitor=monitor,
+    )
+    monitor.start()
+    assert not polling.collect_once()
+    assert status_repository.events[-1][2] == (
+        SourceFailureCategory.TIMEOUT,
+        "temperature request timed out",
+    )

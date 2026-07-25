@@ -22,15 +22,20 @@ class Settings:
     device_id: str
     log_level: int
     log_level_name: str
+    collector_stale_after_seconds: float = 45.0
 
     @classmethod
     def from_env(cls) -> Settings:
-        host = os.getenv("API_HOST", "0.0.0.0").strip()
+        host = os.getenv("API_HOST", "127.0.0.1").strip()
         if not host:
             raise ConfigurationError("API_HOST must not be empty")
 
         port = _port("API_PORT", "8000")
         stale_after = _positive_float("API_TELEMETRY_STALE_AFTER_SECONDS", "45")
+        collector_stale_after = _positive_float(
+            "API_COLLECTOR_STALE_AFTER_SECONDS",
+            "45",
+        )
         docs_enabled = _boolean("API_DOCS_ENABLED", "true")
 
         database_path = Path(os.getenv("DATABASE_PATH", "./data/telemetry.db")).expanduser()
@@ -50,6 +55,7 @@ class Settings:
             host=host,
             port=port,
             telemetry_stale_after_seconds=stale_after,
+            collector_stale_after_seconds=collector_stale_after,
             docs_enabled=docs_enabled,
             database_path=database_path,
             device_id=device_id,

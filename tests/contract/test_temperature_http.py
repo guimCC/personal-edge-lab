@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from personal_edge_lab.application.ports.telemetry import SourceFailureCategory
 from personal_edge_lab.infrastructure.esp32.temperature_source import (
     EdgeNodeClient,
     TemperatureSourceError,
@@ -66,8 +67,12 @@ def test_invalid_payloads(payload: object) -> None:
 
 def test_non_200_response() -> None:
     transport = httpx.MockTransport(lambda request: httpx.Response(503))
-    with make_client(transport) as client, pytest.raises(TemperatureSourceError, match="503"):
+    with (
+        make_client(transport) as client,
+        pytest.raises(TemperatureSourceError, match="503") as captured,
+    ):
         client.fetch_temperature()
+    assert captured.value.category is SourceFailureCategory.HTTP_STATUS
 
 
 def test_invalid_json_response() -> None:
@@ -83,9 +88,10 @@ def test_invalid_json_response() -> None:
         pytest.raises(
             TemperatureSourceError,
             match="not valid JSON",
-        ),
+        ) as captured,
     ):
         client.fetch_temperature()
+    assert captured.value.category is SourceFailureCategory.INVALID_JSON
 
 
 @pytest.mark.parametrize("exception", [httpx.ReadTimeout("slow"), httpx.ConnectError("down")])
@@ -93,5 +99,15 @@ def test_transport_failure(exception: httpx.RequestError) -> None:
     def fail(request: httpx.Request) -> httpx.Response:
         raise exception
 
-    with make_client(httpx.MockTransport(fail)) as client, pytest.raises(TemperatureSourceError):
+    with (
+        make_client(httpx.MockTransport(fail)) as client,
+        pytest.raises(TemperatureSourceError) as captured,
+    ):
         client.fetch_temperature()
+    expected = (
+        SourceFailureCategory.TIMEOUT
+        if isinstance(exception, httpx.TimeoutException)
+        else SourceFailureCategory.CONNECTION
+    )
+    assert captured.value.category is expected
+    assert "node.local" not in str(captured.value)

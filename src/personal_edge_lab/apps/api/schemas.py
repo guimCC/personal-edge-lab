@@ -10,7 +10,12 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 
 from personal_edge_lab.domain.ac import CommandAuditEntry, CommandOutcome
 from personal_edge_lab.domain.telemetry import TemperatureReading
-from personal_edge_lab.modules.telemetry import TelemetryHealth
+from personal_edge_lab.modules.telemetry import (
+    CollectorHealth,
+    EdgeNodeHealth,
+    TelemetryHealth,
+    TelemetrySeries,
+)
 
 
 class ApiModel(BaseModel):
@@ -45,6 +50,47 @@ class TemperatureHistoryResponse(ApiModel):
     count: int
     limit: int
     items: list[TemperatureReadingResponse]
+
+
+class TemperatureBucketResponse(ApiModel):
+    bucket_start_at_utc: datetime
+    bucket_end_at_utc: datetime
+    sample_count: int
+    temperature_minimum_c: float | None
+    temperature_average_c: float | None
+    temperature_maximum_c: float | None
+
+
+class TemperatureSeriesResponse(ApiModel):
+    device_id: str
+    window: Literal["1h", "6h", "24h"]
+    start_at_utc: datetime
+    end_at_utc: datetime
+    bucket_seconds: int
+    sample_count: int
+    items: list[TemperatureBucketResponse]
+
+    @classmethod
+    def from_application(cls, series: TelemetrySeries) -> TemperatureSeriesResponse:
+        return cls(
+            device_id=series.device_id,
+            window=series.window,
+            start_at_utc=series.start_at,
+            end_at_utc=series.end_at,
+            bucket_seconds=series.bucket_seconds,
+            sample_count=series.sample_count,
+            items=[
+                TemperatureBucketResponse(
+                    bucket_start_at_utc=item.start_at,
+                    bucket_end_at_utc=item.end_at,
+                    sample_count=item.sample_count,
+                    temperature_minimum_c=item.minimum_c,
+                    temperature_average_c=item.average_c,
+                    temperature_maximum_c=item.maximum_c,
+                )
+                for item in series.items
+            ],
+        )
 
 
 class CommandAuditResponse(ApiModel):
@@ -108,9 +154,61 @@ class TelemetryHealthResponse(ApiModel):
         )
 
 
+class CollectorHealthResponse(ApiModel):
+    status: Literal["running", "stopped", "stale", "no_data"]
+    device_id: str
+    process_started_at_utc: datetime | None
+    heartbeat_at_utc: datetime | None
+    heartbeat_age_seconds: float | None
+    stale_after_seconds: float
+    stopped_at_utc: datetime | None
+    last_attempt_at_utc: datetime | None
+    last_success_at_utc: datetime | None
+    consecutive_failures: int
+
+    @classmethod
+    def from_application(cls, health: CollectorHealth) -> CollectorHealthResponse:
+        return cls(
+            status=health.status,
+            device_id=health.device_id,
+            process_started_at_utc=health.process_started_at,
+            heartbeat_at_utc=health.heartbeat_at,
+            heartbeat_age_seconds=health.heartbeat_age_seconds,
+            stale_after_seconds=health.stale_after_seconds,
+            stopped_at_utc=health.stopped_at,
+            last_attempt_at_utc=health.last_attempt_at,
+            last_success_at_utc=health.last_success_at,
+            consecutive_failures=health.consecutive_failures,
+        )
+
+
+class EdgeNodeHealthResponse(ApiModel):
+    status: Literal["reachable", "unreachable", "unknown"]
+    device_id: str
+    last_attempt_at_utc: datetime | None
+    last_success_at_utc: datetime | None
+    last_failure_at_utc: datetime | None
+    last_failure_category: str | None
+    last_failure_message: str | None
+
+    @classmethod
+    def from_application(cls, health: EdgeNodeHealth) -> EdgeNodeHealthResponse:
+        return cls(
+            status=health.status,
+            device_id=health.device_id,
+            last_attempt_at_utc=health.last_attempt_at,
+            last_success_at_utc=health.last_success_at,
+            last_failure_at_utc=health.last_failure_at,
+            last_failure_category=health.last_failure_category,
+            last_failure_message=health.last_failure_message,
+        )
+
+
 class HealthResponse(ApiModel):
     status: Literal["healthy", "degraded"]
     version: str
     checked_at_utc: datetime
     database: DatabaseHealthResponse
     telemetry: TelemetryHealthResponse
+    collector: CollectorHealthResponse
+    edge_node: EdgeNodeHealthResponse
