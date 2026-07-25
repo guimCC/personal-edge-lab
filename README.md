@@ -139,3 +139,17 @@ See [the development roadmap and log](docs/roadmap.md), the
 
 The old `python -m telemetry_collector` and `python -m ac_control` entrypoints have intentionally
 been removed. Deployment must update the installed package and `systemd` unit together.
+
+## Deploying later changes on RUBIK
+
+After the initial Stage 2 rollout has been accepted, build, install, restart, and verify a new
+checkout with one command:
+
+```bash
+./scripts/deploy-rubik.sh
+```
+
+The script preserves a pre-deployment backup and skips dependency installation when the locked
+dependencies are unchanged. Use `./scripts/deploy-rubik.sh --skip-tests` only for a quick iteration
+that will receive a full checked deployment later. See [the deployment runbook](docs/deployment.md)
+for exact behavior, manual recovery, and rollback.

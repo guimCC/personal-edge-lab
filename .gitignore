@@ -14,3 +14,5 @@ frontend/node_modules/
 frontend/test-results/
 frontend/playwright-report/
 src/personal_edge_lab/apps/api/static/dashboard/
+.build-venv/
+.deploy-state/

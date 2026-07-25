@@ -350,3 +350,30 @@ sudo systemctl restart telemetry-collector.service personal-edge-lab-api.service
 
 Migration `002_collector_runtime_status` is additive and `0.2.0` ignores it. Do not restore the
 database unless integrity or row-count evidence proves corruption.
+
+## Repeat Stage 2 deployments
+
+After the first accepted rollout, deploy later changes from the RUBIK checkout with:
+
+```bash
+cd /home/ubuntu/personal-edge-lab
+./scripts/deploy-rubik.sh
+```
+
+The script runs as `ubuntu` and requests `sudo` only for operating-system configuration and service
+operations. It backs up the live configuration and database, reuses frontend and Python build
+dependencies when their lock/configuration files are unchanged, builds and inspects the dashboard
+wheel, applies idempotent migrations, updates systemd/Nginx configuration, restarts the two
+application services, and verifies the LAN proxy. It installs Nginx, Avahi, SQLite CLI, or curl only
+when missing.
+
+For a rapid iteration that has already passed the full checks:
+
+```bash
+./scripts/deploy-rubik.sh --skip-tests
+```
+
+This still builds and inspects the frontend and wheel, backs up SQLite, applies migrations, updates
+configuration, restarts services, and performs runtime health checks. It skips only frontend
+lint/unit tests and Python tests/lint. Run the default command before treating a revision as an
+accepted release.
