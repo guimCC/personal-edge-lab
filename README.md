@@ -142,8 +142,11 @@ Useful diagnostics:
 
 ```bash
 python -m pytest
+python -m pytest --cov=personal_edge_lab --cov-report=term-missing
 python -m ruff check .
 python -m ruff format --check .
+.venv/bin/pyright --pythonpath .venv/bin/python
+.venv/bin/shellcheck scripts/*.sh
 (cd frontend && npm run lint && npm test && npm run build)
 sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
 sqlite3 data/telemetry.db \
@@ -153,6 +156,7 @@ python -m personal_edge_lab.apps.ac_cli history --limit 20
 
 See [the development roadmap and log](docs/roadmap.md), the
 [architecture guide](docs/architecture.md), the
+[telemetry retention policy](docs/data-retention.md), the
 [ESP32 contract](docs/contracts/ac-controller-01.md), the
 [platform API contract](docs/contracts/platform-api-v1.md), and the
 [Raspberry cutover runbook](docs/deployment.md).

@@ -468,7 +468,9 @@ operations. It backs up the live configuration and database, reuses frontend and
 dependencies when their lock/configuration files are unchanged, builds and inspects the dashboard
 wheel, applies idempotent migrations, updates systemd/Nginx configuration, runs one initial alert
 evaluation, enables its 30-second timer, restarts the API without interrupting the collector, and
-verifies HTTPS. It installs Nginx, Avahi, SQLite CLI, or curl only when missing.
+verifies HTTPS. Its quality gate includes Ruff, formatting, Pyright, ShellCheck, the complete
+Python suite, and frontend lint/unit/build checks. It installs Nginx, Avahi, SQLite CLI, or curl
+only when missing.
 
 For a rapid iteration that has already passed the full checks:
 

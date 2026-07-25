@@ -50,10 +50,32 @@ automation.
 | 2. Dashboard and service health | Done | Phone-first telemetry and operational health on RUBIK |
 | 3. Authenticated dashboard AC control | Done | HTTPS owner access and intentional AC control accepted on RUBIK |
 | 4. Stale telemetry and availability alerts | Done | Durable failure and recovery incidents accepted on RUBIK |
+| 4.5. Platform consolidation | Implemented | Backend boundaries and automated quality gates ready for RUBIK acceptance |
 | 5. External interfaces and automation | Later | Telegram, rules, speech, and local AI, in that order |
 
 `Planned` does not mean committed scope. Before each stage starts, its open decisions are resolved
 and its acceptance criteria become the implementation checklist.
+
+## Stage 4.5 — Platform consolidation
+
+**Status:** Implemented locally as `0.5.1`; pending the normal RUBIK deployment acceptance.
+
+This maintenance release prepares multiple delivery adapters without adding a new runtime service:
+
+- platform health and cool-only remote command policy are reusable application capabilities;
+- AC use cases have an explicit `ac_control` module instead of a generic `home` namespace;
+- alert evaluation and alert reading use separate ports, adapters, and services;
+- SQLite repositories share foreign-key, timeout, and row settings;
+- command audit timestamps are supplied by the application clock;
+- FastAPI routes and schemas are separated by feature;
+- active incidents cannot be displaced by recovered-history limits;
+- environment parsing and process logging use small shared policies;
+- CI, Pyright, coverage reporting, Ruff, ShellCheck, wheel inspection, and architecture guards form
+  the automated quality gate;
+- the 365-day telemetry-retention decision is recorded in `docs/data-retention.md`; deletion remains
+  disabled until the bounded maintenance capability is implemented and accepted.
+
+The frontend component refactor is deliberately outside this consolidation stage.
 
 ## Stage 0 — Modular foundation
 
@@ -222,7 +244,7 @@ semantics.
 ### Preserved command semantics
 
 - The API accepts only complete valid states.
-- The home module remains the single reusable command orchestration path.
+- The `ac_control` module remains the single reusable command orchestration path.
 - Every attempt is audited before HTTP transmission.
 - There is no automatic retry.
 - A timeout or unexpected response stays visibly unknown.

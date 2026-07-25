@@ -14,7 +14,8 @@ apps -> application/ports <- infrastructure
   and other pure rules. It uses only the standard library and does not know HTTP, SQLite, apps, or
   modules.
 - `application/ports` contains the narrow protocols required by use cases: a temperature source,
-  telemetry repository, AC controller, and command-audit repository.
+  telemetry repository, AC controller, command-audit repository, and distinct alert evaluation
+  and alert query repositories.
 - `modules/telemetry` collects one reading and provides bounded telemetry queries, aggregation,
   freshness, and collector/edge-node health evaluation.
 - `modules/ac_control` validates channel policy, sends, and audits one AC command and provides
@@ -26,18 +27,21 @@ apps -> application/ports <- infrastructure
 - `modules/alerting` evaluates stored operational evidence into durable alert transitions and
   exposes bounded alert queries without importing FastAPI, systemd, or SQLite.
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
-- `infrastructure/persistence/sqlite` owns migrations and maps SQLite rows to domain objects.
+- `infrastructure/persistence/sqlite` owns migrations, applies one shared connection policy
+  (`foreign_keys`, busy timeout, row mapping), and maps SQLite rows to domain objects.
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
   consecutive-failure counter.
 - `apps/ac_cli` owns parsing, output, configuration, composition, and exit codes.
-- `apps/api` protects typed HTTP queries, serves the compiled React dashboard, enforces
-  origin/CSRF controls, and composes the existing command use case for authenticated writes.
+- `apps/api` has feature routers for authentication, operations, telemetry, AC, and the packaged
+  dashboard. It protects typed HTTP queries, enforces origin/CSRF controls, and composes the
+  existing command use case for authenticated writes.
 - `apps/auth_cli` manages the owner Argon2id hash and session revocation locally.
 - `apps/alert_evaluator` is the one-shot composition root scheduled by systemd every 30 seconds.
   It has no network adapter and records evaluator health independently from the collector and API.
 
-Architecture tests parse imports to keep domain isolated and prevent modules from importing HTTP
-or SQLite implementations.
+Architecture tests parse imports to keep domain isolated, application ports inward-facing,
+feature modules independent from adapters, and infrastructure independent from apps and feature
+modules.
 
 ## Runtime behavior
 
@@ -90,7 +94,7 @@ The local API is a separate process:
 owner browser -> Nginx TLS -> FastAPI + React assets -> use cases -> SQLite repositories
 ```
 
-Read routes never contact the ESP32. The single authenticated command route composes the same home
+Read routes never contact the ESP32. The single authenticated command route composes the same AC
 command service as the CLI and performs one adapter call only after its audit reservation is
 durable. Migrations run before the API accepts requests. Each synchronous request owns its SQLite
 connection, so web worker threads never share a connection. Nginx redirects HTTP to HTTPS and
@@ -116,8 +120,8 @@ runtime is visible as unknown alert health.
 ### Add a domain model
 
 Place pure data and rules under `personal_edge_lab.domain`. Keep I/O, environment access,
-frameworks, SQLite, and HTTP out. Export the type from `domain/__init__.py` only when a convenient
-public import is useful, and add unit boundary tests.
+frameworks, SQLite, and HTTP out. Import concrete domain modules explicitly rather than growing a
+package-level reexport surface, and add unit boundary tests.
 
 ### Add or extend a port
 
