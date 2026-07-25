@@ -25,7 +25,7 @@ Usage: ./scripts/deploy-rubik.sh [--skip-tests]
 
 Build and deploy the current checkout on rubik-edge-01.
 
-  --skip-tests  Skip frontend lint/unit tests and Python tests/lint.
+  --skip-tests  Skip frontend and Python quality checks.
   -h, --help    Show this help.
 EOF
 }
@@ -297,9 +297,11 @@ fi
 if [[ ! -f "$PYPROJECT_STAMP" ]] \
     || ! grep -qx "$PYPROJECT_HASH" "$PYPROJECT_STAMP" \
     || ! "$BUILD_PYTHON" -c 'import build, pytest' >/dev/null 2>&1 \
-    || ! "$BUILD_PYTHON" -m ruff --version >/dev/null 2>&1; then
+    || ! "$BUILD_PYTHON" -m ruff --version >/dev/null 2>&1 \
+    || ! "$BUILD_VENV/bin/pyright" --version >/dev/null 2>&1 \
+    || ! "$BUILD_VENV/bin/shellcheck" --version >/dev/null 2>&1; then
     "$BUILD_PYTHON" -m pip install --upgrade pip
-    "$BUILD_PYTHON" -m pip install -e "$PROJECT_ROOT[dev]"
+    "$BUILD_PYTHON" -m pip install -e "${PROJECT_ROOT}[dev]"
     printf '%s\n' "$PYPROJECT_HASH" >"$PYPROJECT_STAMP"
 else
     printf 'Python development dependencies are unchanged; reusing .build-venv.\n'
@@ -308,8 +310,10 @@ fi
 if [[ "$SKIP_TESTS" == false ]]; then
     log "Checking Python"
     "$BUILD_PYTHON" -m pytest
-    "$BUILD_PYTHON" -m ruff check src tests hatch_build.py
-    "$BUILD_PYTHON" -m ruff format --check src tests hatch_build.py
+    "$BUILD_PYTHON" -m ruff check src tests hatch_build.py scripts/inspect_wheel.py
+    "$BUILD_PYTHON" -m ruff format --check src tests hatch_build.py scripts/inspect_wheel.py
+    "$BUILD_VENV/bin/pyright" --pythonpath "$BUILD_PYTHON"
+    "$BUILD_VENV/bin/shellcheck" scripts/*.sh
 fi
 
 log "Building and inspecting wheel"
@@ -320,23 +324,7 @@ mapfile -t WHEELS < <(find "$WHEEL_DIR" -maxdepth 1 -type f -name '*.whl' -print
 [[ "${#WHEELS[@]}" -eq 1 ]] || fail "expected exactly one wheel, found ${#WHEELS[@]}"
 WHEEL="${WHEELS[0]}"
 
-"$BUILD_PYTHON" - "$WHEEL" <<'PY'
-from pathlib import Path
-from sys import argv
-from zipfile import ZipFile
-
-wheel = Path(argv[1])
-required_suffixes = (
-    "personal_edge_lab/apps/api/static/dashboard/index.html",
-    "personal_edge_lab/apps/api/static/dashboard/.vite/manifest.json",
-    "personal_edge_lab/apps/alert_evaluator/__main__.py",
-)
-with ZipFile(wheel) as archive:
-    names = set(archive.namelist())
-missing = [name for name in required_suffixes if name not in names]
-if missing:
-    raise SystemExit(f"wheel is missing dashboard files: {', '.join(missing)}")
-PY
+"$BUILD_PYTHON" scripts/inspect_wheel.py "$WHEEL"
 
 install -d -m 0755 "$PROJECT_ROOT/dist"
 cp "$WHEEL" "$PROJECT_ROOT/dist/$(basename -- "$WHEEL")"

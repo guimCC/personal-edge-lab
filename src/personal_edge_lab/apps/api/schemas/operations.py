@@ -53,7 +53,7 @@ class CollectorHealthResponse(ApiModel):
     @classmethod
     def from_application(cls, health: CollectorHealth) -> CollectorHealthResponse:
         return cls(
-            status=health.status,
+            status=health.status.value,
             device_id=health.device_id,
             process_started_at_utc=health.process_started_at,
             heartbeat_at_utc=health.heartbeat_at,
@@ -78,7 +78,7 @@ class EdgeNodeHealthResponse(ApiModel):
     @classmethod
     def from_application(cls, health: EdgeNodeHealth) -> EdgeNodeHealthResponse:
         return cls(
-            status=health.status,
+            status=health.status.value,
             device_id=health.device_id,
             last_attempt_at_utc=health.last_attempt_at,
             last_success_at_utc=health.last_success_at,
@@ -99,7 +99,7 @@ class AlertHealthResponse(ApiModel):
     @classmethod
     def from_application(cls, overview: AlertOverview) -> AlertHealthResponse:
         return cls(
-            status=overview.status,
+            status=overview.status.value,
             active_count=overview.active_count,
             suspect_count=overview.suspect_count,
             latest_transition_at_utc=overview.latest_transition_at,
@@ -126,7 +126,7 @@ class HealthResponse(ApiModel):
         version: str,
     ) -> HealthResponse:
         return cls(
-            status=health.status,
+            status=health.status.value,
             version=version,
             checked_at_utc=health.checked_at,
             database=DatabaseHealthResponse(),
@@ -153,8 +153,8 @@ class AlertStateResponse(ApiModel):
     def from_domain(cls, state: AlertState) -> AlertStateResponse:
         return cls(
             device_id=state.device_id,
-            alert_type=state.alert_type,
-            lifecycle=state.lifecycle,
+            alert_type=state.alert_type.value,
+            lifecycle=state.lifecycle.value,
             suspect_started_at_utc=state.suspect_started_at,
             active_incident_id=state.active_incident_id,
             recovered_at_utc=state.recovered_at,
@@ -189,8 +189,8 @@ class AlertIncidentResponse(ApiModel):
         return cls(
             id=incident.id,
             device_id=incident.device_id,
-            alert_type=incident.alert_type,
-            status=incident.status,
+            alert_type=incident.alert_type.value,
+            status=incident.status.value,
             suspect_started_at_utc=incident.suspect_started_at,
             alerting_at_utc=incident.alerting_at,
             recovered_at_utc=incident.recovered_at,
@@ -224,7 +224,7 @@ class AlertListResponse(ApiModel):
         ]
         return cls(
             device_id=overview.device_id,
-            status=overview.status,
+            status=overview.status.value,
             evaluator_last_run_at_utc=overview.evaluator_last_run_at,
             evaluator_age_seconds=overview.evaluator_age_seconds,
             count=len(incidents),

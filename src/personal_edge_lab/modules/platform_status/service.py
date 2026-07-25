@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from personal_edge_lab.application.ports.alerting import AlertQueryRepository
+from personal_edge_lab.application.ports.alerting import AlertQueryRepositoryFactory
 from personal_edge_lab.application.ports.telemetry import (
     CollectorStatusRepository,
     TelemetryRepository,
@@ -48,7 +48,6 @@ class PlatformHealth:
 
 TelemetryRepositoryFactory = Callable[[], AbstractContextManager[TelemetryRepository]]
 CollectorRepositoryFactory = Callable[[], AbstractContextManager[CollectorStatusRepository]]
-AlertQueryRepositoryFactory = Callable[[], AbstractContextManager[AlertQueryRepository]]
 
 
 class GetPlatformHealth:

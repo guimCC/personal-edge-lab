@@ -62,7 +62,7 @@ class TemperatureSeriesResponse(ApiModel):
     def from_application(cls, series: TelemetrySeries) -> TemperatureSeriesResponse:
         return cls(
             device_id=series.device_id,
-            window=series.window,
+            window=series.window.value,
             start_at_utc=series.start_at,
             end_at_utc=series.end_at,
             bucket_seconds=series.bucket_seconds,

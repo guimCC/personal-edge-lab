@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from personal_edge_lab.domain.ac import AcMode, AcState, CommandExecution, ValidationError
 from personal_edge_lab.modules.ac_control.commands import CommandService
 
@@ -24,11 +26,11 @@ class ExecuteCoolOnlyCommand:
         self,
         *,
         command_type: str,
-        state_payload: dict[str, object] | None,
+        state_payload: Mapping[str, object] | None,
     ) -> CommandExecution:
         attempted_payload: dict[str, object] = {"command_type": command_type}
         if state_payload is not None:
-            attempted_payload["state"] = state_payload
+            attempted_payload["state"] = dict(state_payload)
 
         if command_type == "power_off":
             if state_payload is not None:

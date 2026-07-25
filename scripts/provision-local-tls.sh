@@ -74,6 +74,8 @@ if [[ -n "$RUBIK_TARGET" ]]; then
     REMOTE_KEY="/tmp/pel-rubik-edge-01.local-key.pem"
     scp "$CERTIFICATE" "$RUBIK_TARGET:$REMOTE_CERTIFICATE"
     scp "$PRIVATE_KEY" "$RUBIK_TARGET:$REMOTE_KEY"
+    # The fixed temporary paths are intentionally expanded into the remote command.
+    # shellcheck disable=SC2029
     ssh "$RUBIK_TARGET" \
         "sudo install -d -m 0750 -o root -g www-data /etc/personal-edge-lab/tls \
         && sudo install -m 0644 -o root -g root '$REMOTE_CERTIFICATE' \

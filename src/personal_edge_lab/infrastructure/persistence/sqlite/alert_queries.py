@@ -54,9 +54,7 @@ class SqliteAlertQueryRepository:
     ) -> list[AlertIncident]:
         status_clause = "" if status is None else " AND status = ?"
         parameters: tuple[object, ...] = (
-            (device_id, limit)
-            if status is None
-            else (device_id, status.value, limit)
+            (device_id, limit) if status is None else (device_id, status.value, limit)
         )
         rows = self._connection.execute(
             f"""

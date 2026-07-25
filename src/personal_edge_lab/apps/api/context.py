@@ -39,19 +39,21 @@ class ApiContext:
         self,
         repository: SqliteAuthRepository,
     ) -> AuthenticationService:
-        arguments: dict[str, object] = {}
-        if self.token_generator is not None:
-            arguments["token_generator"] = self.token_generator
+        arguments = {
+            "actor_id": self.settings.owner_id,
+            "verify_password": self.password_hasher.verify,
+            "idle_seconds": self.settings.session_idle_seconds,
+            "absolute_seconds": self.settings.session_absolute_seconds,
+            "max_failures": self.settings.login_max_failures,
+            "failure_window_seconds": self.settings.login_window_seconds,
+            "block_seconds": self.settings.login_block_seconds,
+            "clock": self.clock,
+        }
+        if self.token_generator is None:
+            return AuthenticationService(repository, **arguments)
         return AuthenticationService(
             repository,
-            actor_id=self.settings.owner_id,
-            verify_password=self.password_hasher.verify,
-            idle_seconds=self.settings.session_idle_seconds,
-            absolute_seconds=self.settings.session_absolute_seconds,
-            max_failures=self.settings.login_max_failures,
-            failure_window_seconds=self.settings.login_window_seconds,
-            block_seconds=self.settings.login_block_seconds,
-            clock=self.clock,
+            token_generator=self.token_generator,
             **arguments,
         )
 

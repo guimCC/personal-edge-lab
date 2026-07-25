@@ -320,6 +320,7 @@ class SqliteAlertEvaluationRepository:
             evidence_message=evidence_message,
         )
 
+
 def _state_from_row(row: sqlite3.Row) -> AlertState:
     return AlertState(
         device_id=str(row["device_id"]),

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "personal-edge-lab"
-version = "0.5.0"
+version = "0.5.1"
 description = "Local telemetry and device control for the personal edge lab"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,8 +20,11 @@ dependencies = [
 dev = [
   "build>=1,<2",
   "httpx2>=2.9,<3",
+  "pyright>=1.1.400,<2",
   "pytest>=8,<9",
+  "pytest-cov>=5,<8",
   "ruff>=0.5",
+  "shellcheck-py>=0.10,<0.12",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -36,6 +39,20 @@ path = "hatch_build.py"
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["personal_edge_lab"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
 
 [tool.ruff]
 target-version = "py312"
