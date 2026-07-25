@@ -3,11 +3,20 @@ import { expect, test } from "@playwright/test";
 const NOW = "2026-07-25T14:00:00Z";
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        authenticated: false,
+        auth_enabled: false,
+        controls_enabled: false,
+      },
+    }),
+  );
   await page.route("**/health", async (route) => {
     await route.fulfill({
       json: {
         status: "healthy",
-        version: "0.3.0",
+        version: "0.4.0",
         checked_at_utc: NOW,
         database: { status: "healthy" },
         telemetry: {

@@ -11,7 +11,7 @@ export default defineConfig({
     reuseExistingServer: true,
   },
   projects: [
-    { name: "phone", use: { ...devices["iPhone 13"] } },
+    { name: "phone", use: { ...devices["Pixel 7"] } },
     { name: "desktop", use: { viewport: { width: 1440, height: 900 } } },
   ],
 });
