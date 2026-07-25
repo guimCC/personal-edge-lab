@@ -198,6 +198,12 @@ def create_app(
         request: Request,
         session: Annotated[AuthenticatedSession | None, Depends(require_session)],
     ) -> AuthenticatedSession:
+        return validate_csrf(request, session)
+
+    def validate_csrf(
+        request: Request,
+        session: AuthenticatedSession | None,
+    ) -> AuthenticatedSession:
         if session is None:
             raise HTTPException(status_code=403, detail="CSRF validation failed")
         origin = request.headers.get("origin")
@@ -215,11 +221,11 @@ def create_app(
         return session
 
     def require_command_csrf(
-        session: Annotated[AuthenticatedSession, Depends(require_csrf)],
+        request: Request,
     ) -> AuthenticatedSession:
         if not settings.ac_control_enabled:
             raise HTTPException(status_code=404, detail="not found")
-        return session
+        return validate_csrf(request, require_session(request))
 
     @app.get(
         "/health/live",

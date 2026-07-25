@@ -308,3 +308,24 @@ def test_controls_disabled_returns_not_found_and_does_not_enter_openapi(tmp_path
 
     assert response.status_code == 404
     assert "/api/v1/ac/commands" not in schema["paths"]
+
+
+def test_controls_disabled_without_authentication_still_returns_not_found(
+    tmp_path,
+) -> None:
+    settings = replace(
+        authenticated_settings(tmp_path),
+        auth_enabled=False,
+        ac_control_enabled=False,
+        docs_enabled=True,
+    )
+    with TestClient(create_app(settings), base_url=ORIGIN) as client:
+        response = client.post(
+            "/api/v1/ac/commands",
+            json=set_state(),
+            headers={"Idempotency-Key": "550e8400-e29b-41d4-a716-446655440005"},
+        )
+
+    assert response.status_code == 404
+    with sqlite3.connect(settings.database_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM ac_command_audit").fetchone() == (0,)
