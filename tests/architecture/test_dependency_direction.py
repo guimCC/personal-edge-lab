@@ -56,4 +56,4 @@ def test_only_expected_real_modules_exist() -> None:
         for path in (PACKAGE_ROOT / "modules").iterdir()
         if path.is_dir() and not path.name.startswith("__")
     }
-    assert module_names == {"authentication", "home", "telemetry"}
+    assert module_names == {"alerting", "authentication", "home", "telemetry"}

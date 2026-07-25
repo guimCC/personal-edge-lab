@@ -134,6 +134,107 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version="004_operational_alerts",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS alert_runtime_status (
+                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                last_started_at_utc TEXT NOT NULL,
+                last_finished_at_utc TEXT,
+                last_outcome TEXT,
+                last_error_category TEXT,
+                last_error_message TEXT,
+                CHECK (last_outcome IS NULL OR last_outcome IN ('success', 'failure'))
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS alert_incidents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                alert_type TEXT NOT NULL
+                    CHECK (alert_type IN ('telemetry_stale', 'edge_unavailable')),
+                status TEXT NOT NULL
+                    CHECK (status IN ('active', 'recovered')),
+                suspect_started_at_utc TEXT NOT NULL,
+                alerting_at_utc TEXT NOT NULL,
+                recovered_at_utc TEXT,
+                last_observed_at_utc TEXT NOT NULL,
+                evidence_category TEXT NOT NULL,
+                evidence_message TEXT NOT NULL,
+                CHECK (
+                    recovered_at_utc IS NULL
+                    OR recovered_at_utc >= alerting_at_utc
+                ),
+                CHECK (last_observed_at_utc >= suspect_started_at_utc)
+            )
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_one_active_incident
+            ON alert_incidents (device_id, alert_type)
+            WHERE status = 'active'
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_alert_incident_device_newest
+            ON alert_incidents (device_id, id DESC)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS alert_states (
+                device_id TEXT NOT NULL,
+                alert_type TEXT NOT NULL
+                    CHECK (alert_type IN ('telemetry_stale', 'edge_unavailable')),
+                lifecycle TEXT NOT NULL
+                    CHECK (lifecycle IN ('healthy', 'suspect', 'alerting', 'recovered')),
+                suspect_started_at_utc TEXT,
+                active_incident_id INTEGER,
+                recovered_at_utc TEXT,
+                recovery_display_until_utc TEXT,
+                last_observed_at_utc TEXT NOT NULL,
+                evidence_category TEXT NOT NULL,
+                evidence_message TEXT NOT NULL,
+                PRIMARY KEY (device_id, alert_type),
+                FOREIGN KEY (active_incident_id) REFERENCES alert_incidents (id),
+                CHECK (
+                    lifecycle != 'alerting'
+                    OR active_incident_id IS NOT NULL
+                ),
+                CHECK (
+                    lifecycle != 'suspect'
+                    OR suspect_started_at_utc IS NOT NULL
+                ),
+                CHECK (
+                    lifecycle != 'recovered'
+                    OR (
+                        recovered_at_utc IS NOT NULL
+                        AND recovery_display_until_utc IS NOT NULL
+                    )
+                )
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS alert_transition_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                incident_id INTEGER,
+                device_id TEXT NOT NULL,
+                alert_type TEXT NOT NULL
+                    CHECK (alert_type IN ('telemetry_stale', 'edge_unavailable')),
+                from_state TEXT NOT NULL
+                    CHECK (from_state IN ('healthy', 'suspect', 'alerting', 'recovered')),
+                to_state TEXT NOT NULL
+                    CHECK (to_state IN ('healthy', 'suspect', 'alerting', 'recovered')),
+                transitioned_at_utc TEXT NOT NULL,
+                evidence_category TEXT NOT NULL,
+                evidence_message TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES alert_incidents (id),
+                CHECK (from_state != to_state)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_alert_transition_device_newest
+            ON alert_transition_events (device_id, id DESC)
+            """,
+        ),
+    ),
 )
 
 
