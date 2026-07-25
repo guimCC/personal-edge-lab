@@ -47,8 +47,8 @@ automation.
 | 0. Modular foundation | Done | Telemetry and AC control share one modular package |
 | 0A. Deployment housekeeping | Done | Live configuration captured and reboot accepted |
 | 1. Read-only local API | Done | Stored telemetry and audit data available on the trusted LAN |
-| 2. Dashboard and service health | In progress | Implemented locally; RUBIK acceptance pending |
-| 3. Authenticated dashboard AC control | Planned | Safe physical control through the browser |
+| 2. Dashboard and service health | Done | Phone-first telemetry and operational health on RUBIK |
+| 3. Authenticated dashboard AC control | In progress | Implemented locally; guarded RUBIK acceptance pending |
 | 4. Stale telemetry and availability alerts | Planned | Actionable failure and recovery notifications |
 | 5. External interfaces and automation | Later | Telegram, rules, speech, and local AI, in that order |
 
@@ -153,7 +153,7 @@ The first version has no `POST`, `PUT`, `PATCH`, or `DELETE` routes.
 
 ## Stage 2 — Temperature dashboard and service-health view
 
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Done
 
 **Goal:** make current conditions and platform health understandable from a browser.
 
@@ -194,6 +194,8 @@ The first version has no `POST`, `PUT`, `PATCH`, or `DELETE` routes.
 
 ## Stage 3 — Authenticated AC controls in the dashboard
 
+**Status:** Implemented locally; RUBIK acceptance pending
+
 **Goal:** allow intentional AC control from the dashboard without weakening existing safety
 semantics.
 
@@ -207,16 +209,15 @@ semantics.
 - display confirmed, rejected, unreachable, node-failed, and unknown outcomes distinctly;
 - show the corresponding audit entry.
 
-### Safety and security decisions required first
+### Recorded decisions
 
-- LAN-only threat model and who is allowed to control the AC.
-- Authentication mechanism and credential storage.
-- Secure session handling and cross-site request forgery protection.
-- Rate limits and accidental double-submission prevention.
-- Whether TLS is terminated on the RUBIK or by another trusted local component.
-- Audit data that can be shown to each user.
-
-Authentication is not represented by hiding a button or relying only on an obscure URL.
+- One `owner` identity with an Argon2id password hash and revocable SQLite sessions.
+- Seven-day absolute and 24-hour idle session expiry; raw cookie tokens are never stored.
+- Exact-origin, Fetch Metadata, JSON, and session-bound CSRF validation for writes.
+- Nginx terminates HTTPS using a private workstation CA trusted explicitly on owner devices.
+- Browser controls authorize cool mode only; the local CLI retains all existing modes.
+- Idempotency, a rolling six-per-minute limit, and a leased per-device lock prevent duplicates.
+- Production docs are disabled and all platform reads require authentication.
 
 ### Preserved command semantics
 
@@ -461,3 +462,76 @@ changed, how it was verified, decisions made, and what remains.
 
 - Deploy Stage 1 to the RUBIK using `docs/deployment.md` and record the acceptance evidence before
   marking the stage done.
+
+### 2026-07-25 — Dashboard and operational health accepted on RUBIK
+
+**Stage:** 2
+**Status:** Done
+
+**Delivered**
+
+- Deployed the React temperature dashboard and expanded operational-health API as version `0.3.0`.
+- Added collector heartbeat, last-attempt outcome, ESP32 reachability, and bounded temperature
+  series.
+- Served the packaged dashboard through FastAPI, loopback Uvicorn, Nginx, and the
+  `rubik-edge-01.local` Avahi name.
+- Added a repeatable RUBIK deployment script for subsequent releases.
+
+**Decisions**
+
+- Keep Node.js as a build-time tool; no Node process runs in production.
+- Keep the dashboard read-only and preserve AC command history as audit data, not current AC state.
+- Keep API, collector, Nginx, and Avahi as independently managed services.
+- Require authenticated, HTTPS-protected command handling before adding dashboard controls.
+
+**Verification**
+
+- The frontend was compiled on RUBIK and packaged inside the `0.3.0` wheel.
+- Migration `002_collector_runtime_status` was applied without replacing existing telemetry or
+  audit data.
+- Collector runtime status and telemetry collection were confirmed after the collector restart.
+- The dashboard and API documentation were reachable through `rubik-edge-01.local`.
+- The local regression suite has 161 passing tests; Ruff lint and formatting checks pass.
+
+**Known limitations**
+
+- The LAN interface remains HTTP and intentionally read-only.
+- There is no authentication, browser AC control, alert delivery, TLS, or public-internet exposure.
+- The deployment script must be committed and deployed to RUBIK before it becomes the standard
+  release path.
+
+**Next**
+
+- Define the Stage 3 LAN threat model, HTTPS approach, authentication/session design, CSRF
+  protection, rate limiting, and command idempotency contract before adding a write route.
+
+### 2026-07-25 — Authenticated AC control implemented locally
+
+**Stage:** 3
+**Status:** Implemented locally; RUBIK acceptance pending
+
+**Delivered**
+
+- Added the owner Argon2id credential CLI, opaque SQLite sessions, durable concurrent login
+  throttling, exact expiry behavior, CSRF/origin validation, and session revocation.
+- Added cool-only Set State and separate Power Off through the existing one-attempt command use
+  case, with audit attribution, idempotent replay, rolling rate limits, and leased device locks.
+- Added the authenticated dashboard login, cache clearing, normalized review dialog, explicit
+  confirmation, distinct outcomes, and safe same-key result checks after a lost response.
+- Added local-CA provisioning, HTTPS Nginx, hardened API systemd settings, guarded deployment,
+  rollback documentation, and additive migration `003_authenticated_control`.
+
+**Verification**
+
+- 183 Python unit, integration, contract, architecture, CLI, collector, and real-process tests pass.
+- Frontend lint, TypeScript checks, six component tests, production build, and four phone/desktop
+  Playwright checks pass.
+- The `0.4.0` wheel contains the authentication app/module and hashed dashboard assets.
+- Concurrent reservation and throttle tests prove one command winner and durable lockout state.
+
+**Not yet accepted**
+
+- The private CA still needs to be trusted on the actual owner phone and computer.
+- The guarded disabled → HTTPS → authentication → controls rollout must run on RUBIK.
+- One operator-confirmed cool command and one operator-confirmed Power Off remain required, along
+  with request-count, audit, unknown-outcome, telemetry-cadence, and reboot evidence.

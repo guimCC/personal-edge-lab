@@ -18,13 +18,16 @@ apps -> application/ports <- infrastructure
 - `modules/telemetry` collects one reading and provides bounded telemetry queries, aggregation,
   freshness, and collector/edge-node health evaluation.
 - `modules/home` rejects, sends, and audits one AC command and provides audit-history queries.
+- `modules/authentication` owns owner login throttling, opaque sessions, expiry, and credential
+  rotation semantics without importing FastAPI or SQLite.
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
 - `infrastructure/persistence/sqlite` owns migrations and maps SQLite rows to domain objects.
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
   consecutive-failure counter.
 - `apps/ac_cli` owns parsing, output, configuration, composition, and exit codes.
-- `apps/api` exposes typed, read-only HTTP queries, serves the compiled React dashboard, and opens
-  fresh SQLite repositories per request.
+- `apps/api` protects typed HTTP queries, serves the compiled React dashboard, enforces
+  origin/CSRF controls, and composes the existing command use case for authenticated writes.
+- `apps/auth_cli` manages the owner Argon2id hash and session revocation locally.
 
 Architecture tests parse imports to keep domain isolated and prevent modules from importing HTTP
 or SQLite implementations.
@@ -57,16 +60,34 @@ operator -> validate complete state -> begin audit -> one HTTP request -> comple
 Timeouts and malformed HTTP 200 responses remain unknown outcomes because IR transmission may
 have happened. Even a confirmed response is not physical-state confirmation.
 
+Dashboard commands reserve their audit and device lease atomically before transmission:
+
+```text
+session + CSRF + origin + idempotency key
+                  |
+                  v
+SQLite reservation -> local policy -> exactly one ESP32 request -> audit completion
+        |                  |
+        |                  +-> rejected_locally, no ESP32 request
+        +-> replay / conflict / rate limit / device busy
+```
+
+Only SHA-256 hashes of random session cookies are stored. A session owns a separate browser CSRF
+token, seven-day absolute expiry, and 24-hour idle expiry. Password verification uses an Argon2id
+hash stored outside SQLite. Expired device leases are recovered as an unknown physical outcome and
+are never resent automatically.
+
 The local API is a separate process:
 
 ```text
-trusted-LAN browser -> Nginx -> FastAPI + React assets -> query use cases -> SQLite repositories
+owner browser -> Nginx TLS -> FastAPI + React assets -> use cases -> SQLite repositories
 ```
 
-It performs no ESP32 requests and has no physical-control route. Migrations run before the API
-accepts requests. Each synchronous request owns its SQLite connection, so web worker threads never
-share a connection. Telemetry freshness comes from stored readings; collector and ESP32 health
-come from the collector status row. Vite is build-time only and no Node process serves production
+Read routes never contact the ESP32. The single authenticated command route composes the same home
+command service as the CLI and performs one adapter call only after its audit reservation is
+durable. Migrations run before the API accepts requests. Each synchronous request owns its SQLite
+connection, so web worker threads never share a connection. Nginx redirects HTTP to HTTPS and
+Uvicorn remains loopback-only. Vite is build-time only and no Node process serves production
 traffic.
 
 ## Adding capability
@@ -108,7 +129,7 @@ process lifecycle or presentation. Business rules should remain reusable outside
 
 ## Future architecture, not current packages
 
-Future slices may introduce dashboard controls, Telegram, speech, email, a task worker, identity
+Future slices may introduce alerts, Telegram, speech, email, a task worker, multiple identities
 and permissions, and worker registration. They should reuse domain models and use cases through
 ports.
 No empty placeholder packages exist for these ideas. A package is added only with its first

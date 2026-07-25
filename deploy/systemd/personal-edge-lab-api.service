@@ -1,5 +1,5 @@
 [Unit]
-Description=Personal Edge Lab read-only API and dashboard
+Description=Personal Edge Lab authenticated API and dashboard
 Wants=network-online.target
 After=network-online.target
 
@@ -13,6 +13,22 @@ ExecStart=/home/ubuntu/personal-edge-lab/.venv/bin/python -m personal_edge_lab.a
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true
+UMask=0077
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/personal-edge-lab/data
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target

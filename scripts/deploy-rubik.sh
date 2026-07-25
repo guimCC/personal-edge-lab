@@ -86,7 +86,7 @@ done
 [[ -f "$PROJECT_ROOT/.env" ]] || fail "configuration is missing: $PROJECT_ROOT/.env"
 [[ -f "$PROJECT_ROOT/frontend/package-lock.json" ]] || fail "frontend lockfile is missing"
 
-for command in flock git node npm python3 sha256sum; do
+for command in flock git node npm openssl python3 sha256sum; do
     command -v "$command" >/dev/null || fail "required command is missing: $command"
 done
 
@@ -110,14 +110,52 @@ set +a
 }
 [[ -n "${DATABASE_PATH:-}" ]] || fail "DATABASE_PATH is missing from .env"
 
+log "Checking administrator access"
+sudo -v
+
+TLS_DIRECTORY="/etc/personal-edge-lab/tls"
+TLS_CERTIFICATE="$TLS_DIRECTORY/rubik-edge-01.local.pem"
+TLS_PRIVATE_KEY="$TLS_DIRECTORY/rubik-edge-01.local-key.pem"
+sudo test -f "$TLS_CERTIFICATE" || fail "TLS leaf certificate is missing: $TLS_CERTIFICATE"
+sudo test -f "$TLS_PRIVATE_KEY" || fail "TLS leaf key is missing: $TLS_PRIVATE_KEY"
+[[ "$(sudo stat -c '%a' "$TLS_PRIVATE_KEY")" == "640" ]] || {
+    fail "TLS leaf key must have mode 640"
+}
+sudo openssl x509 -checkend 1209600 -noout -in "$TLS_CERTIFICATE" || {
+    fail "TLS certificate expires in less than 14 days"
+}
+
+AUTH_ENABLED="${API_AUTH_ENABLED:-false}"
+CONTROL_ENABLED="${API_AC_CONTROL_ENABLED:-false}"
+if [[ "$AUTH_ENABLED" == "true" ]]; then
+    [[ "${PUBLIC_ORIGIN:-}" == "https://rubik-edge-01.local" ]] || {
+        fail "authenticated deployment requires PUBLIC_ORIGIN=https://rubik-edge-01.local"
+    }
+    [[ -n "${AUTH_PASSWORD_HASH_FILE:-}" ]] || {
+        fail "AUTH_PASSWORD_HASH_FILE is required when authentication is enabled"
+    }
+    [[ -r "$AUTH_PASSWORD_HASH_FILE" ]] || {
+        fail "owner password hash is not readable: $AUTH_PASSWORD_HASH_FILE"
+    }
+    [[ "$(stat -c '%a' "$AUTH_PASSWORD_HASH_FILE")" == "600" ]] || {
+        fail "owner password hash must have mode 600"
+    }
+    [[ "${API_DOCS_ENABLED:-}" == "false" ]] || {
+        fail "authenticated production deployment requires API_DOCS_ENABLED=false"
+    }
+fi
+if [[ "$CONTROL_ENABLED" == "true" ]]; then
+    [[ "$AUTH_ENABLED" == "true" ]] || fail "controls require API_AUTH_ENABLED=true"
+    [[ "${API_DOCS_ENABLED:-}" == "false" ]] || {
+        fail "controls require API_DOCS_ENABLED=false"
+    }
+fi
+
 if [[ "$DATABASE_PATH" = /* ]]; then
     DATABASE_FILE="$DATABASE_PATH"
 else
     DATABASE_FILE="$PROJECT_ROOT/$DATABASE_PATH"
 fi
-
-log "Checking administrator access"
-sudo -v
 
 SYSTEM_PACKAGES=()
 command -v curl >/dev/null || SYSTEM_PACKAGES+=(curl)
@@ -143,7 +181,17 @@ git status --short >"$DEPLOY_BACKUP/working-tree.txt"
 if [[ -f "$DATABASE_FILE" ]]; then
     sqlite3 "$DATABASE_FILE" ".backup '$DEPLOY_BACKUP/telemetry.db'"
     sqlite3 "$DATABASE_FILE" 'PRAGMA integrity_check;' | grep -qx 'ok'
+    sqlite3 "$DATABASE_FILE" \
+        'SELECT "temperature_readings", COUNT(*) FROM temperature_readings
+         UNION ALL SELECT "ac_command_audit", COUNT(*) FROM ac_command_audit;' \
+        >"$DEPLOY_BACKUP/row-counts.txt"
 fi
+
+if [[ -n "${AUTH_PASSWORD_HASH_FILE:-}" && -f "$AUTH_PASSWORD_HASH_FILE" ]]; then
+    cp --preserve=all "$AUTH_PASSWORD_HASH_FILE" \
+        "$DEPLOY_BACKUP/owner-password.hash"
+fi
+sudo cp -a "$TLS_DIRECTORY" "$DEPLOY_BACKUP/tls"
 
 for unit in telemetry-collector.service personal-edge-lab-api.service; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
@@ -285,18 +333,18 @@ sudo install -m 0644 \
     /etc/nginx/sites-available/personal-edge-lab
 sudo ln -sfn /etc/nginx/sites-available/personal-edge-lab \
     /etc/nginx/sites-enabled/personal-edge-lab
+sudo rm -f /etc/nginx/sites-enabled/default
 
 sudo systemctl daemon-reload
 sudo nginx -t
 
 log "Restarting application services"
 sudo systemctl enable telemetry-collector.service personal-edge-lab-api.service >/dev/null
-sudo systemctl restart telemetry-collector.service
 sudo systemctl restart personal-edge-lab-api.service
 sudo systemctl enable --now avahi-daemon.service nginx.service >/dev/null
 sudo systemctl reload nginx.service
 
-log "Verifying services and HTTP endpoints"
+log "Verifying services and HTTPS endpoints"
 for service in \
     telemetry-collector.service \
     personal-edge-lab-api.service \
@@ -308,20 +356,38 @@ done
 HEALTH_OK=false
 for _attempt in {1..15}; do
     if curl --fail --silent --show-error \
-        http://127.0.0.1:8000/health >"$WHEEL_DIR/health.json"; then
+        http://127.0.0.1:8000/health/live >"$WHEEL_DIR/health-live.json"; then
         HEALTH_OK=true
         break
     fi
     sleep 1
 done
-[[ "$HEALTH_OK" == true ]] || fail "API health endpoint did not become available"
+[[ "$HEALTH_OK" == true ]] || fail "API liveness endpoint did not become available"
 
-curl --fail --silent --show-error \
-    -H 'Host: rubik-edge-01.local' \
-    http://127.0.0.1/health >/dev/null
-curl --fail --silent --show-error \
-    -H 'Host: rubik-edge-01.local' \
-    http://127.0.0.1/ | grep -q '<div id="root"></div>'
+HTTP_REDIRECT="$(
+    curl --silent --output /dev/null --write-out '%{http_code}' \
+        -H 'Host: rubik-edge-01.local' http://127.0.0.1/
+)"
+[[ "$HTTP_REDIRECT" == "308" ]] || fail "HTTP did not redirect to HTTPS"
+
+curl --insecure --fail --silent --show-error \
+    --resolve rubik-edge-01.local:443:127.0.0.1 \
+    https://rubik-edge-01.local/ | grep -q '<div id="root"></div>'
+
+PROTECTED_STATUS="$(
+    curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+        --resolve rubik-edge-01.local:443:127.0.0.1 \
+        https://rubik-edge-01.local/health
+)"
+if [[ "$AUTH_ENABLED" == "true" ]]; then
+    [[ "$PROTECTED_STATUS" == "401" ]] || {
+        fail "unauthenticated /health did not return 401"
+    }
+else
+    [[ "$PROTECTED_STATUS" == "200" ]] || {
+        fail "Stage 2-compatible /health did not return 200"
+    }
+fi
 
 INSTALLED_VERSION="$(
     "$RUNTIME_PYTHON" -c \
@@ -331,5 +397,9 @@ INSTALLED_VERSION="$(
 printf '\nDeployment successful.\n'
 printf 'Version: %s\n' "$INSTALLED_VERSION"
 printf 'Backup: %s\n' "$DEPLOY_BACKUP"
-printf 'Dashboard: http://rubik-edge-01.local/\n'
-printf 'API docs: http://rubik-edge-01.local/docs\n'
+printf 'Dashboard: https://rubik-edge-01.local/\n'
+if [[ "${API_DOCS_ENABLED:-false}" == "true" ]]; then
+    printf 'API docs: https://rubik-edge-01.local/docs\n'
+else
+    printf 'API docs: disabled\n'
+fi

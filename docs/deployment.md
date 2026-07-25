@@ -158,6 +158,109 @@ journalctl -u "$SERVICE" -n 100 --no-pager
 
 Confirm that the old service produces a new reading before closing the rollback.
 
+## Stage 3 authenticated-control rollout
+
+Stage 3 is intentionally enabled in phases. Do not combine password creation, HTTPS cutover, and
+the first physical command into one unattended operation.
+
+### 1. Capture and build with both flags disabled
+
+Back up `.env`, SQLite, both application units, Nginx, the installed commit/wheel, row counts, any
+existing password hash, and `/etc/personal-edge-lab/tls`. Verify `PRAGMA integrity_check` before
+installation. Build and test `0.4.0` normally, install it, and run migration
+`003_authenticated_control` while retaining:
+
+```dotenv
+API_AUTH_ENABLED=false
+API_AC_CONTROL_ENABLED=false
+```
+
+Stage 2 reads must remain usable and the collector must keep its normal cadence. Migration `003`
+is additive; it does not rewrite telemetry or existing audit rows.
+
+### 2. Provision and trust local HTTPS
+
+On the trusted development workstation, with pinned mkcert v1.4.4:
+
+```bash
+./scripts/provision-local-tls.sh --copy-to ubuntu@rubik-edge-01
+```
+
+The helper prints the `rootCA.pem` path. Install that CA certificate manually as trusted on the
+owner's phone and computer. Never copy `rootCA-key.pem` to RUBIK. Confirm the installed leaf key is
+owned by `root:www-data` with mode `0640`, then install the checked-in Nginx configuration:
+
+```bash
+sudo install -m 0644 deploy/nginx/personal-edge-lab.conf \
+  /etc/nginx/sites-available/personal-edge-lab
+sudo ln -sfn /etc/nginx/sites-available/personal-edge-lab \
+  /etc/nginx/sites-enabled/personal-edge-lab
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Verify port 80 redirects, the trusted browser loads `https://rubik-edge-01.local/`, an unknown
+host is rejected, and `/health/live` cannot be proxied from the LAN.
+
+### 3. Create the owner credential and enable authentication
+
+With the environment loaded and authentication still disabled:
+
+```bash
+python -m personal_edge_lab.apps.auth_cli set-password
+stat -c '%a %U %G %n' secrets/owner-password.hash
+```
+
+Use at least 14 characters. Configure the Stage 3 values from `.env.example`, set
+`API_AUTH_ENABLED=true`, leave `API_AC_CONTROL_ENABLED=false`, and restart only the API. Verify:
+
+- the login shell and assets load without a session;
+- `/health` and all histories return 401 without a session;
+- the owner can sign in over trusted HTTPS;
+- login failures are generic and the durable throttle returns 429;
+- logout clears access and cached protected values;
+- `/docs` and `/openapi.json` are unavailable.
+
+### 4. Enable controls without physical testing
+
+Set `API_AC_CONTROL_ENABLED=true`, restart only the API, and exercise malformed, unauthenticated,
+wrong-origin, missing-CSRF, missing-idempotency, duplicate, conflict, and rate-limit requests with
+a mocked or non-physical adapter. Confirm those checks create no physical ESP32 request and that
+well-formed domain-invalid commands produce a `rejected_locally` audit.
+
+The checked deployment command validates TLS expiry and security prerequisites, backs up the
+credential/TLS configuration, uses loopback liveness, and verifies unauthenticated reads:
+
+```bash
+./scripts/deploy-rubik.sh
+```
+
+### 5. Operator-controlled physical acceptance
+
+From the dashboard review dialog, explicitly authorize exactly one cool Set State and one Power
+Off action. For each, record:
+
+- the normalized payload and idempotency key;
+- one new audit ID attributed to `owner` and `dashboard`;
+- the number of ESP32 requests (at most one);
+- the displayed outcome and observed physical behavior.
+
+Simulate or observe an unknown response and verify the UI warns that transmission may have
+occurred and does not retry automatically. Reusing the same request key may only replay/recover
+the recorded result.
+
+Reboot and verify telemetry collector, API, Avahi, and Nginx start independently; HTTPS remains
+trusted; sessions survive within their expiry bounds; telemetry cadence remains approximately 15
+seconds; and the local AC CLI retains its output, modes, and exit codes.
+
+### Stage 3 rollback
+
+Disable `API_AC_CONTROL_ENABLED` first. Restore the retained `0.3.0` wheel, prior `.env`, API unit,
+and Nginx HTTP configuration, then restart only API/Nginx. Migration `003` can remain because its
+tables and nullable columns are ignored by `0.3.0`. Restore SQLite only when integrity evidence
+shows actual corruption; otherwise preserve all telemetry and audit rows written since backup.
+
 ## Stage 1 read-only API rollout
 
 The API is a second service and does not require stopping the collector. Capture the installed
@@ -351,7 +454,7 @@ sudo systemctl restart telemetry-collector.service personal-edge-lab-api.service
 Migration `002_collector_runtime_status` is additive and `0.2.0` ignores it. Do not restore the
 database unless integrity or row-count evidence proves corruption.
 
-## Repeat Stage 2 deployments
+## Repeat accepted deployments
 
 After the first accepted rollout, deploy later changes from the RUBIK checkout with:
 
@@ -363,9 +466,9 @@ cd /home/ubuntu/personal-edge-lab
 The script runs as `ubuntu` and requests `sudo` only for operating-system configuration and service
 operations. It backs up the live configuration and database, reuses frontend and Python build
 dependencies when their lock/configuration files are unchanged, builds and inspects the dashboard
-wheel, applies idempotent migrations, updates systemd/Nginx configuration, restarts the two
-application services, and verifies the LAN proxy. It installs Nginx, Avahi, SQLite CLI, or curl only
-when missing.
+wheel, applies idempotent migrations, updates systemd/Nginx configuration, restarts the API
+without interrupting the collector, and verifies HTTPS. It installs Nginx, Avahi, SQLite CLI, or
+curl only when missing.
 
 For a rapid iteration that has already passed the full checks:
 
@@ -374,6 +477,6 @@ For a rapid iteration that has already passed the full checks:
 ```
 
 This still builds and inspects the frontend and wheel, backs up SQLite, applies migrations, updates
-configuration, restarts services, and performs runtime health checks. It skips only frontend
+configuration, restarts the API/Nginx, and performs runtime health checks. It skips only frontend
 lint/unit tests and Python tests/lint. Run the default command before treating a revision as an
 accepted release.
