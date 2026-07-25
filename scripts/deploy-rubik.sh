@@ -273,8 +273,8 @@ fi
 if [[ "$SKIP_TESTS" == false ]]; then
     log "Checking Python"
     "$BUILD_PYTHON" -m pytest
-    "$BUILD_PYTHON" -m ruff check .
-    "$BUILD_PYTHON" -m ruff format --check .
+    "$BUILD_PYTHON" -m ruff check src tests hatch_build.py
+    "$BUILD_PYTHON" -m ruff format --check src tests hatch_build.py
 fi
 
 log "Building and inspecting wheel"
