@@ -95,7 +95,8 @@ sqlite3 data/telemetry.db \
 python -m personal_edge_lab.apps.ac_cli history --limit 20
 ```
 
-See [the architecture guide](docs/architecture.md), the
+See [the development roadmap and log](docs/roadmap.md), the
+[architecture guide](docs/architecture.md), the
 [ESP32 contract](docs/contracts/ac-controller-01.md), and the
 [Raspberry cutover runbook](docs/deployment.md).
 
