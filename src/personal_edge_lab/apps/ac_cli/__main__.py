@@ -23,7 +23,7 @@ from personal_edge_lab.infrastructure.persistence.sqlite.command_audit import (
     SqliteCommandAuditRepository,
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
-from personal_edge_lab.modules.home import (
+from personal_edge_lab.modules.ac_control import (
     CommandHistoryQueryError,
     CommandService,
     ListCommandHistory,

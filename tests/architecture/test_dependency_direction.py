@@ -50,10 +50,46 @@ def test_modules_depend_on_ports_and_domain_not_adapters() -> None:
     assert not {path: names for path, names in violations.items() if names}
 
 
+def test_application_ports_depend_only_on_domain_and_standard_library() -> None:
+    forbidden = (
+        "personal_edge_lab.apps",
+        "personal_edge_lab.infrastructure",
+        "personal_edge_lab.modules",
+        "fastapi",
+        "httpx",
+        "pydantic",
+        "sqlite3",
+    )
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(forbidden)
+        )
+        for path in python_files("application/ports")
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
+def test_infrastructure_does_not_depend_on_apps_or_feature_modules() -> None:
+    forbidden = ("personal_edge_lab.apps", "personal_edge_lab.modules")
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(forbidden)
+        )
+        for path in python_files("infrastructure")
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
 def test_only_expected_real_modules_exist() -> None:
     module_names = {
         path.name
         for path in (PACKAGE_ROOT / "modules").iterdir()
-        if path.is_dir() and not path.name.startswith("__")
+        if path.is_dir() and (path / "__init__.py").is_file()
     }
-    assert module_names == {"alerting", "authentication", "home", "telemetry"}
+    assert module_names == {
+        "ac_control",
+        "alerting",
+        "authentication",
+        "platform_status",
+        "telemetry",
+    }

@@ -20,28 +20,18 @@ from personal_edge_lab.apps.api.config import Settings
 from personal_edge_lab.apps.api.schemas import (
     AcCommandRequest,
     AcCommandResponse,
-    AlertHealthResponse,
     AlertListResponse,
-    CollectorHealthResponse,
     CommandAuditResponse,
     CommandHistoryResponse,
-    DatabaseHealthResponse,
-    EdgeNodeHealthResponse,
     HealthResponse,
     LivenessResponse,
     LoginRequest,
     SessionResponse,
-    TelemetryHealthResponse,
     TemperatureHistoryResponse,
     TemperatureReadingResponse,
     TemperatureSeriesResponse,
 )
-from personal_edge_lab.domain.ac import (
-    AcMode,
-    AcState,
-    CommandRequestContext,
-    ValidationError,
-)
+from personal_edge_lab.domain.ac import CommandRequestContext
 from personal_edge_lab.domain.auth import AuthenticatedSession
 from personal_edge_lab.infrastructure.esp32.ac_controller import AcCommandClient
 from personal_edge_lab.infrastructure.persistence.sqlite.alerting import (
@@ -60,9 +50,17 @@ from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_m
 from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import (
     SqliteTelemetryRepository,
 )
+from personal_edge_lab.modules.ac_control import (
+    CommandConflictError,
+    CommandInProgressError,
+    CommandRateLimitedError,
+    CommandService,
+    DeviceBusyError,
+    ExecuteCoolOnlyCommand,
+    ListCommandHistory,
+)
 from personal_edge_lab.modules.alerting import (
     AlertHistoryFilter,
-    AlertStatusSummary,
     GetOperationalAlerts,
 )
 from personal_edge_lab.modules.authentication import (
@@ -70,21 +68,11 @@ from personal_edge_lab.modules.authentication import (
     AuthenticationService,
     LoginRateLimited,
 )
-from personal_edge_lab.modules.home import (
-    CommandConflictError,
-    CommandInProgressError,
-    CommandRateLimitedError,
-    CommandService,
-    DeviceBusyError,
-    ListCommandHistory,
-)
+from personal_edge_lab.modules.platform_status import GetPlatformHealth
 from personal_edge_lab.modules.telemetry import (
     GetLatestTemperature,
-    GetOperationalHealth,
-    GetTelemetryHealth,
     GetTemperatureSeries,
     ListTemperatureHistory,
-    TelemetryFreshness,
     TelemetryWindow,
 )
 
@@ -343,49 +331,21 @@ def create_app(
             Depends(require_session),
         ],
     ) -> HealthResponse:
-        checked_at = clock()
-        with SqliteTelemetryRepository(settings.database_path) as repository:
-            telemetry = GetTelemetryHealth(
-                repository,
-                device_id=settings.device_id,
-                stale_after_seconds=settings.telemetry_stale_after_seconds,
-                clock=lambda: checked_at,
-            ).execute()
-        with SqliteCollectorStatusRepository(settings.database_path) as repository:
-            operational = GetOperationalHealth(
-                repository,
-                device_id=settings.device_id,
-                stale_after_seconds=settings.collector_stale_after_seconds,
-                clock=lambda: checked_at,
-            ).execute()
-        alerts = GetOperationalAlerts(
-            lambda: SqliteAlertRepository(settings.database_path),
+        platform_health = GetPlatformHealth(
+            telemetry_repository_factory=lambda: SqliteTelemetryRepository(settings.database_path),
+            collector_repository_factory=lambda: SqliteCollectorStatusRepository(
+                settings.database_path
+            ),
+            alert_repository_factory=lambda: SqliteAlertRepository(settings.database_path),
+            device_id=settings.device_id,
+            telemetry_stale_after_seconds=settings.telemetry_stale_after_seconds,
+            collector_stale_after_seconds=settings.collector_stale_after_seconds,
             evaluator_stale_after_seconds=settings.alert_evaluator_stale_after_seconds,
-            clock=lambda: checked_at,
-        ).execute(settings.device_id, limit=1)
-        overall = (
-            "healthy"
-            if (
-                telemetry.status is TelemetryFreshness.FRESH
-                and operational.collector.status.value == "running"
-                and operational.edge_node.status.value == "reachable"
-                and alerts.status
-                in {
-                    AlertStatusSummary.HEALTHY,
-                    AlertStatusSummary.RECOVERED,
-                }
-            )
-            else "degraded"
-        )
-        return HealthResponse(
-            status=overall,
+            clock=clock,
+        ).execute()
+        return HealthResponse.from_application(
+            platform_health,
             version=__version__,
-            checked_at_utc=checked_at,
-            database=DatabaseHealthResponse(),
-            telemetry=TelemetryHealthResponse.from_application(telemetry),
-            collector=CollectorHealthResponse.from_application(operational.collector),
-            edge_node=EdgeNodeHealthResponse.from_application(operational.edge_node),
-            alerts=AlertHealthResponse.from_application(alerts),
         )
 
     @app.get(
@@ -540,7 +500,10 @@ def create_app(
                     context=context,
                     clock=clock,
                 )
-                execution = _execute_browser_command(service, body)
+                execution = ExecuteCoolOnlyCommand(service).execute(
+                    command_type=body.command_type,
+                    state_payload=body.state,
+                )
                 entry = repository.get(execution.command_id)
                 if entry is None:
                     raise sqlite3.DatabaseError("command audit record was not found")
@@ -584,65 +547,6 @@ def create_app(
         )
 
     return app
-
-
-def _execute_browser_command(
-    service: CommandService,
-    body: AcCommandRequest,
-):
-    attempted_payload = body.model_dump(exclude_none=True)
-    if body.command_type == "power_off":
-        if body.state is not None:
-            return service.reject(
-                command_type=body.command_type,
-                attempted_payload=attempted_payload,
-                message="power_off must not include state",
-            )
-        return service.power_off()
-    if body.command_type != "set_state":
-        return service.reject(
-            command_type=body.command_type,
-            attempted_payload=attempted_payload,
-            message="command_type must be set_state or power_off",
-        )
-    if body.state is None:
-        return service.reject(
-            command_type=body.command_type,
-            attempted_payload=attempted_payload,
-            message="set_state requires state",
-        )
-    expected_fields = {
-        "power",
-        "temperature_c",
-        "mode",
-        "fan",
-        "vertical_vane",
-    }
-    if set(body.state) != expected_fields:
-        return service.reject(
-            command_type=body.command_type,
-            attempted_payload=attempted_payload,
-            message="set_state requires exactly power, temperature_c, mode, fan, and vertical_vane",
-        )
-    try:
-        state = AcState.from_values(
-            power=body.state.get("power"),
-            temperature_c=body.state.get("temperature_c"),
-            mode=body.state.get("mode"),
-            fan=body.state.get("fan"),
-            vertical_vane=body.state.get("vertical_vane"),
-        )
-        if not state.power:
-            raise ValidationError("set_state requires power=true")
-        if state.mode is not AcMode.COOL:
-            raise ValidationError("browser controls currently authorize only cool mode")
-    except ValidationError as error:
-        return service.reject(
-            command_type=body.command_type,
-            attempted_payload=attempted_payload,
-            message=str(error),
-        )
-    return service.set_state(state)
 
 
 def _clear_session_cookie(response: Response) -> None:

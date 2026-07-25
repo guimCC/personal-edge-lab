@@ -1,13 +1,14 @@
-"""Home-control use cases."""
+"""Air-conditioner control use cases."""
 
-from personal_edge_lab.modules.home.commands import (
+from personal_edge_lab.modules.ac_control.commands import (
     CommandConflictError,
     CommandInProgressError,
     CommandRateLimitedError,
     CommandService,
     DeviceBusyError,
 )
-from personal_edge_lab.modules.home.queries import (
+from personal_edge_lab.modules.ac_control.policy import ExecuteCoolOnlyCommand
+from personal_edge_lab.modules.ac_control.queries import (
     DEFAULT_COMMAND_HISTORY_LIMIT,
     MAX_COMMAND_HISTORY_LIMIT,
     CommandHistoryQueryError,
@@ -23,5 +24,6 @@ __all__ = [
     "CommandRateLimitedError",
     "CommandService",
     "DeviceBusyError",
+    "ExecuteCoolOnlyCommand",
     "ListCommandHistory",
 ]

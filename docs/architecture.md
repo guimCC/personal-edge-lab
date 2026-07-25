@@ -17,7 +17,10 @@ apps -> application/ports <- infrastructure
   telemetry repository, AC controller, and command-audit repository.
 - `modules/telemetry` collects one reading and provides bounded telemetry queries, aggregation,
   freshness, and collector/edge-node health evaluation.
-- `modules/home` rejects, sends, and audits one AC command and provides audit-history queries.
+- `modules/ac_control` validates channel policy, sends, and audits one AC command and provides
+  audit-history queries.
+- `modules/platform_status` combines telemetry, collector, ESP32, and durable-alert evidence for
+  every delivery adapter without depending on FastAPI.
 - `modules/authentication` owns owner login throttling, opaque sessions, expiry, and credential
   rotation semantics without importing FastAPI or SQLite.
 - `modules/alerting` evaluates stored operational evidence into durable alert transitions and

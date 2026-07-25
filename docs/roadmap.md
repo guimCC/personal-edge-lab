@@ -64,7 +64,7 @@ The two existing vertical slices were moved into `personal_edge_lab`:
 - continuous telemetry collection;
 - on-demand AC `set`, `off`, and `history`;
 - pure domain models and application ports;
-- reusable telemetry and home-control use cases;
+- reusable telemetry, AC-control, and platform-status use cases;
 - ESP32 HTTP and SQLite infrastructure adapters;
 - transactional SQLite migrations;
 - new application entrypoints;

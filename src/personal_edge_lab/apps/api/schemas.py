@@ -12,6 +12,7 @@ from personal_edge_lab.domain.ac import CommandAuditEntry, CommandOutcome
 from personal_edge_lab.domain.alerting import AlertIncident, AlertState
 from personal_edge_lab.domain.telemetry import TemperatureReading
 from personal_edge_lab.modules.alerting import AlertOverview
+from personal_edge_lab.modules.platform_status import PlatformHealth
 from personal_edge_lab.modules.telemetry import (
     CollectorHealth,
     EdgeNodeHealth,
@@ -241,6 +242,24 @@ class HealthResponse(ApiModel):
     collector: CollectorHealthResponse
     edge_node: EdgeNodeHealthResponse
     alerts: AlertHealthResponse
+
+    @classmethod
+    def from_application(
+        cls,
+        health: PlatformHealth,
+        *,
+        version: str,
+    ) -> HealthResponse:
+        return cls(
+            status=health.status,
+            version=version,
+            checked_at_utc=health.checked_at,
+            database=DatabaseHealthResponse(),
+            telemetry=TelemetryHealthResponse.from_application(health.telemetry),
+            collector=CollectorHealthResponse.from_application(health.collector),
+            edge_node=EdgeNodeHealthResponse.from_application(health.edge_node),
+            alerts=AlertHealthResponse.from_application(health.alerts),
+        )
 
 
 class AlertStateResponse(ApiModel):

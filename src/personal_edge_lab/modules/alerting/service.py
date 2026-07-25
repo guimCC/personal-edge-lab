@@ -8,7 +8,11 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-from personal_edge_lab.application.ports.alerting import AlertRepository, AlertRepositoryFactory
+from personal_edge_lab.application.ports.alerting import (
+    AlertEvaluationRepository,
+    AlertEvaluationRepositoryFactory,
+    AlertQueryRepositoryFactory,
+)
 from personal_edge_lab.domain.alerting import (
     AlertEvaluationResult,
     AlertEvaluatorRuntime,
@@ -68,7 +72,7 @@ class AlertOverview:
 class EvaluateOperationalAlerts:
     def __init__(
         self,
-        repository_factory: AlertRepositoryFactory,
+        repository_factory: AlertEvaluationRepositoryFactory,
         *,
         device_id: str,
         policy: AlertPolicy,
@@ -247,7 +251,7 @@ class EvaluateOperationalAlerts:
 
     def _transition(
         self,
-        repository: AlertRepository,
+        repository: AlertEvaluationRepository,
         state: AlertState,
         signal: AlertSignal,
         *,
@@ -398,7 +402,7 @@ class EvaluateOperationalAlerts:
 class GetOperationalAlerts:
     def __init__(
         self,
-        repository_factory: AlertRepositoryFactory,
+        repository_factory: AlertQueryRepositoryFactory,
         *,
         evaluator_stale_after_seconds: float,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -506,7 +510,7 @@ def _observe(state: AlertState, signal: AlertSignal, observed_at: datetime) -> A
 
 
 def _append_transition(
-    repository: AlertRepository,
+    repository: AlertEvaluationRepository,
     previous: AlertState,
     current: AlertState,
     transitioned_at: datetime,
