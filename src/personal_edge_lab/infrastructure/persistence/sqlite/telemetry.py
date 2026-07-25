@@ -61,6 +61,20 @@ class SqliteTelemetryRepository:
         ).fetchone()
         return None if row is None else _reading_from_row(row)
 
+    def history(self, device_id: str, *, limit: int) -> list[TemperatureReading]:
+        rows = self._connection.execute(
+            """
+            SELECT device_id, sensor_type, received_at_utc, estimated_sample_at_utc,
+                   temperature_c, raw_adc, age_ms, sample_interval_ms
+            FROM temperature_readings
+            WHERE device_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (device_id, limit),
+        )
+        return [_reading_from_row(row) for row in rows]
+
     def count(self) -> int:
         row = self._connection.execute(
             "SELECT COUNT(*) AS count FROM temperature_readings"

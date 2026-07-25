@@ -136,3 +136,13 @@ def test_history_displays_recent_audit(configured_environment) -> None:
     assert "confirmed_success" in stdout
     assert "set_state" in stdout
     assert stderr == ""
+
+
+def test_history_limit_validation_remains_unchanged(configured_environment) -> None:
+    exit_code, stdout, stderr = run_cli(
+        ["history", "--limit", "0"],
+        lambda request: httpx.Response(500),
+    )
+    assert exit_code == 2
+    assert stdout == ""
+    assert stderr == "--limit must be from 1 through 100\n"

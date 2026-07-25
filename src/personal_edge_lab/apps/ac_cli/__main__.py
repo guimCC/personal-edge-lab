@@ -23,7 +23,11 @@ from personal_edge_lab.infrastructure.persistence.sqlite.command_audit import (
     SqliteCommandAuditRepository,
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
-from personal_edge_lab.modules.home import CommandService
+from personal_edge_lab.modules.home import (
+    CommandHistoryQueryError,
+    CommandService,
+    ListCommandHistory,
+)
 
 EXIT_BY_OUTCOME = {
     CommandOutcome.CONFIRMED_SUCCESS: 0,
@@ -77,7 +81,7 @@ def main(
         with SqliteCommandAuditRepository(settings.database_path) as audit_repository:
             if args.command == "history":
                 return _show_history(
-                    audit_repository,
+                    ListCommandHistory(audit_repository),
                     args.limit,
                     stdout=stdout,
                     stderr=stderr,
@@ -154,16 +158,17 @@ def _show_result(
 
 
 def _show_history(
-    audit_repository: SqliteCommandAuditRepository,
+    query: ListCommandHistory,
     limit: int,
     *,
     stdout: TextIO,
     stderr: TextIO,
 ) -> int:
-    if not 1 <= limit <= 100:
+    try:
+        entries = query.execute(limit=limit)
+    except CommandHistoryQueryError:
         print("--limit must be from 1 through 100", file=stderr)
         return 2
-    entries = audit_repository.history(limit=limit)
     if not entries:
         print("No AC command attempts recorded.", file=stdout)
         return 0
