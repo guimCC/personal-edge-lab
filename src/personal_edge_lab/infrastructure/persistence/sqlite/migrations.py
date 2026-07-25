@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-DEFAULT_TIMEOUT_SECONDS = 5.0
+from personal_edge_lab.infrastructure.persistence.sqlite.connection import (
+    DEFAULT_TIMEOUT_SECONDS,
+    open_connection,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,8 +247,7 @@ def run_migrations(
 ) -> None:
     """Apply pending migrations atomically, preserving compatible existing tables."""
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(database_path, timeout=timeout_seconds) as connection:
-        connection.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+    with open_connection(database_path, timeout_seconds=timeout_seconds) as connection:
         connection.execute("BEGIN IMMEDIATE")
         try:
             connection.execute(

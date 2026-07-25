@@ -420,20 +420,39 @@ class GetOperationalAlerts:
         if not 1 <= limit <= MAX_ALERT_LIMIT:
             raise AlertQueryError(f"limit must be from 1 through {MAX_ALERT_LIMIT}")
         checked_at = _utc_time(self._clock())
-        incident_status = {
-            AlertHistoryFilter.ACTIVE: AlertIncidentStatus.ACTIVE,
-            AlertHistoryFilter.RECOVERED: AlertIncidentStatus.RECOVERED,
-            AlertHistoryFilter.ALL: None,
-        }[history_filter]
         with self._repository_factory() as repository:
             states = tuple(repository.states(selected_device))
-            incidents = tuple(
-                repository.incidents(
+            if history_filter is AlertHistoryFilter.ALL:
+                active = repository.incidents(
                     selected_device,
-                    status=incident_status,
+                    status=AlertIncidentStatus.ACTIVE,
                     limit=limit,
                 )
-            )
+                recovered = repository.incidents(
+                    selected_device,
+                    status=AlertIncidentStatus.RECOVERED,
+                    limit=limit,
+                )
+                incidents = tuple(
+                    sorted(
+                        (*active, *recovered),
+                        key=lambda item: item.id,
+                        reverse=True,
+                    )
+                )
+            else:
+                incident_status = (
+                    AlertIncidentStatus.ACTIVE
+                    if history_filter is AlertHistoryFilter.ACTIVE
+                    else AlertIncidentStatus.RECOVERED
+                )
+                incidents = tuple(
+                    repository.incidents(
+                        selected_device,
+                        status=incident_status,
+                        limit=limit,
+                    )
+                )
             runtime = repository.evaluator_runtime()
             latest_transition = repository.latest_transition_at(selected_device)
         evaluator_last_run, evaluator_age = _evaluator_age(runtime, checked_at)

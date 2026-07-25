@@ -21,9 +21,22 @@ class AcController(Protocol):
 
 
 class CommandAuditRepository(Protocol):
-    def begin(self, *, device_id: str, command_type: str, payload_json: str) -> int: ...
+    def begin(
+        self,
+        *,
+        device_id: str,
+        command_type: str,
+        payload_json: str,
+        requested_at: datetime,
+    ) -> int: ...
 
-    def complete(self, command_id: int, result: CommandResult) -> None: ...
+    def complete(
+        self,
+        command_id: int,
+        result: CommandResult,
+        *,
+        completed_at: datetime,
+    ) -> None: ...
 
     def history(self, *, limit: int) -> list[CommandAuditEntry]: ...
 

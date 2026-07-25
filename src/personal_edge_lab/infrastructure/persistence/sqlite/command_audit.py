@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
 
@@ -15,13 +15,12 @@ from personal_edge_lab.domain.ac import (
     CommandReservationStatus,
     CommandResult,
 )
+from personal_edge_lab.infrastructure.persistence.sqlite.connection import open_connection
 
 
 class SqliteCommandAuditRepository:
     def __init__(self, database_path: Path, *, timeout_seconds: float = 5.0) -> None:
-        self._connection = sqlite3.connect(database_path, timeout=timeout_seconds)
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+        self._connection = open_connection(database_path, timeout_seconds=timeout_seconds)
 
     def __enter__(self) -> SqliteCommandAuditRepository:
         return self
@@ -32,7 +31,14 @@ class SqliteCommandAuditRepository:
     def close(self) -> None:
         self._connection.close()
 
-    def begin(self, *, device_id: str, command_type: str, payload_json: str) -> int:
+    def begin(
+        self,
+        *,
+        device_id: str,
+        command_type: str,
+        payload_json: str,
+        requested_at: datetime,
+    ) -> int:
         cursor = self._connection.execute(
             """
             INSERT INTO ac_command_audit (
@@ -44,7 +50,7 @@ class SqliteCommandAuditRepository:
                 device_id,
                 command_type,
                 payload_json,
-                datetime.now(UTC).isoformat(),
+                requested_at.isoformat(),
                 CommandOutcome.PENDING.value,
             ),
         )
@@ -204,7 +210,13 @@ class SqliteCommandAuditRepository:
             self._connection.rollback()
             raise
 
-    def complete(self, command_id: int, result: CommandResult) -> None:
+    def complete(
+        self,
+        command_id: int,
+        result: CommandResult,
+        *,
+        completed_at: datetime,
+    ) -> None:
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             cursor = self._connection.execute(
@@ -215,7 +227,7 @@ class SqliteCommandAuditRepository:
                 WHERE id = ?
                 """,
                 (
-                    datetime.now(UTC).isoformat(),
+                    completed_at.isoformat(),
                     result.outcome.value,
                     result.http_status,
                     result.response_body,

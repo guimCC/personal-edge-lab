@@ -224,6 +224,48 @@ def test_alert_overview_filters_history_and_detects_stale_evaluator(tmp_path) ->
     assert stale.status is AlertStatusSummary.UNKNOWN
 
 
+def test_all_history_never_hides_an_old_active_incident(tmp_path) -> None:
+    database = tmp_path / "active-priority.db"
+    run_migrations(database)
+    with SqliteAlertRepository(database) as repository:
+        repository.begin_evaluation()
+        active = repository.create_incident(
+            device_id="node-1",
+            alert_type=AlertType.TELEMETRY_STALE,
+            suspect_started_at=NOW,
+            alerting_at=NOW,
+            evidence_category="stale",
+            evidence_message="Telemetry has remained stale",
+        )
+        for offset in range(25):
+            incident = repository.create_incident(
+                device_id="node-1",
+                alert_type=AlertType.EDGE_UNAVAILABLE,
+                suspect_started_at=NOW + timedelta(seconds=offset + 1),
+                alerting_at=NOW + timedelta(seconds=offset + 1),
+                evidence_category="timeout",
+                evidence_message="Temperature collection timed out",
+            )
+            repository.recover_incident(
+                incident.id,
+                recovered_at=NOW + timedelta(seconds=offset + 2),
+                evidence_category="reachable",
+                evidence_message="Temperature collection recovered",
+            )
+        repository.commit()
+
+    overview = GetOperationalAlerts(
+        lambda: SqliteAlertRepository(database),
+        evaluator_stale_after_seconds=90,
+        clock=lambda: NOW + timedelta(minutes=1),
+    ).execute("node-1", history_filter=AlertHistoryFilter.ALL, limit=20)
+
+    assert any(incident.id == active.id for incident in overview.incidents)
+    assert sum(
+        incident.status is AlertIncidentStatus.RECOVERED for incident in overview.incidents
+    ) == 20
+
+
 def test_alert_transaction_rollback_leaves_no_partial_incident(tmp_path) -> None:
     database = tmp_path / "rollback.db"
     run_migrations(database)

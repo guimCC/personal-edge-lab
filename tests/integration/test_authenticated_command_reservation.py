@@ -77,6 +77,7 @@ def test_device_lock_blocks_other_key_and_completed_result_replays(tmp_path) -> 
         repository.complete(
             first.command_id,
             CommandResult(outcome=CommandOutcome.CONFIRMED_SUCCESS, http_status=200),
+            completed_at=NOW + timedelta(seconds=1),
         )
     replay = reserve(database, "550e8400-e29b-41d4-a716-446655440001")
     assert replay.status is CommandReservationStatus.REPLAYED

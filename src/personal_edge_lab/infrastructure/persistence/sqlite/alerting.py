@@ -21,14 +21,12 @@ from personal_edge_lab.domain.telemetry import (
     CollectorRuntimeStatus,
     TemperatureReading,
 )
+from personal_edge_lab.infrastructure.persistence.sqlite.connection import open_connection
 
 
 class SqliteAlertRepository:
     def __init__(self, database_path: Path, *, timeout_seconds: float = 5.0) -> None:
-        self._connection = sqlite3.connect(database_path, timeout=timeout_seconds)
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
-        self._connection.execute("PRAGMA foreign_keys = ON")
+        self._connection = open_connection(database_path, timeout_seconds=timeout_seconds)
 
     def __enter__(self) -> SqliteAlertRepository:
         return self

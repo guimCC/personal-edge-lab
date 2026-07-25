@@ -29,10 +29,23 @@ class Repository:
         self.entries = [entry(2), entry(1)]
         self.limit: int | None = None
 
-    def begin(self, *, device_id: str, command_type: str, payload_json: str) -> int:
+    def begin(
+        self,
+        *,
+        device_id: str,
+        command_type: str,
+        payload_json: str,
+        requested_at: datetime,
+    ) -> int:
         return 1
 
-    def complete(self, command_id: int, result: CommandResult) -> None:
+    def complete(
+        self,
+        command_id: int,
+        result: CommandResult,
+        *,
+        completed_at: datetime,
+    ) -> None:
         pass
 
     def history(self, *, limit: int) -> list[CommandAuditEntry]:

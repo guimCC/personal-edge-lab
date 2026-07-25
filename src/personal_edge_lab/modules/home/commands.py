@@ -90,7 +90,7 @@ class CommandService:
         )
         if replay is not None:
             return replay
-        self._audit_repository.complete(command_id, result)
+        self._audit_repository.complete(command_id, result, completed_at=self._clock())
         return CommandExecution(command_id, command_type, payload_json, result)
 
     def _execute(
@@ -108,7 +108,7 @@ class CommandService:
         if replay is not None:
             return replay
         result = send()
-        self._audit_repository.complete(command_id, result)
+        self._audit_repository.complete(command_id, result, completed_at=self._clock())
         return CommandExecution(command_id, command_type, payload_json, result)
 
     def _start(
@@ -124,6 +124,7 @@ class CommandService:
                     device_id=self._device_id,
                     command_type=command_type,
                     payload_json=payload_json,
+                    requested_at=self._clock(),
                 ),
                 None,
             )

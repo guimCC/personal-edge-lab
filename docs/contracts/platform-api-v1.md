@@ -59,11 +59,13 @@ alert is suspect or active, or when the evaluator has never run or is older than
 - `status=active|recovered|all`, default `all`;
 - `limit` from 1 to 100, default 20.
 
-It returns current state for both alert types and newest-first incident history. Active incident
-duration is measured through the API check time; recovered duration ends at recovery. Evidence
-contains only stable categories and sanitized operator-facing text. The evaluator creates alert
-state from stored telemetry and collector status; this read route never contacts the ESP32 or
-systemd.
+It returns current state for both alert types and newest-first incident history. With `status=all`,
+all active incidents are always returned plus at most `limit` recovered incidents; `limit` can
+therefore be exceeded only by the small, bounded set of active alert types. This prevents a
+long-running active incident from being hidden by newer recovery history. Active incident duration
+is measured through the API check time; recovered duration ends at recovery. Evidence contains only
+stable categories and sanitized operator-facing text. The evaluator creates alert state from stored
+telemetry and collector status; this read route never contacts the ESP32 or systemd.
 
 ## Authenticated AC command
 

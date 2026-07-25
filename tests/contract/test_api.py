@@ -381,6 +381,7 @@ def test_ac_history_returns_structured_payload_and_pending_nulls(tmp_path) -> No
             device_id="node-1",
             command_type="power_off",
             payload_json='{"power":false}',
+            requested_at=NOW,
         )
         repository.complete(
             completed_id,
@@ -389,11 +390,13 @@ def test_ac_history_returns_structured_payload_and_pending_nulls(tmp_path) -> No
                 http_status=200,
                 response_body='{"power":false,"status":"ok"}',
             ),
+            completed_at=NOW,
         )
         repository.begin(
             device_id="node-1",
             command_type="set_state",
             payload_json='{"temperature_c":24}',
+            requested_at=NOW,
         )
 
     with TestClient(create_app(settings(database), clock=lambda: NOW)) as client:
