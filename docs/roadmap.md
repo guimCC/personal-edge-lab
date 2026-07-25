@@ -48,7 +48,7 @@ automation.
 | 0A. Deployment housekeeping | Done | Live configuration captured and reboot accepted |
 | 1. Read-only local API | Done | Stored telemetry and audit data available on the trusted LAN |
 | 2. Dashboard and service health | Done | Phone-first telemetry and operational health on RUBIK |
-| 3. Authenticated dashboard AC control | In progress | Implemented locally; guarded RUBIK acceptance pending |
+| 3. Authenticated dashboard AC control | Done | HTTPS owner access and intentional AC control accepted on RUBIK |
 | 4. Stale telemetry and availability alerts | Planned | Actionable failure and recovery notifications |
 | 5. External interfaces and automation | Later | Telegram, rules, speech, and local AI, in that order |
 
@@ -194,7 +194,7 @@ The first version has no `POST`, `PUT`, `PATCH`, or `DELETE` routes.
 
 ## Stage 3 — Authenticated AC controls in the dashboard
 
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Done
 
 **Goal:** allow intentional AC control from the dashboard without weakening existing safety
 semantics.
@@ -239,9 +239,32 @@ semantics.
 - CLI behavior remains unchanged.
 - Manual physical testing requires operator confirmation and is recorded separately.
 
+### Recorded RUBIK acceptance
+
+Stage 3 was accepted on 2026-07-25 as release `0.4.0`:
+
+- the private CA was trusted on the owner computer and iPhone, and both loaded
+  `https://rubik-edge-01.local` without bypassing certificate validation;
+- HTTP redirected to HTTPS, production docs were unavailable, protected reads required a valid
+  session, and `/health/live` remained loopback-only;
+- authentication and controls were enabled in separate guarded steps, with the command route
+  unavailable before the control feature flag was enabled;
+- the computer and iPhone each completed operator-confirmed Set State and Power Off actions; the
+  resulting dashboard audit rows were attributed to `owner` and recorded `confirmed_success`;
+- deployment probes created no command audit rows and did not contact the ESP32;
+- after a full RUBIK reboot, collector, API, Nginx, and Avahi were enabled and active with no
+  service errors;
+- SQLite passed its integrity check, migrations `001` through `003` remained applied, server-side
+  sessions survived the reboot, and telemetry resumed at approximately 15-second cadence;
+- the local AC history CLI retained its output and showed the latest dashboard command without
+  changing command behavior.
+
 ## Stage 4 — Stale telemetry and ESP32 availability alerts
 
 **Goal:** notify the operator about sustained problems without producing repetitive noise.
+
+The implementation proposal is maintained in
+[the Stage 4 alerting plan](stage-4-alerting-plan.md).
 
 ### Start with platform state, not a delivery channel
 
@@ -505,10 +528,10 @@ changed, how it was verified, decisions made, and what remains.
 - Define the Stage 3 LAN threat model, HTTPS approach, authentication/session design, CSRF
   protection, rate limiting, and command idempotency contract before adding a write route.
 
-### 2026-07-25 — Authenticated AC control implemented locally
+### 2026-07-25 — Authenticated AC control accepted on RUBIK
 
 **Stage:** 3
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Done
 
 **Delivered**
 
@@ -523,15 +546,29 @@ changed, how it was verified, decisions made, and what remains.
 
 **Verification**
 
-- 183 Python unit, integration, contract, architecture, CLI, collector, and real-process tests pass.
+- 184 Python unit, integration, contract, architecture, CLI, collector, and real-process tests pass.
 - Frontend lint, TypeScript checks, six component tests, production build, and four phone/desktop
   Playwright checks pass.
 - The `0.4.0` wheel contains the authentication app/module and hashed dashboard assets.
 - Concurrent reservation and throttle tests prove one command winner and durable lockout state.
+- The guarded disabled → HTTPS → authentication → controls rollout completed on RUBIK.
+- The owner computer and iPhone trusted the private CA and successfully used the authenticated
+  dashboard.
+- Operator-confirmed Set State and Power Off actions from both clients were attributed to `owner`,
+  audited once per accepted action, and returned `confirmed_success`.
+- Unauthenticated command probes returned `401`, disabled-route probes returned `404`, and neither
+  kind created audit records.
+- After reboot, all four services were enabled and active, SQLite returned `ok`, migrations
+  `001`–`003` remained applied, telemetry resumed at approximately 15-second cadence, and the AC
+  history CLI remained compatible.
 
-**Not yet accepted**
+**Known limitations**
 
-- The private CA still needs to be trusted on the actual owner phone and computer.
-- The guarded disabled → HTTPS → authentication → controls rollout must run on RUBIK.
-- One operator-confirmed cool command and one operator-confirmed Power Off remain required, along
-  with request-count, audit, unknown-outcome, telemetry-cadence, and reboot evidence.
+- Access remains owner-only and LAN-only; each owner device must explicitly trust the private CA.
+- The platform still has no independent physical AC-state feedback.
+- Remote access, MFA, multiple identities, alerts, Telegram, and automation remain deferred.
+
+**Next**
+
+- Implement Stage 4 durable alert evaluation and dashboard-visible incident/recovery history
+  without adding an external notification channel yet.
