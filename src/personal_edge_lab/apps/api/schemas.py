@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from personal_edge_lab.domain.ac import CommandAuditEntry, CommandOutcome
 from personal_edge_lab.domain.telemetry import TemperatureReading
@@ -105,6 +105,9 @@ class CommandAuditResponse(ApiModel):
     response_body: str | None
     error_category: str | None
     error_message: str | None
+    actor_id: str | None
+    request_source: str
+    idempotency_key: str | None
 
     @classmethod
     def from_domain(cls, entry: CommandAuditEntry) -> CommandAuditResponse:
@@ -123,6 +126,9 @@ class CommandAuditResponse(ApiModel):
             response_body=entry.response_body,
             error_category=entry.error_category,
             error_message=entry.error_message,
+            actor_id=entry.actor_id,
+            request_source=entry.request_source,
+            idempotency_key=entry.idempotency_key,
         )
 
 
@@ -212,3 +218,36 @@ class HealthResponse(ApiModel):
     telemetry: TelemetryHealthResponse
     collector: CollectorHealthResponse
     edge_node: EdgeNodeHealthResponse
+
+
+class SessionResponse(ApiModel):
+    authenticated: bool
+    auth_enabled: bool
+    controls_enabled: bool
+    actor_id: str | None = None
+    csrf_token: str | None = None
+    idle_expires_at_utc: datetime | None = None
+    absolute_expires_at_utc: datetime | None = None
+
+
+class LoginRequest(ApiModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    password: str = Field(min_length=1)
+
+
+class AcCommandRequest(ApiModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    command_type: str = Field(min_length=1)
+    state: dict[str, JsonValue] | None = None
+
+
+class AcCommandResponse(ApiModel):
+    audit: CommandAuditResponse
+    replayed: bool
+
+
+class LivenessResponse(ApiModel):
+    status: Literal["alive"] = "alive"
+    version: str

@@ -81,7 +81,7 @@ def test_health_reports_fresh_telemetry(tmp_path) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "healthy",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "checked_at_utc": "2026-07-25T14:00:00Z",
         "database": {"status": "healthy"},
         "telemetry": {
@@ -337,7 +337,9 @@ def test_database_errors_return_sanitized_503(tmp_path, monkeypatch) -> None:
     assert str(database) not in response.text
 
 
-def test_docs_and_openapi_expose_only_read_routes(tmp_path) -> None:
+def test_docs_and_openapi_expose_auth_and_read_routes_when_controls_disabled(
+    tmp_path,
+) -> None:
     database = tmp_path / "telemetry.db"
     run_migrations(database)
     with TestClient(create_app(settings(database), clock=lambda: NOW)) as client:
@@ -347,12 +349,18 @@ def test_docs_and_openapi_expose_only_read_routes(tmp_path) -> None:
     assert docs.status_code == 200
     assert set(schema["paths"]) == {
         "/health",
+        "/api/v1/auth/session",
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",
         "/api/v1/telemetry/latest",
         "/api/v1/telemetry/history",
         "/api/v1/telemetry/series",
         "/api/v1/ac/history",
     }
-    assert all(set(operations) == {"get"} for operations in schema["paths"].values())
+    assert set(schema["paths"]["/api/v1/auth/session"]) == {"get"}
+    assert set(schema["paths"]["/api/v1/auth/login"]) == {"post"}
+    assert set(schema["paths"]["/api/v1/auth/logout"]) == {"post"}
+    assert "/api/v1/ac/commands" not in schema["paths"]
 
 
 def test_dashboard_is_served_with_restrictive_headers_and_not_in_openapi(tmp_path) -> None:

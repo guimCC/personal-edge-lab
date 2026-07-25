@@ -39,6 +39,19 @@ API_VARIABLES = (
     "API_TELEMETRY_STALE_AFTER_SECONDS",
     "API_COLLECTOR_STALE_AFTER_SECONDS",
     "API_DOCS_ENABLED",
+    "PUBLIC_ORIGIN",
+    "API_AUTH_ENABLED",
+    "API_AC_CONTROL_ENABLED",
+    "AUTH_OWNER_ID",
+    "AUTH_PASSWORD_HASH_FILE",
+    "AUTH_SESSION_IDLE_SECONDS",
+    "AUTH_SESSION_ABSOLUTE_SECONDS",
+    "AUTH_LOGIN_MAX_FAILURES",
+    "AUTH_LOGIN_WINDOW_SECONDS",
+    "AUTH_LOGIN_BLOCK_SECONDS",
+    "API_AC_COMMAND_RATE_LIMIT_PER_MINUTE",
+    "AC_NODE_BASE_URL",
+    "AC_COMMAND_TIMEOUT_SECONDS",
     "DATABASE_PATH",
     "DEVICE_ID",
     "LOG_LEVEL",
@@ -110,6 +123,9 @@ def test_api_environment_defaults(monkeypatch) -> None:
     assert settings.telemetry_stale_after_seconds == 45
     assert settings.collector_stale_after_seconds == 45
     assert settings.docs_enabled is True
+    assert settings.auth_enabled is False
+    assert settings.ac_control_enabled is False
+    assert settings.public_origin == "https://rubik-edge-01.local"
     assert str(settings.database_path) == "data/telemetry.db"
     assert settings.device_id == "ac-controller-01"
     assert settings.log_level == logging.INFO
@@ -203,5 +219,72 @@ def test_invalid_api_environment_is_rejected(
 ) -> None:
     clear(monkeypatch, API_VARIABLES)
     monkeypatch.setenv(name, value)
+    with pytest.raises(ApiConfigurationError, match=message):
+        ApiSettings.from_env()
+
+
+def test_authenticated_control_requires_all_production_guards(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    clear(monkeypatch, API_VARIABLES)
+    password_hash = tmp_path / "owner-password.hash"
+    password_hash.write_text("$argon2id$test", encoding="utf-8")
+    monkeypatch.setenv("AUTH_PASSWORD_HASH_FILE", str(password_hash))
+    monkeypatch.setenv("API_AUTH_ENABLED", "true")
+    monkeypatch.setenv("API_AC_CONTROL_ENABLED", "true")
+    monkeypatch.setenv("API_DOCS_ENABLED", "false")
+
+    settings = ApiSettings.from_env()
+
+    assert settings.auth_enabled is True
+    assert settings.ac_control_enabled is True
+    assert settings.password_hash_file == password_hash
+    assert settings.session_idle_seconds == 86_400
+    assert settings.session_absolute_seconds == 604_800
+    assert settings.command_rate_limit_per_minute == 6
+
+
+@pytest.mark.parametrize(
+    ("values", "message"),
+    [
+        (
+            {
+                "API_AUTH_ENABLED": "false",
+                "API_AC_CONTROL_ENABLED": "true",
+                "API_DOCS_ENABLED": "false",
+            },
+            "require authentication",
+        ),
+        (
+            {
+                "API_AUTH_ENABLED": "true",
+                "API_AC_CONTROL_ENABLED": "true",
+                "API_DOCS_ENABLED": "true",
+            },
+            "API_DOCS_ENABLED=false",
+        ),
+        (
+            {
+                "API_AUTH_ENABLED": "true",
+                "PUBLIC_ORIGIN": "http://rubik-edge-01.local",
+            },
+            "HTTPS PUBLIC_ORIGIN",
+        ),
+    ],
+)
+def test_insecure_authenticated_control_combinations_are_rejected(
+    monkeypatch,
+    tmp_path,
+    values,
+    message,
+) -> None:
+    clear(monkeypatch, API_VARIABLES)
+    password_hash = tmp_path / "owner-password.hash"
+    password_hash.write_text("$argon2id$test", encoding="utf-8")
+    monkeypatch.setenv("AUTH_PASSWORD_HASH_FILE", str(password_hash))
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+
     with pytest.raises(ApiConfigurationError, match=message):
         ApiSettings.from_env()
