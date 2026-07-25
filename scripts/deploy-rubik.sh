@@ -364,11 +364,18 @@ for _attempt in {1..15}; do
 done
 [[ "$HEALTH_OK" == true ]] || fail "API liveness endpoint did not become available"
 
-HTTP_REDIRECT="$(
-    curl --silent --output /dev/null --write-out '%{http_code}' \
-        -H 'Host: rubik-edge-01.local' http://127.0.0.1/
-)"
-[[ "$HTTP_REDIRECT" == "308" ]] || fail "HTTP did not redirect to HTTPS"
+HTTP_REDIRECT=""
+for _attempt in {1..15}; do
+    HTTP_REDIRECT="$(
+        curl --silent --output /dev/null --write-out '%{http_code}' \
+            -H 'Host: rubik-edge-01.local' http://127.0.0.1/
+    )"
+    [[ "$HTTP_REDIRECT" == "308" ]] && break
+    sleep 1
+done
+[[ "$HTTP_REDIRECT" == "308" ]] || {
+    fail "HTTP did not redirect to HTTPS (last status: $HTTP_REDIRECT)"
+}
 
 curl --insecure --fail --silent --show-error \
     --resolve rubik-edge-01.local:443:127.0.0.1 \
