@@ -491,9 +491,9 @@ printf 'Version: %s\n' "$INSTALLED_VERSION"
 printf 'Backup: %s\n' "$DEPLOY_BACKUP"
 printf 'Dashboard: https://rubik-edge-01.local/\n'
 if [[ "$TELEGRAM_ENABLED" == "true" ]]; then
-    printf 'Telegram AC control: enabled\n'
+    printf 'Casadaqui operations bot: enabled\n'
 else
-    printf 'Telegram AC control: disabled\n'
+    printf 'Casadaqui operations bot: disabled\n'
 fi
 if [[ "${API_DOCS_ENABLED:-false}" == "true" ]]; then
     printf 'API docs: https://rubik-edge-01.local/docs\n'

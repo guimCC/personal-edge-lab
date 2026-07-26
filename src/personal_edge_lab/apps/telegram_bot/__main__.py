@@ -12,14 +12,18 @@ import httpx
 
 from personal_edge_lab import __version__
 from personal_edge_lab.apps.logging_config import configure_logging
-from personal_edge_lab.apps.telegram_bot.config import ConfigurationError, Settings
-from personal_edge_lab.apps.telegram_bot.control import (
+from personal_edge_lab.apps.telegram_bot.capabilities.ac import (
+    AcCapability,
     PanelState,
-    TelegramAcControl,
     latest_requested_state,
 )
+from personal_edge_lab.apps.telegram_bot.capabilities.status import (
+    StatusCapability,
+    TelegramStatusSnapshot,
+)
+from personal_edge_lab.apps.telegram_bot.config import ConfigurationError, Settings
+from personal_edge_lab.apps.telegram_bot.owner_bot import OwnerBot
 from personal_edge_lab.apps.telegram_bot.polling import TelegramPollingLoop
-from personal_edge_lab.apps.telegram_bot.status import TelegramStatusSnapshot
 from personal_edge_lab.domain.ac import CommandExecution, CommandRequestContext
 from personal_edge_lab.infrastructure.esp32.ac_controller import AcCommandClient
 from personal_edge_lab.infrastructure.persistence.sqlite.alert_queries import (
@@ -133,26 +137,28 @@ def main(*, stop_event: threading.Event | None = None) -> int:
                 "Connected to Telegram bot%s",
                 f" @{username}" if isinstance(username, str) else "",
             )
-            telegram.set_commands(
-                [
-                    {"command": "ac", "description": "Abrir el mando del aire"},
-                    {"command": "off", "description": "Preparar el apagado"},
-                    {"command": "status", "description": "Ver el estado de RUBIK"},
-                    {"command": "help", "description": "Mostrar ayuda de control"},
-                ]
+            status_capability = StatusCapability(
+                gateway=telegram,
+                status_provider=platform_status,
+                version=__version__,
             )
-            control = TelegramAcControl(
+            ac_capability = AcCapability(
                 gateway=telegram,
                 owner_user_id=settings.owner_user_id,
                 execute_command=execute_command,
                 state_provider=requested_state,
-                status_provider=platform_status,
                 command_rate_limit=settings.command_rate_limit_per_minute,
                 command_timeout_seconds=settings.command_timeout_seconds,
             )
+            owner_bot = OwnerBot(
+                gateway=telegram,
+                owner_user_id=settings.owner_user_id,
+                capabilities=(status_capability, ac_capability),
+            )
+            telegram.set_commands([command.as_api_payload() for command in owner_bot.commands])
             TelegramPollingLoop(
                 source=telegram,
-                handle_update=control.handle_update,
+                handle_update=owner_bot.handle_update,
                 stop_event=shutdown,
                 poll_timeout_seconds=settings.poll_timeout_seconds,
             ).run()

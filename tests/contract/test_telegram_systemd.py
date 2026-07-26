@@ -7,6 +7,7 @@ SERVICE = (PROJECT_ROOT / "deploy/systemd/personal-edge-lab-telegram-bot.service
 
 
 def test_telegram_bot_is_an_independent_hardened_network_service() -> None:
+    assert "Description=Personal Edge Lab Casadaqui owner operations bot" in SERVICE
     assert "Type=simple" in SERVICE
     assert (
         "ExecStart=/home/ubuntu/personal-edge-lab/.venv/bin/python "

@@ -39,7 +39,7 @@ class TelegramPollingLoop:
         self._offset: int | None = None
 
     def run(self) -> None:
-        LOGGER.info("Casadaqui Telegram AC bot started")
+        LOGGER.info("Casadaqui owner operations bot started")
         try:
             while not self._stop_event.is_set():
                 try:
@@ -52,7 +52,7 @@ class TelegramPollingLoop:
                     LOGGER.warning("Telegram polling interrupted: %s", error)
                     self._stop_event.wait(self._retry_delay_seconds)
         finally:
-            LOGGER.info("Casadaqui Telegram AC bot stopped")
+            LOGGER.info("Casadaqui owner operations bot stopped")
 
     def _process(self, updates: list[Mapping[str, Any]]) -> None:
         for update in updates:

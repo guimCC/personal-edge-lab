@@ -1,4 +1,4 @@
-"""Environment configuration for the Telegram AC control bot."""
+"""Environment configuration for the Casadaqui owner operations bot."""
 
 from __future__ import annotations
 

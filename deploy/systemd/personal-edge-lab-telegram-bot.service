@@ -1,5 +1,5 @@
 [Unit]
-Description=Personal Edge Lab Casadaqui Telegram AC control
+Description=Personal Edge Lab Casadaqui owner operations bot
 Wants=network-online.target
 After=network-online.target
 
@@ -32,4 +32,3 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target
-

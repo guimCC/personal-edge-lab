@@ -1,4 +1,4 @@
-"""Stateless Telegram conversation for deliberate owner-only AC control."""
+"""Owner-authorized Telegram capability for deliberate AC control."""
 
 from __future__ import annotations
 
@@ -8,14 +8,13 @@ import json
 import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
 
-from personal_edge_lab import __version__
-from personal_edge_lab.apps.telegram_bot.status import (
-    STATUS_KEYBOARD,
-    TelegramStatusSnapshot,
-    status_text,
-    status_unavailable_text,
+from personal_edge_lab.apps.telegram_bot.contracts import (
+    AuthorizedCallback,
+    AuthorizedMessage,
+    BotCommand,
+    HomeAction,
+    TelegramGateway,
 )
 from personal_edge_lab.domain.ac import (
     AcMode,
@@ -41,39 +40,11 @@ FANS = tuple(FanSpeed)
 VANES = tuple(VerticalVane)
 
 
-class TelegramGateway(Protocol):
-    def send_message(
-        self,
-        *,
-        chat_id: int,
-        text: str,
-        reply_markup: Mapping[str, object] | None = None,
-    ) -> Mapping[str, Any]: ...
-
-    def edit_message(
-        self,
-        *,
-        chat_id: int,
-        message_id: int,
-        text: str,
-        reply_markup: Mapping[str, object] | None = None,
-    ) -> None: ...
-
-    def answer_callback(
-        self,
-        *,
-        callback_query_id: str,
-        text: str | None = None,
-        show_alert: bool = False,
-    ) -> None: ...
-
-
 CommandExecutor = Callable[
     [CommandRequestContext, str, Mapping[str, object] | None],
     CommandExecution,
 ]
 StateProvider = Callable[[], "PanelState"]
-StatusProvider = Callable[[], TelegramStatusSnapshot]
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +63,26 @@ class PanelState:
         }
 
 
-class TelegramAcControl:
+class AcCapability:
+    namespace = "ac"
+    commands = (
+        BotCommand("ac", "Abrir el mando del aire"),
+        BotCommand("off", "Preparar el apagado"),
+    )
+    home_action = HomeAction("❄️ Aire acondicionado")
+    legacy_callback_actions = frozenset(
+        {
+            "noop",
+            "review_off",
+            "panel",
+            "menu_fan",
+            "menu_vane",
+            "send_set",
+            "cancel",
+            "confirm_off",
+        }
+    )
+
     def __init__(
         self,
         *,
@@ -100,7 +90,6 @@ class TelegramAcControl:
         owner_user_id: int,
         execute_command: CommandExecutor,
         state_provider: StateProvider = PanelState,
-        status_provider: StatusProvider | None = None,
         command_rate_limit: int = 6,
         command_timeout_seconds: float = 5,
     ) -> None:
@@ -108,174 +97,92 @@ class TelegramAcControl:
         self._owner_user_id = owner_user_id
         self._execute_command = execute_command
         self._state_provider = state_provider
-        self._status_provider = status_provider
         self._command_rate_limit = command_rate_limit
         self._command_timeout_seconds = command_timeout_seconds
 
-    def handle_update(self, update: Mapping[str, Any]) -> None:
-        message = update.get("message")
-        if isinstance(message, dict):
-            self._handle_message(update, message)
-            return
-        callback = update.get("callback_query")
-        if isinstance(callback, dict):
-            self._handle_callback(callback)
-
-    def _handle_message(
-        self,
-        update: Mapping[str, Any],
-        message: Mapping[str, Any],
-    ) -> None:
-        identity = _private_identity(message)
-        if identity != (self._owner_user_id, self._owner_user_id):
-            return
-        text = message.get("text")
-        if not isinstance(text, str):
-            return
-        command = text.strip().split(maxsplit=1)[0].split("@", maxsplit=1)[0].lower()
-        if command == "/ac":
-            update_id = update.get("update_id")
-            if not isinstance(update_id, int):
-                return
-            state = self._state_provider()
-            token = _idempotency_token(f"panel:{update_id}")
-            self._gateway.send_message(
-                chat_id=self._owner_user_id,
-                text=_panel_text(state),
-                reply_markup=_panel_keyboard(token, state),
+    def handle_command(self, command: str, message: AuthorizedMessage) -> None:
+        if command == "ac":
+            self._send_panel(
+                chat_id=message.chat_id,
+                token_source=f"message:{message.update_id}",
             )
             return
-        if command == "/off":
-            update_id = update.get("update_id")
-            if not isinstance(update_id, int):
-                return
-            token = _idempotency_token(f"message:{update_id}")
+        if command == "off":
+            token = _idempotency_token(f"message:{message.update_id}")
             self._gateway.send_message(
-                chat_id=self._owner_user_id,
+                chat_id=message.chat_id,
                 text=_off_review_text(),
                 reply_markup=_off_review_keyboard(token),
             )
             return
-        if command == "/status":
-            self._show_status()
-            return
-        if command in {"/start", "/help"}:
-            self._gateway.send_message(
-                chat_id=self._owner_user_id,
-                text=(
-                    "🏠 <b>Casadaqui · Control del aire</b>\n\n"
-                    "/ac — abrir el mando\n"
-                    "/off — preparar el apagado\n"
-                    "/status — ver el estado de RUBIK\n"
-                    "/help — mostrar esta ayuda\n\n"
-                    "Enviar ajuste transmite directamente la configuración visible. "
-                    "Apagar requiere una confirmación adicional."
-                ),
-            )
-            return
-        if command.startswith("/"):
-            self._gateway.send_message(
-                chat_id=self._owner_user_id,
-                text="Comando desconocido. Usa /ac para abrir el mando.",
-            )
+        raise ValueError("unsupported AC command")
 
-    def _handle_callback(self, callback: Mapping[str, Any]) -> None:
-        callback_id = callback.get("id")
-        message = callback.get("message")
-        sender = callback.get("from")
-        data = callback.get("data")
-        if (
-            not isinstance(callback_id, str)
-            or not isinstance(message, dict)
-            or not isinstance(sender, dict)
-            or not isinstance(data, str)
-        ):
-            return
-        identity = _private_identity(message, sender=sender)
-        if identity != (self._owner_user_id, self._owner_user_id):
-            self._gateway.answer_callback(
-                callback_query_id=callback_id,
-                text="Este control es privado.",
-                show_alert=True,
-            )
-            return
-        message_id = message.get("message_id")
-        if not isinstance(message_id, int):
-            return
+    def open_from_home(self, callback: AuthorizedCallback) -> None:
+        self._gateway.answer_callback(callback_query_id=callback.query_id)
+        state = self._state_provider()
+        token = _idempotency_token(f"home:{callback.query_id}")
+        self._gateway.edit_message(
+            chat_id=callback.chat_id,
+            message_id=callback.message_id,
+            text=_panel_text(state),
+            reply_markup=_panel_keyboard(token, state),
+        )
 
-        try:
-            self._dispatch_callback(callback_id, message_id, data)
-        except (ValueError, ValidationError):
-            self._gateway.answer_callback(
-                callback_query_id=callback_id,
-                text="Este control no es válido o ha caducado.",
-                show_alert=True,
-            )
-
-    def _dispatch_callback(self, callback_id: str, message_id: int, data: str) -> None:
-        if data == "noop":
-            self._gateway.answer_callback(callback_query_id=callback_id)
+    def handle_callback(self, action: str, callback: AuthorizedCallback) -> None:
+        if action == "noop":
+            self._gateway.answer_callback(callback_query_id=callback.query_id)
             return
-        if data == "refresh_status":
-            self._gateway.answer_callback(
-                callback_query_id=callback_id,
-                text="Estado actualizado",
-            )
-            self._show_status(message_id=message_id)
-            return
-        parts = data.split(":")
-        action = parts[0]
-        if action == "review_off":
+        parts = action.split(":")
+        selected_action = parts[0]
+        if selected_action == "review_off":
             if len(parts) != 5:
                 raise ValueError("invalid off review")
             token = _validated_token(parts[1])
             state = _state_from_parts(parts[2:])
-            self._gateway.answer_callback(callback_query_id=callback_id)
+            self._gateway.answer_callback(callback_query_id=callback.query_id)
             self._gateway.edit_message(
-                chat_id=self._owner_user_id,
-                message_id=message_id,
+                chat_id=callback.chat_id,
+                message_id=callback.message_id,
                 text=_off_review_text(),
                 reply_markup=_off_review_keyboard(token, state),
             )
             return
 
-        if action in {"panel", "menu_fan", "menu_vane", "send_set", "cancel"}:
+        if selected_action in {"panel", "menu_fan", "menu_vane", "send_set", "cancel"}:
             if len(parts) != 5:
                 raise ValueError("invalid control state")
             token = _validated_token(parts[1])
             state = _state_from_parts(parts[2:])
-            if action == "send_set":
+            if selected_action == "send_set":
                 self._send(
-                    callback_id=callback_id,
-                    message_id=message_id,
+                    callback=callback,
                     token=token,
                     command_type="set_state",
                     state_payload=state.as_command_payload(),
                 )
                 return
-            self._gateway.answer_callback(callback_query_id=callback_id)
-            if action in {"panel", "cancel"}:
+            self._gateway.answer_callback(callback_query_id=callback.query_id)
+            if selected_action in {"panel", "cancel"}:
                 text = _panel_text(state)
                 keyboard = _panel_keyboard(token, state)
-            elif action == "menu_fan":
+            elif selected_action == "menu_fan":
                 text = _fan_menu_text(state)
                 keyboard = _fan_menu_keyboard(token, state)
             else:
                 text = _vane_menu_text(state)
                 keyboard = _vane_menu_keyboard(token, state)
             self._gateway.edit_message(
-                chat_id=self._owner_user_id,
-                message_id=message_id,
+                chat_id=callback.chat_id,
+                message_id=callback.message_id,
                 text=text,
                 reply_markup=keyboard,
             )
             return
-        if action == "confirm_off":
+        if selected_action == "confirm_off":
             if len(parts) != 2:
                 raise ValueError("invalid off confirmation")
             self._send(
-                callback_id=callback_id,
-                message_id=message_id,
+                callback=callback,
                 token=_validated_token(parts[1]),
                 command_type="power_off",
                 state_payload=None,
@@ -283,33 +190,19 @@ class TelegramAcControl:
             return
         raise ValueError("unknown callback action")
 
-    def _show_status(self, *, message_id: int | None = None) -> None:
-        try:
-            snapshot = self._status_provider() if self._status_provider is not None else None
-        except (OSError, sqlite3.Error):
-            snapshot = None
-        text = (
-            status_text(snapshot) if snapshot is not None else status_unavailable_text(__version__)
-        )
-        if message_id is None:
-            self._gateway.send_message(
-                chat_id=self._owner_user_id,
-                text=text,
-                reply_markup=STATUS_KEYBOARD,
-            )
-            return
-        self._gateway.edit_message(
-            chat_id=self._owner_user_id,
-            message_id=message_id,
-            text=text,
-            reply_markup=STATUS_KEYBOARD,
+    def _send_panel(self, *, chat_id: int, token_source: str) -> None:
+        state = self._state_provider()
+        token = _idempotency_token(token_source)
+        self._gateway.send_message(
+            chat_id=chat_id,
+            text=_panel_text(state),
+            reply_markup=_panel_keyboard(token, state),
         )
 
     def _send(
         self,
         *,
-        callback_id: str,
-        message_id: int,
+        callback: AuthorizedCallback,
         token: str,
         command_type: str,
         state_payload: Mapping[str, object] | None,
@@ -318,12 +211,12 @@ class TelegramAcControl:
         # a required delivery gate before any physical request can begin.
         with contextlib.suppress(TelegramApiError):
             self._gateway.answer_callback(
-                callback_query_id=callback_id,
+                callback_query_id=callback.query_id,
                 text="Enviando una única orden…",
             )
         self._gateway.edit_message(
-            chat_id=self._owner_user_id,
-            message_id=message_id,
+            chat_id=callback.chat_id,
+            message_id=callback.message_id,
             text="⏳ <b>Enviando ajuste a través de RUBIK…</b>",
             reply_markup=EMPTY_KEYBOARD,
         )
@@ -356,8 +249,8 @@ class TelegramAcControl:
         else:
             text = _result_text(execution)
         self._gateway.edit_message(
-            chat_id=self._owner_user_id,
-            message_id=message_id,
+            chat_id=callback.chat_id,
+            message_id=callback.message_id,
             text=text,
             reply_markup=EMPTY_KEYBOARD,
         )
@@ -385,26 +278,6 @@ def latest_requested_state(entries: Sequence[CommandAuditEntry]) -> PanelState:
     return PanelState()
 
 
-def _private_identity(
-    message: Mapping[str, Any],
-    *,
-    sender: Mapping[str, Any] | None = None,
-) -> tuple[int, int] | None:
-    chat = message.get("chat")
-    author = sender or message.get("from")
-    if not isinstance(chat, dict) or not isinstance(author, dict):
-        return None
-    chat_id = chat.get("id")
-    user_id = author.get("id")
-    if (
-        chat.get("type") != "private"
-        or not isinstance(chat_id, int)
-        or not isinstance(user_id, int)
-    ):
-        return None
-    return user_id, chat_id
-
-
 def _state_from_parts(parts: Sequence[str]) -> PanelState:
     if len(parts) != 3:
         raise ValueError("invalid panel state")
@@ -419,7 +292,9 @@ def _state_from_parts(parts: Sequence[str]) -> PanelState:
 
 
 def _state_data(prefix: str, token: str, state: PanelState) -> str:
-    data = f"{prefix}:{token}:{state.temperature_c}:{state.fan.value}:{state.vertical_vane.value}"
+    data = (
+        f"ac:{prefix}:{token}:{state.temperature_c}:{state.fan.value}:{state.vertical_vane.value}"
+    )
     if len(data.encode("utf-8")) > 64:
         raise ValueError("Telegram callback data exceeds 64 bytes")
     return data
@@ -467,7 +342,7 @@ def _panel_keyboard(token: str, state: PanelState) -> Mapping[str, object]:
         "inline_keyboard": [
             [
                 _button("−", _state_data("panel", token, lower)),
-                _button(f"{state.temperature_c} °C", "noop", style="primary"),
+                _button(f"{state.temperature_c} °C", "ac:noop", style="primary"),
                 _button("+", _state_data("panel", token, higher)),
             ],
             [
@@ -580,7 +455,7 @@ def _off_review_keyboard(
         "inline_keyboard": [
             [
                 _button("Cancelar", _state_data("cancel", token, panel_state)),
-                _button("Confirmar apagado", f"confirm_off:{token}", style="danger"),
+                _button("Confirmar apagado", f"ac:confirm_off:{token}", style="danger"),
             ]
         ]
     }

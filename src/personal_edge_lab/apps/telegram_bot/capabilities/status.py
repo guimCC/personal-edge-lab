@@ -1,11 +1,20 @@
-"""Telegram presentation of the shared platform-health model."""
+"""Owner-authorized Telegram capability for shared platform health."""
 
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
+from personal_edge_lab.apps.telegram_bot.contracts import (
+    AuthorizedCallback,
+    AuthorizedMessage,
+    BotCommand,
+    HomeAction,
+    TelegramGateway,
+)
 from personal_edge_lab.modules.alerting import AlertStatusSummary
 from personal_edge_lab.modules.platform_status import PlatformHealth, PlatformHealthStatus
 from personal_edge_lab.modules.telemetry import (
@@ -19,7 +28,7 @@ STATUS_KEYBOARD: Final = {
         [
             {
                 "text": "↻ Actualizar",
-                "callback_data": "refresh_status",
+                "callback_data": "status:refresh",
                 "style": "primary",
             }
         ]
@@ -32,6 +41,75 @@ class TelegramStatusSnapshot:
     platform: PlatformHealth
     api_reachable: bool
     version: str
+
+
+StatusProvider = Callable[[], TelegramStatusSnapshot]
+
+
+class StatusCapability:
+    namespace = "status"
+    commands = (BotCommand("status", "Ver el estado de RUBIK"),)
+    home_action = HomeAction("🧭 Estado")
+    legacy_callback_actions = frozenset({"refresh_status"})
+
+    def __init__(
+        self,
+        *,
+        gateway: TelegramGateway,
+        status_provider: StatusProvider,
+        version: str,
+    ) -> None:
+        self._gateway = gateway
+        self._status_provider = status_provider
+        self._version = version
+
+    def handle_command(self, command: str, message: AuthorizedMessage) -> None:
+        if command != "status":
+            raise ValueError("unsupported status command")
+        self._show(chat_id=message.chat_id)
+
+    def open_from_home(self, callback: AuthorizedCallback) -> None:
+        self._gateway.answer_callback(callback_query_id=callback.query_id)
+        self._show(
+            chat_id=callback.chat_id,
+            message_id=callback.message_id,
+        )
+
+    def handle_callback(self, action: str, callback: AuthorizedCallback) -> None:
+        if action not in {"refresh", "refresh_status"}:
+            raise ValueError("unknown status callback action")
+        self._gateway.answer_callback(
+            callback_query_id=callback.query_id,
+            text="Estado actualizado",
+        )
+        self._show(
+            chat_id=callback.chat_id,
+            message_id=callback.message_id,
+        )
+
+    def _show(self, *, chat_id: int, message_id: int | None = None) -> None:
+        try:
+            snapshot = self._status_provider()
+        except (OSError, sqlite3.Error):
+            snapshot = None
+        text = (
+            status_text(snapshot)
+            if snapshot is not None
+            else status_unavailable_text(self._version)
+        )
+        if message_id is None:
+            self._gateway.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=STATUS_KEYBOARD,
+            )
+            return
+        self._gateway.edit_message(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=STATUS_KEYBOARD,
+        )
 
 
 def status_text(snapshot: TelegramStatusSnapshot) -> str:

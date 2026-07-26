@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
-from personal_edge_lab.apps.telegram_bot.control import (
+from personal_edge_lab.apps.telegram_bot.capabilities.ac import (
+    AcCapability,
     PanelState,
-    TelegramAcControl,
     latest_requested_state,
 )
-from personal_edge_lab.apps.telegram_bot.status import TelegramStatusSnapshot, status_text
+from personal_edge_lab.apps.telegram_bot.owner_bot import OwnerBot
 from personal_edge_lab.domain.ac import (
     CommandAuditEntry,
     CommandExecution,
@@ -21,19 +20,8 @@ from personal_edge_lab.domain.ac import (
     VerticalVane,
 )
 from personal_edge_lab.infrastructure.telegram.bot_api import TelegramApiError
-from personal_edge_lab.modules.alerting import AlertOverview, AlertStatusSummary
-from personal_edge_lab.modules.platform_status import PlatformHealth, PlatformHealthStatus
-from personal_edge_lab.modules.telemetry import (
-    CollectorHealth,
-    CollectorHealthStatus,
-    EdgeNodeHealth,
-    EdgeNodeHealthStatus,
-    TelemetryFreshness,
-    TelemetryHealth,
-)
 
 OWNER_ID = 112233
-NOW = datetime(2026, 7, 26, 1, 30, tzinfo=UTC)
 
 
 class FakeGateway:
@@ -111,87 +99,30 @@ def keyboard_callback(payload: dict[str, Any], row: int, column: int = 0) -> str
     return str(markup["inline_keyboard"][row][column]["callback_data"])
 
 
-def healthy_status() -> TelegramStatusSnapshot:
-    return TelegramStatusSnapshot(
-        api_reachable=True,
-        version="0.7.1",
-        platform=PlatformHealth(
-            status=PlatformHealthStatus.HEALTHY,
-            checked_at=NOW,
-            telemetry=TelemetryHealth(
-                status=TelemetryFreshness.FRESH,
-                device_id="ac-controller-01",
-                last_received_at=NOW - timedelta(seconds=8),
-                age_seconds=8,
-                stale_after_seconds=45,
-            ),
-            collector=CollectorHealth(
-                status=CollectorHealthStatus.RUNNING,
-                device_id="ac-controller-01",
-                process_started_at=NOW - timedelta(days=1),
-                heartbeat_at=NOW - timedelta(seconds=8),
-                heartbeat_age_seconds=8,
-                stale_after_seconds=45,
-                stopped_at=None,
-                last_attempt_at=NOW - timedelta(seconds=8),
-                last_success_at=NOW - timedelta(seconds=8),
-                consecutive_failures=0,
-            ),
-            edge_node=EdgeNodeHealth(
-                status=EdgeNodeHealthStatus.REACHABLE,
-                device_id="ac-controller-01",
-                last_attempt_at=NOW - timedelta(seconds=8),
-                last_success_at=NOW - timedelta(seconds=8),
-                last_failure_at=None,
-                last_failure_category=None,
-                last_failure_message=None,
-            ),
-            alerts=AlertOverview(
-                device_id="ac-controller-01",
-                status=AlertStatusSummary.HEALTHY,
-                active_count=0,
-                suspect_count=0,
-                latest_transition_at=None,
-                evaluator_last_run_at=NOW - timedelta(seconds=10),
-                evaluator_age_seconds=10,
-                states=(),
-                incidents=(),
-                limit=1,
-            ),
-        ),
-    )
-
-
-def test_only_the_configured_private_owner_can_open_controls() -> None:
-    gateway = FakeGateway()
-    executor = RecordingExecutor()
-    control = TelegramAcControl(
+def ac_bot(
+    *,
+    gateway: FakeGateway,
+    owner_user_id: int,
+    execute_command: RecordingExecutor,
+    state_provider: Any = PanelState,
+) -> OwnerBot:
+    capability = AcCapability(
         gateway=gateway,
-        owner_user_id=OWNER_ID,
-        execute_command=executor,
+        owner_user_id=owner_user_id,
+        execute_command=execute_command,
+        state_provider=state_provider,
     )
-
-    control.handle_update(message_update("/ac", user_id=999))
-    control.handle_update(message_update("/status", user_id=999, update_id=2))
-    control.handle_update(
-        {
-            "update_id": 3,
-            "message": {
-                "text": "/status",
-                "from": {"id": OWNER_ID},
-                "chat": {"id": -1001, "type": "group"},
-            },
-        }
+    return OwnerBot(
+        gateway=gateway,
+        owner_user_id=owner_user_id,
+        capabilities=(capability,),
     )
-
-    assert gateway.sent == []
-    assert executor.calls == []
 
 
 def test_panel_callbacks_are_bounded_and_do_not_send_a_command() -> None:
     gateway = FakeGateway()
     executor = RecordingExecutor()
-    control = TelegramAcControl(
+    control = ac_bot(
         gateway=gateway,
         owner_user_id=OWNER_ID,
         execute_command=executor,
@@ -207,13 +138,29 @@ def test_panel_callbacks_are_bounded_and_do_not_send_a_command() -> None:
     assert buttons[0][1]["style"] == "primary"
     assert buttons[3][0]["style"] == "success"
     assert buttons[4][0]["style"] == "danger"
+    assert all(
+        button["callback_data"] == "ac:noop" or button["callback_data"].startswith("ac:")
+        for row in buttons
+        for button in row
+    )
+
+    control.handle_update(callback_update(keyboard_callback(gateway.sent[0], 1)))
+    fan_buttons = gateway.edited[-1]["reply_markup"]["inline_keyboard"]
+    control.handle_update(callback_update(keyboard_callback(gateway.sent[0], 2)))
+    vane_buttons = gateway.edited[-1]["reply_markup"]["inline_keyboard"]
+    assert all(
+        1 <= len(button["callback_data"].encode()) <= 64
+        for keyboard in (fan_buttons, vane_buttons)
+        for row in keyboard
+        for button in row
+    )
     assert executor.calls == []
 
 
 def test_submenu_selection_returns_to_panel_without_sending() -> None:
     gateway = FakeGateway()
     executor = RecordingExecutor()
-    control = TelegramAcControl(
+    control = ac_bot(
         gateway=gateway,
         owner_user_id=OWNER_ID,
         execute_command=executor,
@@ -234,107 +181,33 @@ def test_submenu_selection_returns_to_panel_without_sending() -> None:
     assert "Frío · Bajo · Baja" in gateway.edited[-1]["text"]
 
 
-def test_status_shows_shared_operational_health_and_refreshes_in_place() -> None:
+def test_home_opens_ac_panel_and_legacy_callbacks_remain_compatible() -> None:
     gateway = FakeGateway()
     executor = RecordingExecutor()
-    calls = 0
-
-    def status_provider() -> TelegramStatusSnapshot:
-        nonlocal calls
-        calls += 1
-        return healthy_status()
-
-    control = TelegramAcControl(
+    bot = ac_bot(
         gateway=gateway,
         owner_user_id=OWNER_ID,
         execute_command=executor,
-        status_provider=status_provider,
     )
 
-    control.handle_update(message_update("/status"))
+    bot.handle_update(message_update("/start"))
+    home_action = keyboard_callback(gateway.sent[-1], 0)
+    bot.handle_update(callback_update(home_action))
 
-    assert calls == 1
-    assert "<b>API</b> · disponible" in gateway.sent[-1]["text"]
-    assert "<b>Colector</b> · activo · 8 s" in gateway.sent[-1]["text"]
-    assert "<b>ESP32</b> · accesible · 8 s" in gateway.sent[-1]["text"]
-    assert "<b>Telemetría</b> · fresca · 8 s" in gateway.sent[-1]["text"]
-    assert "<b>Alertas</b> · normal · 10 s" in gateway.sent[-1]["text"]
-    assert "<b>Estado general · OPERATIVO</b>" in gateway.sent[-1]["text"]
-    refresh = keyboard_callback(gateway.sent[-1], 0)
+    assert "AIRE ACONDICIONADO" in gateway.edited[-1]["text"]
+    namespaced_lower = keyboard_callback(gateway.edited[-1], 0)
+    legacy_lower = namespaced_lower.removeprefix("ac:")
 
-    control.handle_update(callback_update(refresh))
+    bot.handle_update(callback_update(legacy_lower))
 
-    assert calls == 2
-    assert gateway.edited[-1]["message_id"] == 10
-    assert gateway.answered[-1]["text"] == "Estado actualizado"
-    assert executor.calls == []
-
-
-def test_status_distinguishes_each_degraded_component() -> None:
-    healthy = healthy_status()
-    degraded = TelegramStatusSnapshot(
-        api_reachable=False,
-        version=healthy.version,
-        platform=replace(
-            healthy.platform,
-            status=PlatformHealthStatus.DEGRADED,
-            telemetry=replace(
-                healthy.platform.telemetry,
-                status=TelemetryFreshness.STALE,
-                age_seconds=75,
-            ),
-            collector=replace(
-                healthy.platform.collector,
-                status=CollectorHealthStatus.STALE,
-                heartbeat_age_seconds=75,
-            ),
-            edge_node=replace(
-                healthy.platform.edge_node,
-                status=EdgeNodeHealthStatus.UNREACHABLE,
-            ),
-            alerts=replace(
-                healthy.platform.alerts,
-                status=AlertStatusSummary.ALERTING,
-                active_count=2,
-            ),
-        ),
-    )
-
-    text = status_text(degraded)
-
-    assert "<b>API</b> · no responde" in text
-    assert "<b>Colector</b> · sin pulso reciente · 1 min" in text
-    assert "<b>ESP32</b> · no disponible" in text
-    assert "<b>Telemetría</b> · atrasada · 1 min" in text
-    assert "<b>Alertas</b> · 2 incidencias activas" in text
-    assert "<b>Estado general · DEGRADADO</b>" in text
-
-
-def test_status_database_failure_is_sanitized_and_does_not_send_a_command() -> None:
-    gateway = FakeGateway()
-    executor = RecordingExecutor()
-
-    def unavailable_status() -> TelegramStatusSnapshot:
-        raise OSError("sensitive local database detail")
-
-    control = TelegramAcControl(
-        gateway=gateway,
-        owner_user_id=OWNER_ID,
-        execute_command=executor,
-        status_provider=unavailable_status,
-    )
-
-    control.handle_update(message_update("/status"))
-
-    assert "<b>ESTADO NO DISPONIBLE</b>" in gateway.sent[-1]["text"]
-    assert "sensitive" not in gateway.sent[-1]["text"]
+    assert "<b>23 °C</b>" in gateway.edited[-1]["text"]
     assert executor.calls == []
 
 
 def test_send_state_reuses_panel_idempotency_key_without_a_review_screen() -> None:
     gateway = FakeGateway()
     executor = RecordingExecutor()
-    control = TelegramAcControl(
+    control = ac_bot(
         gateway=gateway,
         owner_user_id=OWNER_ID,
         execute_command=executor,
@@ -366,7 +239,7 @@ def test_send_state_reuses_panel_idempotency_key_without_a_review_screen() -> No
 def test_off_shortcut_only_transmits_after_confirmation() -> None:
     gateway = FakeGateway()
     executor = RecordingExecutor()
-    control = TelegramAcControl(
+    control = ac_bot(
         gateway=gateway,
         owner_user_id=OWNER_ID,
         execute_command=executor,
@@ -385,7 +258,7 @@ def test_off_shortcut_only_transmits_after_confirmation() -> None:
 def test_expired_callback_answer_can_still_replay_through_a_successful_message_edit() -> None:
     gateway = ExpiredCallbackGateway()
     executor = RecordingExecutor()
-    control = TelegramAcControl(
+    control = ac_bot(
         gateway=gateway,
         owner_user_id=OWNER_ID,
         execute_command=executor,

@@ -1,1 +1,1 @@
-"""Owner-only Telegram AC control app."""
+"""Owner-only Telegram operations interface."""
