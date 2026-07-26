@@ -40,8 +40,9 @@ apps -> application/ports <- infrastructure
 - `apps/auth_cli` manages the owner Argon2id hash and session revocation locally.
 - `apps/alert_evaluator` is the one-shot composition root scheduled by systemd every 30 seconds.
   It has no network adapter and records evaluator health independently from the collector and API.
-- `apps/telegram_bot` is an independent long-polling delivery adapter. It authorizes one numeric
-  owner identity in a private chat and composes the existing cool-only AC command use case.
+- `apps/telegram_bot` is an independent long-polling owner interface. `OwnerBot` centralizes
+  authorization and routes to explicitly registered status and AC capabilities; each capability
+  composes its own application use cases.
 - `apps/telegram_cli` validates and stores the bot token and discovers the numeric owner identity
   without placing either operation in the dashboard.
 
@@ -94,8 +95,17 @@ token, seven-day absolute expiry, and 24-hour idle expiry. Password verification
 hash stored outside SQLite. Expired device leases are recovered as an unknown physical outcome and
 are never resent automatically.
 
-Telegram controls use the same reservation path without pretending that browser cookies apply to
-another channel:
+Casadaqui separates channel authorization and navigation from capability behavior:
+
+```text
+private owner -> OwnerBot -> home/status capability -> GetPlatformHealth
+                          \-> AC capability -> CommandService -> SQLite -> one ESP32 request
+```
+
+The capability registry is explicit in the composition root. It generates the native command
+list and home menu, validates unique commands and callback namespaces, and does not dynamically
+discover plugins. Telegram controls use the same reservation path without pretending that browser
+cookies apply to another channel:
 
 ```text
 private Telegram user -> normalized inline panel -> Enviar ajuste
@@ -204,8 +214,9 @@ process lifecycle or presentation. Business rules should remain reusable outside
 
 Future slices may introduce Telegram alert delivery, speech, email, a task worker, multiple
 identities and permissions, and worker registration. They should reuse domain models and use cases
-through ports. Telegram AC control is the first external delivery adapter; it deliberately does
-not yet deliver monitoring data or operational alerts.
+through ports. Casadaqui is the first external operations adapter: it exposes concise status and
+AC capabilities, but deliberately does not expose detailed histories or operational-alert
+delivery.
 No empty placeholder packages exist for these ideas. A package is added only with its first
 end-to-end behavior and tests.
 

@@ -524,9 +524,9 @@ Restore the retained `0.4.0` wheel, previous `.env`, API unit, and any prior pro
 then restart only affected services. Migration `004` may remain because `0.4.0` ignores its
 additive tables. Restore SQLite only if integrity evidence proves actual corruption.
 
-## Stage 5A Casadaqui Telegram AC control rollout
+## Stage 5A Casadaqui owner operations rollout
 
-Deploy `0.7.1` once with Telegram disabled so the package and administration CLI exist:
+Deploy `0.7.2` once with Telegram disabled so the package and administration CLI exist:
 
 ```dotenv
 TELEGRAM_BOT_ENABLED=false
@@ -562,11 +562,13 @@ systemctl status personal-edge-lab-telegram-bot.service --no-pager
 journalctl -u personal-edge-lab-telegram-bot.service -n 50 --no-pager
 ```
 
-This enables an internet-mediated control channel even though the dashboard remains LAN-only.
+This enables an internet-mediated owner operations channel even though the dashboard remains
+LAN-only.
 Before enabling it, protect the owner Telegram account with 2-Step Verification and an app
 passcode. Never send the bot token, dashboard password, or Telegram login code through the bot.
 
-Open `/ac` and exercise temperature adjustments plus the fan and vane submenus first. These edits
+Open `/start` and confirm the Status and Air conditioning capability menu. Open `/ac` and exercise
+temperature adjustments plus the fan and vane submenus first. These edits
 must add no AC audit row. **Enviar ajuste** sends the normalized settings shown in the panel
 directly; Power Off retains a separate confirmation. The first Set State send and Power Off
 confirmation are physical acceptance actions and remain under explicit operator control. Inspect
@@ -582,12 +584,13 @@ Open `/status` and confirm the API, collector, ESP32, telemetry, alerts, and Tel
 with the authenticated dashboard. Press **Actualizar** and confirm the same Telegram message is
 edited without creating an AC audit row or changing collector cadence.
 
-After testing update replay/double taps and an unavailable controller, reboot and verify the bot
-starts independently. Roll back the channel without touching telemetry or the API:
+Exercise one callback from a message created before `0.7.2` and confirm it remains valid. After
+testing update replay/double taps and an unavailable controller, reboot and verify the bot starts
+independently. Roll back the channel without touching telemetry or the API:
 
 ```bash
 sudo systemctl disable --now personal-edge-lab-telegram-bot.service
 ```
 
-Restore the previous wheel and `.env` only if the complete release must be rolled back. Stage 5A
+Restore the `0.7.1` wheel and restart only the bot if the refactor must be rolled back. Stage 5A
 adds no migration; existing Telegram audit rows are valid command history and should remain.

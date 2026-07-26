@@ -52,7 +52,7 @@ automation.
 | 4. Stale telemetry and availability alerts | Done | Durable failure and recovery incidents accepted on RUBIK |
 | 4.5. Platform consolidation | Implemented | Backend boundaries and automated quality gates ready for RUBIK acceptance |
 | 4.6. Modular lab console | Done | Extensible frontend shell with Climate as its first module |
-| 5A. Telegram AC control | Implemented | Owner-only deliberate AC control through Casadaqui |
+| 5A. Casadaqui operations | Implemented | Modular owner-only status and deliberate AC control |
 | 5B–D. Automation, speech, local AI | Later | Separate bounded slices after Telegram acceptance |
 
 `Planned` does not mean committed scope. Before each stage starts, its open decisions are resolved
@@ -395,12 +395,15 @@ These are separate later slices, not one large project.
 
 ### 5A. Telegram
 
-**Status:** Accepted on RUBIK as `0.7.0`; native interaction refinement prepared as `0.7.1`.
+**Status:** AC control and status accepted on RUBIK; modular owner-interface refactor prepared as
+`0.7.2`.
 
 The initial Telegram slice deliberately focuses on AC control because the dashboard already owns
-monitoring. Casadaqui is an independent long-polling service with:
+monitoring. In `0.7.2`, Casadaqui becomes an independent modular owner interface with:
 
 - one immutable numeric owner user ID and private-chat-only authorization;
+- a central `OwnerBot` router and explicit capability registry;
+- a general `/start` and `/help` menu for Status and Air conditioning;
 - `/ac` for a stateless Cool-mode temperature panel with fan and vane submenus;
 - `/off` as a shortcut to a Power Off review;
 - `/status` for the shared read-only API/collector/ESP32/telemetry/alerts snapshot;
@@ -411,6 +414,10 @@ monitoring. Casadaqui is an independent long-polling service with:
 - explicit unknown-outcome language and no automatic physical retries;
 - a token-safe local administration CLI and a mode-`0600` token file;
 - an independently restartable, hardened systemd service.
+
+New callbacks are namespaced by `home`, `status`, or `ac`; `0.7.2` also accepts the prior callback
+forms so messages opened before deployment remain usable. Future capabilities are registered
+explicitly and invoke their own use cases rather than inheriting AC command policy.
 
 Detailed monitoring/history queries, alert delivery, notification acknowledgement, groups,
 multiple Telegram users, webhooks, and remote dashboard exposure remain later slices. See

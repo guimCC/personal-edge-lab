@@ -76,7 +76,7 @@ Each accepted command makes exactly one HTTP attempt and is audited. There are n
 retries. A timeout is `timeout_unknown` because the ESP32 may already have transmitted IR. An
 HTTP 200 confirms accepted transmission, not the physical state of the AC.
 
-The owner-only Casadaqui Telegram bot is a second control adapter over the same command use case:
+The owner-only Casadaqui Telegram bot is the platform's concise operations interface:
 
 ```bash
 python -m personal_edge_lab.apps.telegram_cli set-token
@@ -84,7 +84,12 @@ python -m personal_edge_lab.apps.telegram_cli discover-owner
 python -m personal_edge_lab.apps.telegram_bot
 ```
 
-`/ac` opens an inline Cool-mode control panel with separate fan and vane submenus. Adjustments only
+`/start` and `/help` open a capability menu for platform status and air conditioning. The bot
+centralizes private-owner authorization and routes each interaction to an explicit capability;
+future capabilities can reuse the same channel without inheriting AC-specific rules.
+
+The AC capability's `/ac` command opens an inline Cool-mode control panel with separate fan and
+vane submenus. Adjustments only
 edit that Telegram message; the visible normalized settings are sent when the owner presses
 **Enviar ajuste**. `/off` retains a separate confirmation because it is easier to trigger
 accidentally. Telegram is authorized by the immutable numeric owner user ID in a private chat;
@@ -96,8 +101,8 @@ telemetry, alert evaluator, and Telegram connection in one message. Its **Actual
 the message in place and never contacts the ESP32 or creates an AC audit row.
 
 The token is stored separately in a mode-`0600` file and is suppressed from HTTP logs.
-The dashboard remains LAN-only, while Telegram control is internet-mediated and therefore requires
-2-Step Verification and an app passcode on the owner's Telegram account.
+The dashboard remains LAN-only, while Casadaqui is internet-mediated and therefore requires 2-Step
+Verification and an app passcode on the owner's Telegram account.
 
 Exit codes remain:
 

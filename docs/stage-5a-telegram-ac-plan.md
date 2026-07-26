@@ -1,20 +1,26 @@
-# Stage 5A — Casadaqui Telegram AC control
+# Stage 5A — Casadaqui owner operations interface
 
 ## Outcome
 
 Release `0.7.0` added an owner-only Telegram control surface for the air conditioner. Release
 `0.7.1` refines its native interaction without changing the command or security architecture. It
-is a delivery adapter over the existing AC command use case, not another controller implementation
-and not another monitoring dashboard.
+also adds concise platform status. Release `0.7.2` separates channel routing from explicit AC and
+Status capabilities, making Casadaqui an operations interface rather than another controller
+implementation or monitoring dashboard.
 
-The first conversation supports:
+The current interface supports:
 
+- `/start` and `/help`: open the general capability menu;
 - `/ac`: open a Cool-mode temperature panel with fan and vertical-vane submenus;
 - `/off`: open a Power Off review directly;
 - `/status`: show the shared operational-health snapshot and refresh it in place;
-- `/help`: explain the bounded command surface;
 - one explicit **Enviar ajuste** action from the normalized Set State panel;
 - a separate confirmation before Power Off.
+
+`OwnerBot` is the only component that parses raw updates and authorizes the private owner.
+Capabilities receive typed authorized interactions. The explicit registry generates Telegram's
+native command list, validates unique commands and callback namespaces, and contains no dynamic
+plugin discovery.
 
 It excludes detailed monitoring/history queries, alert notifications, multiple users, groups,
 webhooks, natural language, automation, and physical-state inference.
@@ -34,6 +40,8 @@ Verification and a local app passcode before remote physical control is enabled.
   from Git, and never included in application error text or HTTP logs.
 - Telegram callbacks are treated as untrusted input and fully parsed and validated.
 - Callback data remains within Telegram's 64-byte limit.
+- New callback data is namespaced with `home:`, `status:`, or `ac:`. Version `0.7.2` also accepts
+  the callback forms emitted by `0.7.1`.
 - Opening a panel creates a deterministic 20-character token that becomes a channel-scoped idempotency
   key. Selection callbacks preserve it, and update redelivery or repeated send taps retrieve the
   original audit result.
@@ -62,7 +70,7 @@ redeliver the update, but the same stable panel key safely replays the durable r
 
 ## RUBIK provisioning
 
-After installing `0.7.1` with the bot disabled:
+After installing `0.7.2` with the bot disabled:
 
 ```bash
 set -a
@@ -94,8 +102,8 @@ unit, and starts the service.
 
 1. Confirm the service remains active and logs identify `@Casadaqui_bot` without printing its
    token.
-2. Confirm `/start`, `/help`, `/ac`, `/status`, temperature adjustments, fan/vane submenus, and
-   `/off` review work.
+2. Confirm `/start` and `/help` show Status and Air conditioning, then verify `/ac`, `/status`,
+   temperature adjustments, fan/vane submenus, and `/off`.
 3. Confirm another Telegram account and a group cannot open or operate the controls.
 4. Exercise every Set State selector without pressing **Enviar ajuste**, then cancel one Power Off
    review; neither may create an audit row.
@@ -106,11 +114,12 @@ unit, and starts the service.
 7. Confirm one Power Off request under operator control with the same evidence.
 8. Exercise an unavailable ESP32 and an unknown response without automatic retransmission.
 9. Refresh `/status`, compare every line with the dashboard, and verify it creates no AC audit row.
-10. Verify dashboard controls, CLI output, telemetry cadence, alert evaluation, and HTTPS remain
+10. Exercise one namespaced callback and one callback copied from a `0.7.1` message.
+11. Verify dashboard controls, CLI output, telemetry cadence, alert evaluation, and HTTPS remain
     unchanged.
-11. Reboot RUBIK and verify the bot, collector, API, alert timer, Nginx, and Avahi start
+12. Reboot RUBIK and verify the bot, collector, API, alert timer, Nginx, and Avahi start
     independently.
 
-Rollback disables and stops `personal-edge-lab-telegram-bot.service`, restores the prior wheel and
-`.env`, and leaves the new Telegram-attributed audit rows intact. No migration or database restore
-is required because Stage 5A adds no schema.
+Rollback restores the `0.7.1` wheel and restarts only
+`personal-edge-lab-telegram-bot.service`. Existing Telegram-attributed audit rows remain intact;
+no migration or database restore is required.
