@@ -52,8 +52,9 @@ automation.
 | 4. Stale telemetry and availability alerts | Done | Durable failure and recovery incidents accepted on RUBIK |
 | 4.5. Platform consolidation | Implemented | Backend boundaries and automated quality gates ready for RUBIK acceptance |
 | 4.6. Modular lab console | Done | Extensible frontend shell with Climate as its first module |
-| 5A. Casadaqui operations | Implemented | Modular owner-only status and deliberate AC control |
-| 5B–D. Automation, speech, local AI | Later | Separate bounded slices after Telegram acceptance |
+| 5A. Casadaqui operations | Done | Modular owner-only status and deliberate AC control |
+| 5B. Proactive Telegram alerts | Implemented | Durable failure/recovery delivery with owner pause policy |
+| 6A. Local-AI email triage | Next | Read-only, evaluated categorization before mailbox actions |
 
 `Planned` does not mean committed scope. Before each stage starts, its open decisions are resolved
 and its acceptance criteria become the implementation checklist.
@@ -419,26 +420,49 @@ New callbacks are namespaced by `home`, `status`, or `ac`; `0.7.2` also accepts 
 forms so messages opened before deployment remain usable. Future capabilities are registered
 explicitly and invoke their own use cases rather than inheriting AC command policy.
 
-Detailed monitoring/history queries, alert delivery, notification acknowledgement, groups,
-multiple Telegram users, webhooks, and remote dashboard exposure remain later slices. See
+Detailed monitoring/history queries, notification acknowledgement, groups, multiple Telegram
+users, webhooks, and remote dashboard exposure remain later slices. See
 [the Stage 5A implementation and acceptance plan](stage-5a-telegram-ac-plan.md).
 
-### 5B. Automation rules
+### 5B. Proactive Telegram alerts
+
+**Status:** Implemented locally as `0.8.0`; pending guarded RUBIK acceptance.
+
+Confirmed `alerting` and `recovered` transitions create an outbound Telegram delivery atomically
+with the transition. The existing Casadaqui service drains the SQLite outbox; the evaluator keeps
+its no-network hardening. Delivery uses leases, bounded backoff, Telegram `Retry-After`, a 24-hour
+maximum age, and sanitized runtime status.
+
+The owner can use `/notifications` to pause operational alerts for one hour, eight hours, until
+08:00 the following day, or indefinitely. Pausing suppresses pending and future alerts without
+stopping evaluation and without replaying old messages on resume. Rapid repeated transitions are
+coalesced into a delayed instability message.
+
+See [the Stage 5B implementation and acceptance plan](stage-5b-telegram-alerts-plan.md).
+
+### 5C. Automation rules
 
 Begin with one concrete rule and a dry-run/audit mode. Automation must account for the lack of
 physical AC state feedback and must never interpret `timeout_unknown` as confirmed failure or
 success. Add scheduling, cooldowns, conflict handling, and a kill switch before unattended control.
 
-### 5C. Speech
+### 5D. Speech
 
 Speech is another interface to existing use cases, not a new control implementation. Commands that
 change physical state require spoken-back normalization and confirmation.
 
-### 5D. Local AI
+## Stage 6 — Local AI
 
-Use local AI first for explanations, summaries, anomaly exploration, or suggested actions. Keep
-physical actions behind deterministic validation, authorization, confirmation, and audit. Model
-output alone must not bypass a use case or directly call an ESP32 adapter.
+### 6A. Read-only email triage
+
+Start with a bounded mailbox batch and fixed, owner-defined categories. A local model may recommend
+classification only: it cannot send, delete, archive, label, or otherwise mutate email. Validate
+structured output, measure it against a small manually labelled set, and benchmark actual RUBIK
+latency/memory before choosing a model. Email credentials and retrieval stay outside the model.
+
+This work receives its own persistent task lifecycle; the notification outbox is not reused as a
+generic AI queue. Casadaqui may later start a triage task and present its result through a separate
+capability.
 
 ## Definition of done for every stage
 

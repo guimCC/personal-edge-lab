@@ -594,3 +594,46 @@ sudo systemctl disable --now personal-edge-lab-telegram-bot.service
 
 Restore the `0.7.1` wheel and restart only the bot if the refactor must be rolled back. Stage 5A
 adds no migration; existing Telegram audit rows are valid command history and should remain.
+
+## Stage 5B proactive Telegram alert rollout
+
+First deploy `0.8.0` with delivery disabled:
+
+```dotenv
+TELEGRAM_NOTIFICATION_DELIVERY_ENABLED=false
+TELEGRAM_NOTIFICATION_BATCH_SIZE=20
+TELEGRAM_NOTIFICATION_LEASE_SECONDS=60
+TELEGRAM_NOTIFICATION_MAX_AGE_SECONDS=86400
+TELEGRAM_NOTIFICATION_RUNTIME_STALE_AFTER_SECONDS=90
+OWNER_TIMEZONE=Europe/Madrid
+```
+
+```bash
+./scripts/deploy-rubik.sh
+sqlite3 data/telemetry.db \
+  'SELECT version FROM schema_migrations WHERE version = "005_notification_outbox";'
+```
+
+After confirming the additive migration, set
+`TELEGRAM_NOTIFICATION_DELIVERY_ENABLED=true` and deploy again. Casadaqui performs the delivery
+cycle before each long poll; no additional service is installed.
+
+```bash
+./scripts/deploy-rubik.sh
+journalctl -u personal-edge-lab-telegram-bot.service -n 100 --no-pager
+sqlite3 -header -column data/telemetry.db \
+  'SELECT status, COUNT(*) FROM notification_outbox GROUP BY status;'
+```
+
+Open `/notifications`, test a one-hour pause, reactivate it, and confirm `/status` reports
+notification delivery as operational. Under controlled conditions, create one sustained telemetry
+incident and one recovery. Each notifiable transition must have one outbox row and one Telegram
+message; no AC audit or physical request may appear.
+
+During a temporary Telegram outage, confirm the row remains pending with a sanitized error and a
+future `next_attempt_at_utc`. Restore connectivity and confirm eventual delivery while `/status`
+and `/ac` remain responsive. Reboot RUBIK and confirm policy, pending rows, and delivery runtime
+survive.
+
+To roll back, set `TELEGRAM_NOTIFICATION_DELIVERY_ENABLED=false`, reinstall `0.7.2`, and restart
+Casadaqui plus the evaluator if the package changed. Migration `005` is additive and may remain.

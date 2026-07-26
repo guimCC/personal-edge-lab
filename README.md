@@ -84,7 +84,8 @@ python -m personal_edge_lab.apps.telegram_cli discover-owner
 python -m personal_edge_lab.apps.telegram_bot
 ```
 
-`/start` and `/help` open a capability menu for platform status and air conditioning. The bot
+`/start` and `/help` open a capability menu for platform status, air conditioning, and notification
+policy. The bot
 centralizes private-owner authorization and routes each interaction to an explicit capability;
 future capabilities can reuse the same channel without inheriting AC-specific rules.
 
@@ -97,8 +98,16 @@ groups and other users are ignored. Transmissions use the same durable audit, ra
 per-device lease, idempotency, and unknown-outcome rules as the dashboard.
 
 `/status` is read-only. It reuses the platform-health use case to show the API, collector, ESP32,
-telemetry, alert evaluator, and Telegram connection in one message. Its **Actualizar** button edits
-the message in place and never contacts the ESP32 or creates an AC audit row.
+telemetry, alert evaluator, durable notification delivery, and Telegram connection in one message.
+Its **Actualizar** button edits the message in place and never contacts the ESP32 or creates an AC
+audit row.
+
+Confirmed alert and recovery transitions are atomically placed in a SQLite outbox and delivered by
+the existing Casadaqui process. `/notifications` can pause them for one hour, eight hours, until
+08:00 the next day in the owner's timezone, or indefinitely. Pausing never stops evaluation and
+never queues a backlog for later delivery. Repeated flapping is coalesced into a bounded instability
+message. Telegram delivery may retry because it is informational; physical AC requests retain their
+strict no-retry rule.
 
 The token is stored separately in a mode-`0600` file and is suppressed from HTTP logs.
 The dashboard remains LAN-only, while Casadaqui is internet-mediated and therefore requires 2-Step
@@ -164,6 +173,8 @@ It creates `schema_migrations` and recognizes the existing telemetry/audit schem
 `002_collector_runtime_status` adds operational status. `003_authenticated_control` adds sessions,
 durable login throttling, audit attribution/idempotency, and a leased web-command lock.
 `004_operational_alerts` adds evaluator runtime, alert states, incidents, and transition events.
+`005_notification_outbox` adds atomic outbound delivery, owner pause policy, retry leases, and
+delivery runtime.
 Existing telemetry and audit rows stay in place. SQLite uses one `data/telemetry.db`; there is no
 ORM or second database process.
 

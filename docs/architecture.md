@@ -26,6 +26,8 @@ apps -> application/ports <- infrastructure
   rotation semantics without importing FastAPI or SQLite.
 - `modules/alerting` evaluates stored operational evidence into durable alert transitions and
   exposes bounded alert queries without importing FastAPI, systemd, or SQLite.
+- `modules/notifications` owns durable delivery, retry, expiry, and owner pause semantics without
+  importing Telegram or SQLite.
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
 - `infrastructure/telegram` implements the narrow Bot API transport and never exposes the bot
   token through its public errors.
@@ -41,8 +43,8 @@ apps -> application/ports <- infrastructure
 - `apps/alert_evaluator` is the one-shot composition root scheduled by systemd every 30 seconds.
   It has no network adapter and records evaluator health independently from the collector and API.
 - `apps/telegram_bot` is an independent long-polling owner interface. `OwnerBot` centralizes
-  authorization and routes to explicitly registered status and AC capabilities; each capability
-  composes its own application use cases.
+  authorization and routes to explicitly registered status, AC, and notification-policy
+  capabilities. The same process drains proactive deliveries before each long poll.
 - `apps/telegram_cli` validates and stores the bot token and discovers the numeric owner identity
   without placing either operation in the dashboard.
 
@@ -100,6 +102,7 @@ Casadaqui separates channel authorization and navigation from capability behavio
 ```text
 private owner -> OwnerBot -> home/status capability -> GetPlatformHealth
                           \-> AC capability -> CommandService -> SQLite -> one ESP32 request
+                          \-> notification policy -> SQLite
 ```
 
 The capability registry is explicit in the composition root. It generates the native command
@@ -127,6 +130,19 @@ The read-only `/status` command composes the same framework-independent `GetPlat
 case as the dashboard. It reads persisted heartbeats, telemetry, and alert-evaluator state through
 fresh SQLite connections, and checks the API through its loopback-only liveness endpoint. It does
 not inspect systemd or contact the ESP32 directly.
+
+Operational alert transitions and outbound delivery use a transactional outbox:
+
+```text
+alert evaluator transaction -> transition + notification_outbox row
+                                                |
+Casadaqui delivery tick -> lease -> Telegram -> delivered / retry / expired
+```
+
+The evaluator retains no network access. Casadaqui retries informational delivery with bounded
+backoff and honors Telegram rate limits, but never reuses that behavior for physical commands.
+Owner pause policy suppresses pending and future operational notifications while evaluation and
+incident history continue. Suppressed rows are not revived later.
 
 The local API is a separate process:
 
@@ -212,11 +228,11 @@ process lifecycle or presentation. Business rules should remain reusable outside
 
 ## Future architecture, not current packages
 
-Future slices may introduce Telegram alert delivery, speech, email, a task worker, multiple
-identities and permissions, and worker registration. They should reuse domain models and use cases
-through ports. Casadaqui is the first external operations adapter: it exposes concise status and
-AC capabilities, but deliberately does not expose detailed histories or operational-alert
-delivery.
+Future slices may introduce email, a local-AI task worker, speech, multiple identities and
+permissions, and worker registration. They should reuse domain models and use cases through ports.
+Casadaqui is the first external operations adapter: it exposes concise status, AC control,
+notification policy, and operational alert delivery, but deliberately does not expose detailed
+histories.
 No empty placeholder packages exist for these ideas. A package is added only with its first
 end-to-end behavior and tests.
 

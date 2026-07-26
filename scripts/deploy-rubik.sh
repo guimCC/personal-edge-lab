@@ -149,6 +149,7 @@ sudo openssl x509 -checkend 1209600 -noout -in "$TLS_CERTIFICATE" || {
 AUTH_ENABLED="${API_AUTH_ENABLED:-false}"
 CONTROL_ENABLED="${API_AC_CONTROL_ENABLED:-false}"
 TELEGRAM_ENABLED="${TELEGRAM_BOT_ENABLED:-false}"
+TELEGRAM_NOTIFICATIONS_ENABLED="${TELEGRAM_NOTIFICATION_DELIVERY_ENABLED:-false}"
 if [[ "$AUTH_ENABLED" == "true" ]]; then
     [[ "${PUBLIC_ORIGIN:-}" == "https://rubik-edge-01.local" ]] || {
         fail "authenticated deployment requires PUBLIC_ORIGIN=https://rubik-edge-01.local"
@@ -184,6 +185,14 @@ if [[ "$TELEGRAM_ENABLED" == "true" ]]; then
     }
     [[ "${TELEGRAM_OWNER_USER_ID:-0}" =~ ^[1-9][0-9]*$ ]] || {
         fail "TELEGRAM_OWNER_USER_ID must be a positive integer"
+    }
+fi
+if [[ "$TELEGRAM_NOTIFICATIONS_ENABLED" == "true" ]]; then
+    [[ "$TELEGRAM_ENABLED" == "true" ]] || {
+        fail "Telegram notification delivery requires TELEGRAM_BOT_ENABLED=true"
+    }
+    [[ "${OWNER_TIMEZONE:-Europe/Madrid}" == "Europe/Madrid" ]] || {
+        fail "Stage 5B deployment requires OWNER_TIMEZONE=Europe/Madrid"
     }
 fi
 
@@ -407,6 +416,24 @@ if [[ "$TELEGRAM_ENABLED" == "true" ]]; then
 else
     sudo systemctl disable --now personal-edge-lab-telegram-bot.service >/dev/null 2>&1 || true
 fi
+if [[ "$TELEGRAM_NOTIFICATIONS_ENABLED" == "true" ]]; then
+    NOTIFICATION_RUNTIME_OK=false
+    for _attempt in {1..10}; do
+        if sqlite_live \
+            "SELECT COUNT(*) FROM notification_delivery_runtime
+             WHERE singleton_id = 1
+               AND last_outcome = 'success'
+               AND last_finished_at_utc IS NOT NULL;" \
+            | grep -qx '1'; then
+            NOTIFICATION_RUNTIME_OK=true
+            break
+        fi
+        sleep 1
+    done
+    [[ "$NOTIFICATION_RUNTIME_OK" == "true" ]] || {
+        fail "Casadaqui notification delivery runtime did not become healthy"
+    }
+fi
 sudo systemctl enable --now avahi-daemon.service nginx.service >/dev/null
 sudo systemctl reload nginx.service
 
@@ -494,6 +521,11 @@ if [[ "$TELEGRAM_ENABLED" == "true" ]]; then
     printf 'Casadaqui operations bot: enabled\n'
 else
     printf 'Casadaqui operations bot: disabled\n'
+fi
+if [[ "$TELEGRAM_NOTIFICATIONS_ENABLED" == "true" ]]; then
+    printf 'Proactive Telegram notifications: enabled\n'
+else
+    printf 'Proactive Telegram notifications: disabled\n'
 fi
 if [[ "${API_DOCS_ENABLED:-false}" == "true" ]]; then
     printf 'API docs: https://rubik-edge-01.local/docs\n'
