@@ -72,7 +72,11 @@ class TelegramBotClient:
         text: str,
         reply_markup: Mapping[str, object] | None = None,
     ) -> Mapping[str, Any]:
-        payload: dict[str, object] = {"chat_id": chat_id, "text": text}
+        payload: dict[str, object] = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+        }
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         return self._mapping_result("sendMessage", payload)
@@ -89,6 +93,7 @@ class TelegramBotClient:
             "chat_id": chat_id,
             "message_id": message_id,
             "text": text,
+            "parse_mode": "HTML",
         }
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup

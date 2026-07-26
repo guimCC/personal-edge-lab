@@ -46,3 +46,36 @@ def test_api_failures_never_expose_the_bot_token() -> None:
 
     assert TOKEN not in str(caught.value)
     assert str(caught.value) == "Telegram rejected the request (code 401)"
+
+
+def test_messages_use_native_html_and_inline_button_styles() -> None:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.update(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 12}})
+
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "Enviar ajuste",
+                    "callback_data": "send",
+                    "style": "success",
+                }
+            ]
+        ]
+    }
+    with TelegramBotClient(token=TOKEN, transport=httpx.MockTransport(handler)) as client:
+        client.send_message(
+            chat_id=112233,
+            text="<b>AIRE ACONDICIONADO</b>",
+            reply_markup=keyboard,
+        )
+
+    assert observed == {
+        "chat_id": 112233,
+        "text": "<b>AIRE ACONDICIONADO</b>",
+        "parse_mode": "HTML",
+        "reply_markup": keyboard,
+    }

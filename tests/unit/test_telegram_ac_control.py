@@ -134,15 +134,18 @@ def test_panel_callbacks_are_bounded_and_do_not_send_a_command() -> None:
 
     control.handle_update(message_update("/ac"))
 
-    assert "Last requested settings — not current AC state" in gateway.sent[0]["text"]
+    assert "Última configuración solicitada" in gateway.sent[0]["text"]
     buttons = gateway.sent[0]["reply_markup"]["inline_keyboard"]
     assert all(
         1 <= len(button["callback_data"].encode()) <= 64 for row in buttons for button in row
     )
+    assert buttons[0][1]["style"] == "primary"
+    assert buttons[3][0]["style"] == "success"
+    assert buttons[4][0]["style"] == "danger"
     assert executor.calls == []
 
 
-def test_set_state_requires_review_and_reuses_confirmation_idempotency_key() -> None:
+def test_submenu_selection_returns_to_panel_without_sending() -> None:
     gateway = FakeGateway()
     executor = RecordingExecutor()
     control = TelegramAcControl(
@@ -152,16 +155,34 @@ def test_set_state_requires_review_and_reuses_confirmation_idempotency_key() -> 
         state_provider=lambda: PanelState(25, FanSpeed.HIGH, VerticalVane.LOW),
     )
     control.handle_update(message_update("/ac"))
-    review = keyboard_callback(gateway.sent[0], 3)
+    fan_menu = keyboard_callback(gateway.sent[0], 1)
 
-    control.handle_update(callback_update(review, callback_id="review-query"))
+    control.handle_update(callback_update(fan_menu))
 
     assert executor.calls == []
-    assert "REVIEW AC COMMAND" in gateway.edited[-1]["text"]
-    confirm = keyboard_callback(gateway.edited[-1], 0, 1)
+    assert "VELOCIDAD DEL VENTILADOR" in gateway.edited[-1]["text"]
+    select_low = keyboard_callback(gateway.edited[-1], 0, 1)
 
-    control.handle_update(callback_update(confirm, callback_id="confirm-query-1"))
-    control.handle_update(callback_update(confirm, callback_id="confirm-query-2"))
+    control.handle_update(callback_update(select_low))
+
+    assert executor.calls == []
+    assert "Frío · Bajo · Baja" in gateway.edited[-1]["text"]
+
+
+def test_send_state_reuses_panel_idempotency_key_without_a_review_screen() -> None:
+    gateway = FakeGateway()
+    executor = RecordingExecutor()
+    control = TelegramAcControl(
+        gateway=gateway,
+        owner_user_id=OWNER_ID,
+        execute_command=executor,
+        state_provider=lambda: PanelState(25, FanSpeed.HIGH, VerticalVane.LOW),
+    )
+    control.handle_update(message_update("/ac"))
+    send = keyboard_callback(gateway.sent[0], 3)
+
+    control.handle_update(callback_update(send, callback_id="send-query-1"))
+    control.handle_update(callback_update(send, callback_id="send-query-2"))
 
     assert len(executor.calls) == 2
     first_context, command_type, payload = executor.calls[0]
@@ -177,7 +198,7 @@ def test_set_state_requires_review_and_reuses_confirmation_idempotency_key() -> 
     assert first_context.actor_id == f"telegram:{OWNER_ID}"
     assert first_context.request_source == "telegram_bot"
     assert first_context.idempotency_key == second_context.idempotency_key
-    assert "no duplicate request was sent" in gateway.edited[-1]["text"]
+    assert "no se ha repetido la petición" in gateway.edited[-1]["text"]
 
 
 def test_off_shortcut_only_transmits_after_confirmation() -> None:
@@ -213,7 +234,7 @@ def test_expired_callback_answer_can_still_replay_through_a_successful_message_e
     control.handle_update(callback_update(confirm))
 
     assert len(executor.calls) == 1
-    assert "AC command confirmed" in gateway.edited[-1]["text"]
+    assert "ORDEN CONFIRMADA" in gateway.edited[-1]["text"]
 
 
 def test_latest_requested_state_skips_invalid_and_non_cool_audit_payloads() -> None:

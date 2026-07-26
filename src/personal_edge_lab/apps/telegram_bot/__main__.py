@@ -95,9 +95,9 @@ def main(*, stop_event: threading.Event | None = None) -> int:
             )
             telegram.set_commands(
                 [
-                    {"command": "ac", "description": "Open AC controls"},
-                    {"command": "off", "description": "Review Power Off"},
-                    {"command": "help", "description": "Show safe control help"},
+                    {"command": "ac", "description": "Abrir el mando del aire"},
+                    {"command": "off", "description": "Preparar el apagado"},
+                    {"command": "help", "description": "Mostrar ayuda de control"},
                 ]
             )
             control = TelegramAcControl(

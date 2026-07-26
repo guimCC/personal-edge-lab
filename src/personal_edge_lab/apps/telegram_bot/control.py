@@ -124,11 +124,15 @@ class TelegramAcControl:
             return
         command = text.strip().split(maxsplit=1)[0].split("@", maxsplit=1)[0].lower()
         if command == "/ac":
+            update_id = update.get("update_id")
+            if not isinstance(update_id, int):
+                return
             state = self._state_provider()
+            token = _idempotency_token(f"panel:{update_id}")
             self._gateway.send_message(
                 chat_id=self._owner_user_id,
                 text=_panel_text(state),
-                reply_markup=_panel_keyboard(state),
+                reply_markup=_panel_keyboard(token, state),
             )
             return
         if command == "/off":
@@ -146,18 +150,19 @@ class TelegramAcControl:
             self._gateway.send_message(
                 chat_id=self._owner_user_id,
                 text=(
-                    "Casadaqui · RUBIK AC control\n\n"
-                    "/ac — open the control panel\n"
-                    "/off — review a Power Off request\n"
-                    "/help — show this message\n\n"
-                    "Every physical action requires an explicit confirmation."
+                    "🏠 <b>Casadaqui · Control del aire</b>\n\n"
+                    "/ac — abrir el mando\n"
+                    "/off — preparar el apagado\n"
+                    "/help — mostrar esta ayuda\n\n"
+                    "Enviar ajuste transmite directamente la configuración visible. "
+                    "Apagar requiere una confirmación adicional."
                 ),
             )
             return
         if command.startswith("/"):
             self._gateway.send_message(
                 chat_id=self._owner_user_id,
-                text="Unknown command. Use /ac to control the air conditioner.",
+                text="Comando desconocido. Usa /ac para abrir el mando.",
             )
 
     def _handle_callback(self, callback: Mapping[str, Any]) -> None:
@@ -176,7 +181,7 @@ class TelegramAcControl:
         if identity != (self._owner_user_id, self._owner_user_id):
             self._gateway.answer_callback(
                 callback_query_id=callback_id,
-                text="This control is private.",
+                text="Este control es privado.",
                 show_alert=True,
             )
             return
@@ -189,7 +194,7 @@ class TelegramAcControl:
         except (ValueError, ValidationError):
             self._gateway.answer_callback(
                 callback_query_id=callback_id,
-                text="This control is invalid or has expired.",
+                text="Este control no es válido o ha caducado.",
                 show_alert=True,
             )
 
@@ -197,55 +202,57 @@ class TelegramAcControl:
         if data == "noop":
             self._gateway.answer_callback(callback_query_id=callback_id)
             return
-        if data == "review_off":
-            token = _idempotency_token(f"callback:{callback_id}")
+        parts = data.split(":")
+        action = parts[0]
+        if action == "review_off":
+            if len(parts) != 5:
+                raise ValueError("invalid off review")
+            token = _validated_token(parts[1])
+            state = _state_from_parts(parts[2:])
             self._gateway.answer_callback(callback_query_id=callback_id)
             self._gateway.edit_message(
                 chat_id=self._owner_user_id,
                 message_id=message_id,
                 text=_off_review_text(),
-                reply_markup=_off_review_keyboard(token),
+                reply_markup=_off_review_keyboard(token, state),
             )
             return
 
-        parts = data.split(":")
-        action = parts[0]
-        if action in {"panel", "review_set", "cancel"}:
-            state = _state_from_parts(parts[1:])
-            self._gateway.answer_callback(callback_query_id=callback_id)
-            if action == "panel" or action == "cancel":
-                self._gateway.edit_message(
-                    chat_id=self._owner_user_id,
-                    message_id=message_id,
-                    text=_panel_text(state),
-                    reply_markup=_panel_keyboard(state),
-                )
-            else:
-                token = _idempotency_token(f"callback:{callback_id}")
-                self._gateway.edit_message(
-                    chat_id=self._owner_user_id,
-                    message_id=message_id,
-                    text=_set_review_text(state),
-                    reply_markup=_set_review_keyboard(token, state),
-                )
-            return
-        if action == "confirm_set":
+        if action in {"panel", "menu_fan", "menu_vane", "send_set", "cancel"}:
             if len(parts) != 5:
-                raise ValueError("invalid set confirmation")
+                raise ValueError("invalid control state")
             token = _validated_token(parts[1])
             state = _state_from_parts(parts[2:])
-            self._confirm(
-                callback_id=callback_id,
+            if action == "send_set":
+                self._send(
+                    callback_id=callback_id,
+                    message_id=message_id,
+                    token=token,
+                    command_type="set_state",
+                    state_payload=state.as_command_payload(),
+                )
+                return
+            self._gateway.answer_callback(callback_query_id=callback_id)
+            if action in {"panel", "cancel"}:
+                text = _panel_text(state)
+                keyboard = _panel_keyboard(token, state)
+            elif action == "menu_fan":
+                text = _fan_menu_text(state)
+                keyboard = _fan_menu_keyboard(token, state)
+            else:
+                text = _vane_menu_text(state)
+                keyboard = _vane_menu_keyboard(token, state)
+            self._gateway.edit_message(
+                chat_id=self._owner_user_id,
                 message_id=message_id,
-                token=token,
-                command_type="set_state",
-                state_payload=state.as_command_payload(),
+                text=text,
+                reply_markup=keyboard,
             )
             return
         if action == "confirm_off":
             if len(parts) != 2:
                 raise ValueError("invalid off confirmation")
-            self._confirm(
+            self._send(
                 callback_id=callback_id,
                 message_id=message_id,
                 token=_validated_token(parts[1]),
@@ -255,7 +262,7 @@ class TelegramAcControl:
             return
         raise ValueError("unknown callback action")
 
-    def _confirm(
+    def _send(
         self,
         *,
         callback_id: str,
@@ -269,12 +276,12 @@ class TelegramAcControl:
         with contextlib.suppress(TelegramApiError):
             self._gateway.answer_callback(
                 callback_query_id=callback_id,
-                text="Sending one command…",
+                text="Enviando una única orden…",
             )
         self._gateway.edit_message(
             chat_id=self._owner_user_id,
             message_id=message_id,
-            text="Sending one AC command through RUBIK…",
+            text="⏳ <b>Enviando ajuste a través de RUBIK…</b>",
             reply_markup=EMPTY_KEYBOARD,
         )
         context = CommandRequestContext(
@@ -289,19 +296,19 @@ class TelegramAcControl:
             execution = self._execute_command(context, command_type, state_payload)
         except CommandRateLimitedError as error:
             text = (
-                "Command limit reached\n\n"
-                f"Wait approximately {error.retry_after_seconds} seconds, then open /ac again."
+                "⏱ <b>Límite de órdenes alcanzado</b>\n\n"
+                f"Espera aproximadamente {error.retry_after_seconds} segundos y abre /ac de nuevo."
             )
         except (CommandConflictError, CommandInProgressError, DeviceBusyError):
             text = (
-                "Another command is already in progress\n\n"
-                "No additional physical request was sent. Wait, then open /ac again."
+                "⏳ <b>Ya hay otra orden en curso</b>\n\n"
+                "No se ha enviado una petición física adicional. Espera y abre /ac de nuevo."
             )
         except (OSError, sqlite3.Error):
             text = (
-                "⚠️ Physical outcome unknown\n\n"
-                "RUBIK could not record a reliable result. The command may have been transmitted. "
-                "Do not automatically send it again; inspect Activity in the dashboard."
+                "⚠️ <b>Resultado físico desconocido</b>\n\n"
+                "RUBIK no ha podido registrar un resultado fiable. La orden podría haberse "
+                "transmitido. No la repitas automáticamente; revisa Actividad en el dashboard."
             )
         else:
             text = _result_text(execution)
@@ -368,8 +375,8 @@ def _state_from_parts(parts: Sequence[str]) -> PanelState:
     )
 
 
-def _state_data(prefix: str, state: PanelState) -> str:
-    data = f"{prefix}:{state.temperature_c}:{state.fan.value}:{state.vertical_vane.value}"
+def _state_data(prefix: str, token: str, state: PanelState) -> str:
+    data = f"{prefix}:{token}:{state.temperature_c}:{state.fan.value}:{state.vertical_vane.value}"
     if len(data.encode("utf-8")) > 64:
         raise ValueError("Telegram callback data exceeds 64 bytes")
     return data
@@ -385,97 +392,152 @@ def _validated_token(value: str) -> str:
     return value
 
 
-def _button(text: str, data: str) -> dict[str, str]:
+def _button(
+    text: str,
+    data: str,
+    *,
+    style: str | None = None,
+) -> dict[str, str]:
     if not 1 <= len(data.encode("utf-8")) <= 64:
         raise ValueError("Telegram callback data must be from 1 through 64 bytes")
-    return {"text": text, "callback_data": data}
+    button = {"text": text, "callback_data": data}
+    if style is not None:
+        button["style"] = style
+    return button
 
 
 def _panel_text(state: PanelState) -> str:
     return (
-        "RUBIK · AIR CONDITIONER\n\n"
-        "Last requested settings — not current AC state.\n\n"
-        "Mode: Cool\n"
-        f"Temperature: {state.temperature_c} °C\n"
-        f"Fan: {_label(state.fan.value)}\n"
-        f"Vertical vane: {_label(state.vertical_vane.value)}\n\n"
-        "Adjust the request, then review it before sending."
+        "❄️ <b>AIRE ACONDICIONADO</b>\n\n"
+        "<blockquote>Última configuración solicitada · No representa el estado físico "
+        "actual</blockquote>\n\n"
+        f"<b>{state.temperature_c} °C</b>\n"
+        f"Frío · {_fan_label(state.fan)} · {_vane_label(state.vertical_vane)}\n\n"
+        "Ajusta los valores y pulsa <b>Enviar ajuste</b>."
     )
 
 
-def _panel_keyboard(state: PanelState) -> Mapping[str, object]:
+def _panel_keyboard(token: str, state: PanelState) -> Mapping[str, object]:
     lower = PanelState(max(16, state.temperature_c - 1), state.fan, state.vertical_vane)
     higher = PanelState(min(31, state.temperature_c + 1), state.fan, state.vertical_vane)
-    next_fan = PanelState(
-        state.temperature_c,
-        _next_value(FANS, state.fan),
-        state.vertical_vane,
-    )
-    next_vane = PanelState(
-        state.temperature_c,
-        state.fan,
-        _next_value(VANES, state.vertical_vane),
-    )
     return {
         "inline_keyboard": [
             [
-                _button("−", _state_data("panel", lower)),
-                _button(f"{state.temperature_c} °C", "noop"),
-                _button("+", _state_data("panel", higher)),
+                _button("−", _state_data("panel", token, lower)),
+                _button(f"{state.temperature_c} °C", "noop", style="primary"),
+                _button("+", _state_data("panel", token, higher)),
             ],
-            [_button(f"Fan · {_label(state.fan.value)}", _state_data("panel", next_fan))],
             [
                 _button(
-                    f"Vane · {_label(state.vertical_vane.value)}",
-                    _state_data("panel", next_vane),
+                    f"💨 Ventilador · {_fan_label(state.fan)}",
+                    _state_data("menu_fan", token, state),
                 )
             ],
-            [_button("Review settings", _state_data("review_set", state))],
-            [_button("Power off", "review_off")],
+            [
+                _button(
+                    f"↕️ Lama · {_vane_label(state.vertical_vane)}",
+                    _state_data("menu_vane", token, state),
+                )
+            ],
+            [
+                _button(
+                    "Enviar ajuste",
+                    _state_data("send_set", token, state),
+                    style="success",
+                )
+            ],
+            [
+                _button(
+                    "Apagar",
+                    _state_data("review_off", token, state),
+                    style="danger",
+                )
+            ],
         ]
     }
 
 
-def _set_review_text(state: PanelState) -> str:
+def _fan_menu_text(state: PanelState) -> str:
     return (
-        "REVIEW AC COMMAND\n\n"
-        "Set requested state:\n"
-        "Power: On\n"
-        "Mode: Cool\n"
-        f"Temperature: {state.temperature_c} °C\n"
-        f"Fan: {_label(state.fan.value)}\n"
-        f"Vertical vane: {_label(state.vertical_vane.value)}\n\n"
-        "Confirm sends exactly one request. A successful response still does not prove the "
-        "physical AC state."
+        "💨 <b>VELOCIDAD DEL VENTILADOR</b>\n\n"
+        f"Seleccionado: <b>{_fan_label(state.fan)}</b>\n\n"
+        "Elige una velocidad. Volverás automáticamente al mando."
     )
 
 
-def _set_review_keyboard(token: str, state: PanelState) -> Mapping[str, object]:
+def _fan_menu_keyboard(token: str, state: PanelState) -> Mapping[str, object]:
+    buttons = [
+        _button(
+            f"{'✓ ' if fan is state.fan else ''}{_fan_label(fan)}",
+            _state_data(
+                "panel",
+                token,
+                PanelState(state.temperature_c, fan, state.vertical_vane),
+            ),
+            style="primary" if fan is state.fan else None,
+        )
+        for fan in FANS
+    ]
     return {
         "inline_keyboard": [
-            [
-                _button("Back", _state_data("cancel", state)),
-                _button("Confirm", _state_data(f"confirm_set:{token}", state)),
-            ]
+            buttons[:2],
+            buttons[2:4],
+            buttons[4:],
+            [_button("‹ Volver", _state_data("panel", token, state))],
+        ]
+    }
+
+
+def _vane_menu_text(state: PanelState) -> str:
+    return (
+        "↕️ <b>POSICIÓN DE LA LAMA</b>\n\n"
+        f"Seleccionada: <b>{_vane_label(state.vertical_vane)}</b>\n\n"
+        "Elige una posición. Volverás automáticamente al mando."
+    )
+
+
+def _vane_menu_keyboard(token: str, state: PanelState) -> Mapping[str, object]:
+    buttons = [
+        _button(
+            f"{'✓ ' if vane is state.vertical_vane else ''}{_vane_label(vane)}",
+            _state_data(
+                "panel",
+                token,
+                PanelState(state.temperature_c, state.fan, vane),
+            ),
+            style="primary" if vane is state.vertical_vane else None,
+        )
+        for vane in VANES
+    ]
+    return {
+        "inline_keyboard": [
+            buttons[:2],
+            buttons[2:4],
+            buttons[4:6],
+            buttons[6:],
+            [_button("‹ Volver", _state_data("panel", token, state))],
         ]
     }
 
 
 def _off_review_text() -> str:
     return (
-        "REVIEW AC COMMAND\n\n"
-        "Power Off\n\n"
-        "Confirm sends exactly one power-off request. The recorded result does not prove the "
-        "physical AC state."
+        "⏻ <b>APAGAR AIRE ACONDICIONADO</b>\n\n"
+        "Se enviará una única petición de apagado.\n\n"
+        "El resultado registrado no confirma el estado físico del aparato."
     )
 
 
-def _off_review_keyboard(token: str) -> Mapping[str, object]:
+def _off_review_keyboard(
+    token: str,
+    fallback: PanelState | None = None,
+) -> Mapping[str, object]:
+    panel_state = fallback or PanelState()
     return {
         "inline_keyboard": [
             [
-                _button("Cancel", "cancel:24:auto:middle"),
-                _button("Confirm Power Off", f"confirm_off:{token}"),
+                _button("Cancelar", _state_data("cancel", token, panel_state)),
+                _button("Confirmar apagado", f"confirm_off:{token}", style="danger"),
             ]
         ]
     }
@@ -484,35 +546,48 @@ def _off_review_keyboard(token: str) -> Mapping[str, object]:
 def _result_text(execution: CommandExecution) -> str:
     outcome = execution.result.outcome
     replay_note = (
-        "\nRecorded result recovered safely; no duplicate request was sent."
+        "\nResultado recuperado de forma segura; no se ha repetido la petición."
         if execution.replayed
         else ""
     )
     if outcome is CommandOutcome.CONFIRMED_SUCCESS:
-        heading = "✅ AC command confirmed"
-        detail = "The controller accepted the request."
+        heading = "✅ <b>ORDEN CONFIRMADA</b>"
+        detail = "El controlador ha aceptado la petición."
     elif outcome is CommandOutcome.REJECTED_LOCALLY:
-        heading = "Command rejected locally"
-        detail = "RUBIK did not contact the AC controller."
+        heading = "⛔️ <b>ORDEN RECHAZADA LOCALMENTE</b>"
+        detail = "RUBIK no ha contactado con el controlador."
     elif outcome is CommandOutcome.NODE_UNREACHABLE:
-        heading = "AC controller unreachable"
-        detail = "No successful delivery was confirmed."
+        heading = "📡 <b>CONTROLADOR NO DISPONIBLE</b>"
+        detail = "No se ha confirmado una entrega correcta."
     elif outcome is CommandOutcome.NODE_REPORTED_FAILURE:
-        heading = "AC controller reported a failure"
-        detail = "The controller did not accept the command."
+        heading = "❌ <b>EL CONTROLADOR HA RECHAZADO LA ORDEN</b>"
+        detail = "El controlador no ha aceptado la petición."
     else:
-        heading = "⚠️ Physical outcome unknown"
+        heading = "⚠️ <b>RESULTADO FÍSICO DESCONOCIDO</b>"
         detail = (
-            "The request may have reached the controller. Do not automatically send it again; "
-            "inspect Activity in the dashboard."
+            "La petición podría haber llegado al controlador. No la repitas automáticamente; "
+            "revisa Actividad en el dashboard."
         )
-    return f"{heading}\n\n{detail}\nAudit #{execution.command_id}{replay_note}"
+    return f"{heading}\n\n{detail}\nAuditoría #{execution.command_id}{replay_note}"
 
 
-def _label(value: str) -> str:
-    return value.replace("_", " ").title()
+def _fan_label(fan: FanSpeed) -> str:
+    return {
+        FanSpeed.AUTO: "Auto",
+        FanSpeed.LOW: "Bajo",
+        FanSpeed.MEDIUM: "Medio",
+        FanSpeed.HIGH: "Alto",
+        FanSpeed.MAX: "Máximo",
+    }[fan]
 
 
-def _next_value[T](values: Sequence[T], current: T) -> T:
-    index = values.index(current)
-    return values[(index + 1) % len(values)]
+def _vane_label(vane: VerticalVane) -> str:
+    return {
+        VerticalVane.AUTO: "Auto",
+        VerticalVane.HIGHEST: "Más alta",
+        VerticalVane.HIGH: "Alta",
+        VerticalVane.MIDDLE: "Centro",
+        VerticalVane.LOW: "Baja",
+        VerticalVane.LOWEST: "Más baja",
+        VerticalVane.SWING: "Oscilar",
+    }[vane]
