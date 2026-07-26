@@ -526,7 +526,7 @@ additive tables. Restore SQLite only if integrity evidence proves actual corrupt
 
 ## Stage 5A Casadaqui Telegram AC control rollout
 
-Deploy `0.7.0` once with Telegram disabled so the package and administration CLI exist:
+Deploy `0.7.1` once with Telegram disabled so the package and administration CLI exist:
 
 ```dotenv
 TELEGRAM_BOT_ENABLED=false
@@ -566,9 +566,11 @@ This enables an internet-mediated control channel even though the dashboard rema
 Before enabling it, protect the owner Telegram account with 2-Step Verification and an app
 passcode. Never send the bot token, dashboard password, or Telegram login code through the bot.
 
-Open `/ac` and exercise adjustments and cancellation first. Cancellation must add no AC audit row.
-The first Set State and Power Off confirmations are physical acceptance actions and remain under
-explicit operator control. Inspect their attribution without exposing the token:
+Open `/ac` and exercise temperature adjustments plus the fan and vane submenus first. These edits
+must add no AC audit row. **Enviar ajuste** sends the normalized settings shown in the panel
+directly; Power Off retains a separate confirmation. The first Set State send and Power Off
+confirmation are physical acceptance actions and remain under explicit operator control. Inspect
+their attribution without exposing the token:
 
 ```bash
 sqlite3 -header -column data/telemetry.db \

@@ -98,18 +98,20 @@ Telegram controls use the same reservation path without pretending that browser 
 another channel:
 
 ```text
-private Telegram user -> inline review -> explicit Confirm
-                                           |
-                                           v
-owner user ID -> deterministic confirmation key -> CommandService
-                                                    |
-                                      SQLite reservation -> one ESP32 request
+private Telegram user -> normalized inline panel -> Enviar ajuste
+                                      |                    |
+                              fan/vane submenus             v
+owner user ID -> stable panel key ----------------> CommandService
+                                                      |
+                                        SQLite reservation -> one ESP32 request
 ```
 
-The callback carries a bounded normalized Cool request and an opaque confirmation key, not a
-credential. Re-delivery or a double tap reuses that key and therefore retrieves the stored result
-instead of transmitting again. The bot token remains in a mode-`0600` file and HTTP client request
-logging is disabled in the bot process because Telegram places the token in its API URL.
+The panel itself is the normalized Cool request, so Set State does not add a redundant review
+screen. Power Off retains a separate confirmation. Each callback carries a bounded request and an
+opaque stable panel key, not a credential. Re-delivery or a double tap reuses that key and therefore
+retrieves the stored result instead of transmitting again. The bot token remains in a mode-`0600`
+file and HTTP client request logging is disabled in the bot process because Telegram places the
+token in its API URL.
 
 The local API is a separate process:
 

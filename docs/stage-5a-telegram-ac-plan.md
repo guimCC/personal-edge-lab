@@ -2,16 +2,18 @@
 
 ## Outcome
 
-Release `0.7.0` adds an owner-only Telegram control surface for the air conditioner. It is a new
-delivery adapter over the existing AC command use case, not another controller implementation and
-not another monitoring dashboard.
+Release `0.7.0` added an owner-only Telegram control surface for the air conditioner. Release
+`0.7.1` refines its native interaction without changing the command or security architecture. It
+is a delivery adapter over the existing AC command use case, not another controller implementation
+and not another monitoring dashboard.
 
 The first conversation supports:
 
-- `/ac`: open a Cool-mode temperature, fan, and vertical-vane panel;
+- `/ac`: open a Cool-mode temperature panel with fan and vertical-vane submenus;
 - `/off`: open a Power Off review directly;
 - `/help`: explain the bounded command surface;
-- explicit review and one Confirm action before every physical command.
+- one explicit **Enviar ajuste** action from the normalized Set State panel;
+- a separate confirmation before Power Off.
 
 It excludes monitoring queries, alert notifications, multiple users, groups, webhooks, natural
 language, automation, and physical-state inference.
@@ -31,8 +33,9 @@ Verification and a local app passcode before remote physical control is enabled.
   from Git, and never included in application error text or HTTP logs.
 - Telegram callbacks are treated as untrusted input and fully parsed and validated.
 - Callback data remains within Telegram's 64-byte limit.
-- Confirmation creates a deterministic 20-byte token that becomes a channel-scoped idempotency
-  key. Update redelivery and repeated taps retrieve the original audit result.
+- Opening a panel creates a deterministic 20-character token that becomes a channel-scoped idempotency
+  key. Selection callbacks preserve it, and update redelivery or repeated send taps retrieve the
+  original audit result.
 - The bot composes `ExecuteCoolOnlyCommand` and `CommandService`; it cannot bypass local policy,
   audit reservation, the rolling rate limit, or the per-device lease.
 - Every new accepted attempt performs exactly one ESP32 request.
@@ -50,11 +53,11 @@ write access for AC audit reservation/completion.
 
 The service processes updates sequentially. It advances the polling offset only after an update is
 handled successfully. If delivery of the result message fails after an AC request, Telegram may
-redeliver the update, but the same confirmation key safely replays the durable result.
+redeliver the update, but the same stable panel key safely replays the durable result.
 
 ## RUBIK provisioning
 
-After installing `0.7.0` with the bot disabled:
+After installing `0.7.1` with the bot disabled:
 
 ```bash
 set -a
@@ -86,12 +89,14 @@ unit, and starts the service.
 
 1. Confirm the service remains active and logs identify `@Casadaqui_bot` without printing its
    token.
-2. Confirm `/start`, `/help`, `/ac`, adjustments, review cancellation, and `/off` review work.
+2. Confirm `/start`, `/help`, `/ac`, temperature adjustments, fan/vane submenus, and `/off` review
+   work.
 3. Confirm another Telegram account and a group cannot open or operate the controls.
-4. Cancel one Set State and one Power Off review; neither may create an audit row.
-5. Under operator control, confirm one Cool set-state request and observe one new audit row with
+4. Exercise every Set State selector without pressing **Enviar ajuste**, then cancel one Power Off
+   review; neither may create an audit row.
+5. Under operator control, send one Cool set-state request and observe one new audit row with
    `request_source=telegram_bot` and `actor_id=telegram:<owner ID>`.
-6. Double-tap or replay the same confirmation and verify one audit row and at most one ESP32
+6. Double-tap or replay the same send callback and verify one audit row and at most one ESP32
    request.
 7. Confirm one Power Off request under operator control with the same evidence.
 8. Exercise an unavailable ESP32 and an unknown response without automatic retransmission.

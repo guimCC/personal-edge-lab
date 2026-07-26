@@ -84,10 +84,12 @@ python -m personal_edge_lab.apps.telegram_cli discover-owner
 python -m personal_edge_lab.apps.telegram_bot
 ```
 
-`/ac` opens an inline Cool-mode control panel and `/off` opens a Power Off review. Neither sends
-anything until the owner presses Confirm. Telegram is authorized by the immutable numeric owner
-user ID in a private chat; groups and other users are ignored. Confirmations use the same durable
-audit, rate limit, per-device lease, idempotency, and unknown-outcome rules as the dashboard.
+`/ac` opens an inline Cool-mode control panel with separate fan and vane submenus. Adjustments only
+edit that Telegram message; the visible normalized settings are sent when the owner presses
+**Enviar ajuste**. `/off` retains a separate confirmation because it is easier to trigger
+accidentally. Telegram is authorized by the immutable numeric owner user ID in a private chat;
+groups and other users are ignored. Transmissions use the same durable audit, rate limit,
+per-device lease, idempotency, and unknown-outcome rules as the dashboard.
 The token is stored separately in a mode-`0600` file and is suppressed from HTTP logs.
 The dashboard remains LAN-only, while Telegram control is internet-mediated and therefore requires
 2-Step Verification and an app passcode on the owner's Telegram account.

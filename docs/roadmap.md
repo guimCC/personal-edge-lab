@@ -395,15 +395,15 @@ These are separate later slices, not one large project.
 
 ### 5A. Telegram
 
-**Status:** Implemented locally as `0.7.0`; pending RUBIK acceptance.
+**Status:** Accepted on RUBIK as `0.7.0`; native interaction refinement prepared as `0.7.1`.
 
 The initial Telegram slice deliberately focuses on AC control because the dashboard already owns
 monitoring. Casadaqui is an independent long-polling service with:
 
 - one immutable numeric owner user ID and private-chat-only authorization;
-- `/ac` for a stateless Cool-mode temperature/fan/vane panel;
+- `/ac` for a stateless Cool-mode temperature panel with fan and vane submenus;
 - `/off` as a shortcut to a Power Off review;
-- an explicit review and Confirm step before every physical action;
+- a direct **Enviar ajuste** action from the normalized panel and a separate Power Off confirmation;
 - durable `telegram_bot` audit attribution and a stable `telegram:<user_id>` actor;
 - the existing rate limit, device lease, cool-only policy, exactly-one ESP32 attempt, and
   idempotent result replay;
