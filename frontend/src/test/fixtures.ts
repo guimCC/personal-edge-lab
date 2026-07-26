@@ -2,7 +2,7 @@ export const NOW = "2026-07-25T14:00:00Z";
 
 export const healthyPlatform = {
   status: "healthy",
-  version: "0.6.0",
+  version: "0.7.0",
   checked_at_utc: NOW,
   database: { status: "healthy" },
   telemetry: {
