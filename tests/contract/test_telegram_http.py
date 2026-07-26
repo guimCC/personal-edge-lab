@@ -103,3 +103,42 @@ def test_messages_use_native_html_and_inline_button_styles() -> None:
         "parse_mode": "HTML",
         "reply_markup": keyboard,
     }
+
+
+@pytest.mark.parametrize(
+    ("method", "description"),
+    [
+        (
+            "edit",
+            "Bad Request: message is not modified: specified new message content "
+            "and reply markup are exactly the same",
+        ),
+        (
+            "callback",
+            "Bad Request: query is too old and response timeout expired or query ID is invalid",
+        ),
+    ],
+)
+def test_idempotent_telegram_noops_do_not_poison_the_update_offset(
+    method: str,
+    description: str,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "ok": False,
+                "error_code": 400,
+                "description": description,
+            },
+        )
+
+    with TelegramBotClient(token=TOKEN, transport=httpx.MockTransport(handler)) as client:
+        if method == "edit":
+            client.edit_message(
+                chat_id=112233,
+                message_id=10,
+                text="Sin cambios",
+            )
+        else:
+            client.answer_callback(callback_query_id="expired-query")

@@ -170,6 +170,13 @@ class TelegramBotClient:
             ) from error
         if not isinstance(body, dict) or body.get("ok") is not True:
             error_code = body.get("error_code") if isinstance(body, dict) else None
+            description = body.get("description") if isinstance(body, dict) else None
+            if _is_idempotent_noop(
+                method,
+                error_code=error_code,
+                description=description,
+            ):
+                return True
             suffix = f" (code {error_code})" if isinstance(error_code, int) else ""
             retry_after = _retry_after(body)
             category = "rate_limited" if error_code == 429 else "http_status"
@@ -189,3 +196,19 @@ def _retry_after(body: Mapping[str, Any]) -> float | None:
     if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
         return None
     return float(value)
+
+
+def _is_idempotent_noop(
+    method: str,
+    *,
+    error_code: object,
+    description: object,
+) -> bool:
+    if error_code != 400 or not isinstance(description, str):
+        return False
+    normalized = description.casefold()
+    if method == "editMessageText":
+        return "message is not modified" in normalized
+    if method == "answerCallbackQuery":
+        return "query is too old" in normalized or "query id is invalid" in normalized
+    return False
