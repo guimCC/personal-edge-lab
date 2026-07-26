@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from personal_edge_lab.apps.telegram_bot.control import (
@@ -9,6 +10,7 @@ from personal_edge_lab.apps.telegram_bot.control import (
     TelegramAcControl,
     latest_requested_state,
 )
+from personal_edge_lab.apps.telegram_bot.status import TelegramStatusSnapshot, status_text
 from personal_edge_lab.domain.ac import (
     CommandAuditEntry,
     CommandExecution,
@@ -19,8 +21,19 @@ from personal_edge_lab.domain.ac import (
     VerticalVane,
 )
 from personal_edge_lab.infrastructure.telegram.bot_api import TelegramApiError
+from personal_edge_lab.modules.alerting import AlertOverview, AlertStatusSummary
+from personal_edge_lab.modules.platform_status import PlatformHealth, PlatformHealthStatus
+from personal_edge_lab.modules.telemetry import (
+    CollectorHealth,
+    CollectorHealthStatus,
+    EdgeNodeHealth,
+    EdgeNodeHealthStatus,
+    TelemetryFreshness,
+    TelemetryHealth,
+)
 
 OWNER_ID = 112233
+NOW = datetime(2026, 7, 26, 1, 30, tzinfo=UTC)
 
 
 class FakeGateway:
@@ -98,6 +111,57 @@ def keyboard_callback(payload: dict[str, Any], row: int, column: int = 0) -> str
     return str(markup["inline_keyboard"][row][column]["callback_data"])
 
 
+def healthy_status() -> TelegramStatusSnapshot:
+    return TelegramStatusSnapshot(
+        api_reachable=True,
+        version="0.7.1",
+        platform=PlatformHealth(
+            status=PlatformHealthStatus.HEALTHY,
+            checked_at=NOW,
+            telemetry=TelemetryHealth(
+                status=TelemetryFreshness.FRESH,
+                device_id="ac-controller-01",
+                last_received_at=NOW - timedelta(seconds=8),
+                age_seconds=8,
+                stale_after_seconds=45,
+            ),
+            collector=CollectorHealth(
+                status=CollectorHealthStatus.RUNNING,
+                device_id="ac-controller-01",
+                process_started_at=NOW - timedelta(days=1),
+                heartbeat_at=NOW - timedelta(seconds=8),
+                heartbeat_age_seconds=8,
+                stale_after_seconds=45,
+                stopped_at=None,
+                last_attempt_at=NOW - timedelta(seconds=8),
+                last_success_at=NOW - timedelta(seconds=8),
+                consecutive_failures=0,
+            ),
+            edge_node=EdgeNodeHealth(
+                status=EdgeNodeHealthStatus.REACHABLE,
+                device_id="ac-controller-01",
+                last_attempt_at=NOW - timedelta(seconds=8),
+                last_success_at=NOW - timedelta(seconds=8),
+                last_failure_at=None,
+                last_failure_category=None,
+                last_failure_message=None,
+            ),
+            alerts=AlertOverview(
+                device_id="ac-controller-01",
+                status=AlertStatusSummary.HEALTHY,
+                active_count=0,
+                suspect_count=0,
+                latest_transition_at=None,
+                evaluator_last_run_at=NOW - timedelta(seconds=10),
+                evaluator_age_seconds=10,
+                states=(),
+                incidents=(),
+                limit=1,
+            ),
+        ),
+    )
+
+
 def test_only_the_configured_private_owner_can_open_controls() -> None:
     gateway = FakeGateway()
     executor = RecordingExecutor()
@@ -108,11 +172,12 @@ def test_only_the_configured_private_owner_can_open_controls() -> None:
     )
 
     control.handle_update(message_update("/ac", user_id=999))
+    control.handle_update(message_update("/status", user_id=999, update_id=2))
     control.handle_update(
         {
-            "update_id": 2,
+            "update_id": 3,
             "message": {
-                "text": "/ac",
+                "text": "/status",
                 "from": {"id": OWNER_ID},
                 "chat": {"id": -1001, "type": "group"},
             },
@@ -167,6 +232,103 @@ def test_submenu_selection_returns_to_panel_without_sending() -> None:
 
     assert executor.calls == []
     assert "Frío · Bajo · Baja" in gateway.edited[-1]["text"]
+
+
+def test_status_shows_shared_operational_health_and_refreshes_in_place() -> None:
+    gateway = FakeGateway()
+    executor = RecordingExecutor()
+    calls = 0
+
+    def status_provider() -> TelegramStatusSnapshot:
+        nonlocal calls
+        calls += 1
+        return healthy_status()
+
+    control = TelegramAcControl(
+        gateway=gateway,
+        owner_user_id=OWNER_ID,
+        execute_command=executor,
+        status_provider=status_provider,
+    )
+
+    control.handle_update(message_update("/status"))
+
+    assert calls == 1
+    assert "<b>API</b> · disponible" in gateway.sent[-1]["text"]
+    assert "<b>Colector</b> · activo · pulso hace 8 s" in gateway.sent[-1]["text"]
+    assert "<b>ESP32</b> · accesible · éxito hace 8 s" in gateway.sent[-1]["text"]
+    assert "<b>Telemetría</b> · fresca · muestra hace 8 s" in gateway.sent[-1]["text"]
+    assert "<b>Alertas</b> · normal · evaluación hace 10 s" in gateway.sent[-1]["text"]
+    assert "<b>Estado general · OPERATIVO</b>" in gateway.sent[-1]["text"]
+    refresh = keyboard_callback(gateway.sent[-1], 0)
+
+    control.handle_update(callback_update(refresh))
+
+    assert calls == 2
+    assert gateway.edited[-1]["message_id"] == 10
+    assert gateway.answered[-1]["text"] == "Estado actualizado"
+    assert executor.calls == []
+
+
+def test_status_distinguishes_each_degraded_component() -> None:
+    healthy = healthy_status()
+    degraded = TelegramStatusSnapshot(
+        api_reachable=False,
+        version=healthy.version,
+        platform=replace(
+            healthy.platform,
+            status=PlatformHealthStatus.DEGRADED,
+            telemetry=replace(
+                healthy.platform.telemetry,
+                status=TelemetryFreshness.STALE,
+                age_seconds=75,
+            ),
+            collector=replace(
+                healthy.platform.collector,
+                status=CollectorHealthStatus.STALE,
+                heartbeat_age_seconds=75,
+            ),
+            edge_node=replace(
+                healthy.platform.edge_node,
+                status=EdgeNodeHealthStatus.UNREACHABLE,
+            ),
+            alerts=replace(
+                healthy.platform.alerts,
+                status=AlertStatusSummary.ALERTING,
+                active_count=2,
+            ),
+        ),
+    )
+
+    text = status_text(degraded)
+
+    assert "<b>API</b> · no responde" in text
+    assert "<b>Colector</b> · sin pulso reciente · hace 1 min" in text
+    assert "<b>ESP32</b> · no disponible" in text
+    assert "<b>Telemetría</b> · atrasada · muestra hace 1 min" in text
+    assert "<b>Alertas</b> · 2 incidencias activas" in text
+    assert "<b>Estado general · DEGRADADO</b>" in text
+
+
+def test_status_database_failure_is_sanitized_and_does_not_send_a_command() -> None:
+    gateway = FakeGateway()
+    executor = RecordingExecutor()
+
+    def unavailable_status() -> TelegramStatusSnapshot:
+        raise OSError("sensitive local database detail")
+
+    control = TelegramAcControl(
+        gateway=gateway,
+        owner_user_id=OWNER_ID,
+        execute_command=executor,
+        status_provider=unavailable_status,
+    )
+
+    control.handle_update(message_update("/status"))
+
+    assert "<b>ESTADO NO DISPONIBLE</b>" in gateway.sent[-1]["text"]
+    assert "sensitive" not in gateway.sent[-1]["text"]
+    assert executor.calls == []
 
 
 def test_send_state_reuses_panel_idempotency_key_without_a_review_screen() -> None:

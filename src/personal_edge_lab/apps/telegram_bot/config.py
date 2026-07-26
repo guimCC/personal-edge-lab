@@ -14,6 +14,7 @@ from personal_edge_lab.apps.configuration import (
     read_http_url,
     read_log_level,
     read_nonblank,
+    read_port,
     read_positive_float,
     read_positive_int,
 )
@@ -24,11 +25,16 @@ class Settings:
     token_file: Path
     owner_user_id: int
     database_path: Path
-    device_id: str
+    ac_device_id: str
+    telemetry_device_id: str
     node_base_url: str
     command_timeout_seconds: float
     command_rate_limit_per_minute: int
     poll_timeout_seconds: int
+    api_port: int
+    telemetry_stale_after_seconds: float
+    collector_stale_after_seconds: float
+    alert_evaluator_stale_after_seconds: float
     log_level: int
 
     @classmethod
@@ -50,7 +56,8 @@ class Settings:
 
         owner_user_id = read_positive_int("TELEGRAM_OWNER_USER_ID", "0")
         database_path = read_file_path("DATABASE_PATH", "./data/telemetry.db")
-        device_id = read_nonblank("AC_DEVICE_ID", "ac-controller-01")
+        ac_device_id = read_nonblank("AC_DEVICE_ID", "ac-controller-01")
+        telemetry_device_id = read_nonblank("DEVICE_ID", "ac-controller-01")
         node_base_url = read_http_url(
             "AC_NODE_BASE_URL",
             "http://ac-controller-01.local",
@@ -58,6 +65,19 @@ class Settings:
         command_timeout = read_positive_float("AC_COMMAND_TIMEOUT_SECONDS", "5")
         rate_limit = read_positive_int("TELEGRAM_AC_COMMAND_RATE_LIMIT_PER_MINUTE", "6")
         poll_timeout = read_positive_int("TELEGRAM_POLL_TIMEOUT_SECONDS", "25")
+        api_port = read_port("API_PORT", "8000")
+        telemetry_stale_after = read_positive_float(
+            "API_TELEMETRY_STALE_AFTER_SECONDS",
+            "45",
+        )
+        collector_stale_after = read_positive_float(
+            "API_COLLECTOR_STALE_AFTER_SECONDS",
+            "45",
+        )
+        alert_evaluator_stale_after = read_positive_float(
+            "ALERT_EVALUATOR_STALE_AFTER_SECONDS",
+            "90",
+        )
         if poll_timeout > 50:
             raise ConfigurationError("TELEGRAM_POLL_TIMEOUT_SECONDS must not exceed 50")
         log_level, _level_name = read_log_level()
@@ -65,11 +85,16 @@ class Settings:
             token_file=token_file,
             owner_user_id=owner_user_id,
             database_path=database_path,
-            device_id=device_id,
+            ac_device_id=ac_device_id,
+            telemetry_device_id=telemetry_device_id,
             node_base_url=node_base_url,
             command_timeout_seconds=command_timeout,
             command_rate_limit_per_minute=rate_limit,
             poll_timeout_seconds=poll_timeout,
+            api_port=api_port,
+            telemetry_stale_after_seconds=telemetry_stale_after,
+            collector_stale_after_seconds=collector_stale_after,
+            alert_evaluator_stale_after_seconds=alert_evaluator_stale_after,
             log_level=log_level,
         )
 

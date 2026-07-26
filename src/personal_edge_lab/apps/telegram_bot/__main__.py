@@ -1,4 +1,4 @@
-"""Casadaqui owner-only Telegram AC control composition root."""
+"""Casadaqui owner-only Telegram bot composition root."""
 
 from __future__ import annotations
 
@@ -8,6 +8,9 @@ import sqlite3
 import threading
 from collections.abc import Mapping
 
+import httpx
+
+from personal_edge_lab import __version__
 from personal_edge_lab.apps.logging_config import configure_logging
 from personal_edge_lab.apps.telegram_bot.config import ConfigurationError, Settings
 from personal_edge_lab.apps.telegram_bot.control import (
@@ -16,17 +19,28 @@ from personal_edge_lab.apps.telegram_bot.control import (
     latest_requested_state,
 )
 from personal_edge_lab.apps.telegram_bot.polling import TelegramPollingLoop
+from personal_edge_lab.apps.telegram_bot.status import TelegramStatusSnapshot
 from personal_edge_lab.domain.ac import CommandExecution, CommandRequestContext
 from personal_edge_lab.infrastructure.esp32.ac_controller import AcCommandClient
+from personal_edge_lab.infrastructure.persistence.sqlite.alert_queries import (
+    SqliteAlertQueryRepository,
+)
+from personal_edge_lab.infrastructure.persistence.sqlite.collector_status import (
+    SqliteCollectorStatusRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.command_audit import (
     SqliteCommandAuditRepository,
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import (
+    SqliteTelemetryRepository,
+)
 from personal_edge_lab.infrastructure.telegram.bot_api import (
     TelegramApiError,
     TelegramBotClient,
 )
 from personal_edge_lab.modules.ac_control import CommandService, ExecuteCoolOnlyCommand
+from personal_edge_lab.modules.platform_status import GetPlatformHealth
 
 LOGGER = logging.getLogger(__name__)
 
@@ -65,7 +79,7 @@ def main(*, stop_event: threading.Event | None = None) -> int:
         ):
             return ExecuteCoolOnlyCommand(
                 service=CommandService(
-                    device_id=settings.device_id,
+                    device_id=settings.ac_device_id,
                     controller=controller,
                     audit_repository=repository,
                     context=context,
@@ -75,6 +89,32 @@ def main(*, stop_event: threading.Event | None = None) -> int:
     def requested_state() -> PanelState:
         with SqliteCommandAuditRepository(settings.database_path) as repository:
             return latest_requested_state(repository.history(limit=100))
+
+    def platform_status() -> TelegramStatusSnapshot:
+        try:
+            response = httpx.get(
+                f"http://127.0.0.1:{settings.api_port}/health/live",
+                timeout=2,
+            )
+            api_reachable = response.status_code == 200
+        except httpx.HTTPError:
+            api_reachable = False
+        platform = GetPlatformHealth(
+            telemetry_repository_factory=lambda: SqliteTelemetryRepository(settings.database_path),
+            collector_repository_factory=lambda: SqliteCollectorStatusRepository(
+                settings.database_path
+            ),
+            alert_repository_factory=lambda: SqliteAlertQueryRepository(settings.database_path),
+            device_id=settings.telemetry_device_id,
+            telemetry_stale_after_seconds=settings.telemetry_stale_after_seconds,
+            collector_stale_after_seconds=settings.collector_stale_after_seconds,
+            evaluator_stale_after_seconds=settings.alert_evaluator_stale_after_seconds,
+        ).execute()
+        return TelegramStatusSnapshot(
+            platform=platform,
+            api_reachable=api_reachable,
+            version=__version__,
+        )
 
     try:
         run_migrations(settings.database_path)
@@ -97,6 +137,7 @@ def main(*, stop_event: threading.Event | None = None) -> int:
                 [
                     {"command": "ac", "description": "Abrir el mando del aire"},
                     {"command": "off", "description": "Preparar el apagado"},
+                    {"command": "status", "description": "Ver el estado de RUBIK"},
                     {"command": "help", "description": "Mostrar ayuda de control"},
                 ]
             )
@@ -105,6 +146,7 @@ def main(*, stop_event: threading.Event | None = None) -> int:
                 owner_user_id=settings.owner_user_id,
                 execute_command=execute_command,
                 state_provider=requested_state,
+                status_provider=platform_status,
                 command_rate_limit=settings.command_rate_limit_per_minute,
                 command_timeout_seconds=settings.command_timeout_seconds,
             )

@@ -10,6 +10,13 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from personal_edge_lab import __version__
+from personal_edge_lab.apps.telegram_bot.status import (
+    STATUS_KEYBOARD,
+    TelegramStatusSnapshot,
+    status_text,
+    status_unavailable_text,
+)
 from personal_edge_lab.domain.ac import (
     AcMode,
     AcState,
@@ -66,6 +73,7 @@ CommandExecutor = Callable[
     CommandExecution,
 ]
 StateProvider = Callable[[], "PanelState"]
+StatusProvider = Callable[[], TelegramStatusSnapshot]
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +100,7 @@ class TelegramAcControl:
         owner_user_id: int,
         execute_command: CommandExecutor,
         state_provider: StateProvider = PanelState,
+        status_provider: StatusProvider | None = None,
         command_rate_limit: int = 6,
         command_timeout_seconds: float = 5,
     ) -> None:
@@ -99,6 +108,7 @@ class TelegramAcControl:
         self._owner_user_id = owner_user_id
         self._execute_command = execute_command
         self._state_provider = state_provider
+        self._status_provider = status_provider
         self._command_rate_limit = command_rate_limit
         self._command_timeout_seconds = command_timeout_seconds
 
@@ -146,6 +156,9 @@ class TelegramAcControl:
                 reply_markup=_off_review_keyboard(token),
             )
             return
+        if command == "/status":
+            self._show_status()
+            return
         if command in {"/start", "/help"}:
             self._gateway.send_message(
                 chat_id=self._owner_user_id,
@@ -153,6 +166,7 @@ class TelegramAcControl:
                     "🏠 <b>Casadaqui · Control del aire</b>\n\n"
                     "/ac — abrir el mando\n"
                     "/off — preparar el apagado\n"
+                    "/status — ver el estado de RUBIK\n"
                     "/help — mostrar esta ayuda\n\n"
                     "Enviar ajuste transmite directamente la configuración visible. "
                     "Apagar requiere una confirmación adicional."
@@ -201,6 +215,13 @@ class TelegramAcControl:
     def _dispatch_callback(self, callback_id: str, message_id: int, data: str) -> None:
         if data == "noop":
             self._gateway.answer_callback(callback_query_id=callback_id)
+            return
+        if data == "refresh_status":
+            self._gateway.answer_callback(
+                callback_query_id=callback_id,
+                text="Estado actualizado",
+            )
+            self._show_status(message_id=message_id)
             return
         parts = data.split(":")
         action = parts[0]
@@ -261,6 +282,28 @@ class TelegramAcControl:
             )
             return
         raise ValueError("unknown callback action")
+
+    def _show_status(self, *, message_id: int | None = None) -> None:
+        try:
+            snapshot = self._status_provider() if self._status_provider is not None else None
+        except (OSError, sqlite3.Error):
+            snapshot = None
+        text = (
+            status_text(snapshot) if snapshot is not None else status_unavailable_text(__version__)
+        )
+        if message_id is None:
+            self._gateway.send_message(
+                chat_id=self._owner_user_id,
+                text=text,
+                reply_markup=STATUS_KEYBOARD,
+            )
+            return
+        self._gateway.edit_message(
+            chat_id=self._owner_user_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=STATUS_KEYBOARD,
+        )
 
     def _send(
         self,

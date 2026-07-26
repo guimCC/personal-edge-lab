@@ -83,8 +83,13 @@ TELEGRAM_VARIABLES = (
     "TELEGRAM_OWNER_USER_ID",
     "TELEGRAM_AC_COMMAND_RATE_LIMIT_PER_MINUTE",
     "TELEGRAM_POLL_TIMEOUT_SECONDS",
+    "API_PORT",
+    "API_TELEMETRY_STALE_AFTER_SECONDS",
+    "API_COLLECTOR_STALE_AFTER_SECONDS",
+    "ALERT_EVALUATOR_STALE_AFTER_SECONDS",
     "DATABASE_PATH",
     "AC_DEVICE_ID",
+    "DEVICE_ID",
     "AC_NODE_BASE_URL",
     "AC_COMMAND_TIMEOUT_SECONDS",
     "LOG_LEVEL",
@@ -330,9 +335,14 @@ def test_telegram_environment_requires_explicit_enablement_and_secret(
     assert settings.token_file == token
     assert settings.read_token() == "123456:secret-token"
     assert settings.owner_user_id == 112233
-    assert settings.device_id == "ac-controller-01"
+    assert settings.ac_device_id == "ac-controller-01"
+    assert settings.telemetry_device_id == "ac-controller-01"
     assert settings.command_rate_limit_per_minute == 6
     assert settings.poll_timeout_seconds == 25
+    assert settings.api_port == 8000
+    assert settings.telemetry_stale_after_seconds == 45
+    assert settings.collector_stale_after_seconds == 45
+    assert settings.alert_evaluator_stale_after_seconds == 90
 
 
 @pytest.mark.parametrize(
