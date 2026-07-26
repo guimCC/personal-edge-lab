@@ -166,6 +166,32 @@ It reads only SQLite, never contacts the ESP32, and persists transitions for sta
 repeated ESP32 collection failures. The dashboard shows suspect, active, and recently recovered
 states. Repeated evaluations update one durable incident instead of creating notification noise.
 
+## Diagnose local inference
+
+The packaged diagnostic CLI proves the private RUBIK-to-UNO-Q path without introducing an email
+worker or storing model content. Public node liveness works even when inference is disabled:
+
+```bash
+python -m personal_edge_lab.apps.ai_cli health
+```
+
+Authenticated completion is deliberately feature-gated:
+
+```bash
+export LOCAL_LLM_ENABLED=true
+python -m personal_edge_lab.apps.ai_cli complete --text "Return exactly ready"
+```
+
+The completion key remains in the mode-`0600` file configured by
+`LOCAL_LLM_API_KEY_FILE`; never place its value in `.env` or a command line. The CLI makes one
+bounded request with no retry. It prints operation evidence, provider `llama_cpp`, logical model
+`qwen3-1.7b-q4-k-m`, token usage when supplied, and elapsed time. Prompt and completion content
+are excluded from logs; successful completion text appears only on standard output after terminal
+control characters are removed.
+
+Exit codes are `0` for success, `2` for disabled/configuration/input rejection, `3` for connection,
+`4` for timeout, and `5` for authenticated HTTP, provider, or protocol failure.
+
 ## Data and migrations
 
 All applications run the same standard-library migration runner before opening a repository.

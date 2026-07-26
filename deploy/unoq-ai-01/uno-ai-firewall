@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+readonly IPTABLES="/usr/sbin/iptables-legacy"
+readonly CHAIN="UNO_AI_INPUT"
+readonly RUBIK_ADDRESS="192.168.1.81/32"
+readonly INFERENCE_PORT="8080"
+
+[[ -x "$IPTABLES" ]] || {
+    printf 'ERROR: %s is unavailable.\n' "$IPTABLES" >&2
+    exit 1
+}
+
+if "$IPTABLES" --wait 5 --list "$CHAIN" >/dev/null 2>&1; then
+    while "$IPTABLES" --wait 5 --check INPUT \
+        --protocol tcp --dport "$INFERENCE_PORT" --jump "$CHAIN" 2>/dev/null; do
+        "$IPTABLES" --wait 5 --delete INPUT \
+            --protocol tcp --dport "$INFERENCE_PORT" --jump "$CHAIN"
+    done
+    "$IPTABLES" --wait 5 --flush "$CHAIN"
+else
+    "$IPTABLES" --wait 5 --new-chain "$CHAIN"
+fi
+
+"$IPTABLES" --wait 5 --append "$CHAIN" \
+    --source "$RUBIK_ADDRESS" --protocol tcp --dport "$INFERENCE_PORT" --jump ACCEPT
+"$IPTABLES" --wait 5 --append "$CHAIN" \
+    --protocol tcp --dport "$INFERENCE_PORT" --jump DROP
+"$IPTABLES" --wait 5 --insert INPUT 1 \
+    --protocol tcp --dport "$INFERENCE_PORT" --jump "$CHAIN"
+
+"$IPTABLES" --wait 5 --check INPUT \
+    --protocol tcp --dport "$INFERENCE_PORT" --jump "$CHAIN"
+"$IPTABLES" --wait 5 --check "$CHAIN" \
+    --source "$RUBIK_ADDRESS" --protocol tcp --dport "$INFERENCE_PORT" --jump ACCEPT
+"$IPTABLES" --wait 5 --check "$CHAIN" \
+    --protocol tcp --dport "$INFERENCE_PORT" --jump DROP

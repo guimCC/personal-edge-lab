@@ -10,12 +10,12 @@ apps -> application/ports <- infrastructure
              modules -> domain
 ```
 
-- `domain` contains `TemperatureReading`, `AcState`, command results, audit entries, validation,
-  and other pure rules. It uses only the standard library and does not know HTTP, SQLite, apps, or
-  modules.
+- `domain` contains `TemperatureReading`, `AcState`, command results, audit entries, pure local-AI
+  request/results, validation, and other pure rules. It uses only the standard library and does not
+  know HTTP, SQLite, apps, or modules.
 - `application/ports` contains the narrow protocols required by use cases: a temperature source,
-  telemetry repository, AC controller, command-audit repository, and distinct alert evaluation
-  and alert query repositories.
+  telemetry repository, AC controller, command-audit repository, distinct alert evaluation and
+  alert query repositories, plus the narrow `LanguageModel.complete` contract.
 - `modules/telemetry` collects one reading and provides bounded telemetry queries, aggregation,
   freshness, and collector/edge-node health evaluation.
 - `modules/ac_control` validates channel policy, sends, and audits one AC command and provides
@@ -31,6 +31,9 @@ apps -> application/ports <- infrastructure
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
 - `infrastructure/telegram` implements the narrow Bot API transport and never exposes the bot
   token through its public errors.
+- `infrastructure/ai` implements llama.cpp health and completion HTTP contracts. It translates
+  failures into sanitized categories, performs one attempt, and does not expose the server's GGUF
+  path as model identity.
 - `infrastructure/persistence/sqlite` owns migrations, applies one shared connection policy
   (`foreign_keys`, busy timeout, row mapping), and maps SQLite rows to domain objects.
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
@@ -47,10 +50,23 @@ apps -> application/ports <- infrastructure
   capabilities. The same process drains proactive deliveries before each long poll.
 - `apps/telegram_cli` validates and stores the bot token and discovers the numeric owner identity
   without placing either operation in the dashboard.
+- `apps/ai_cli` is a packaged RUBIK diagnostic composition root. Public `health` proves liveness
+  while authenticated, feature-gated `complete` proves bounded inference connectivity.
 
 Architecture tests parse imports to keep domain isolated, application ports inward-facing,
 feature modules independent from adapters, and infrastructure independent from apps and feature
 modules.
+
+Local-AI connectivity remains a diagnostic slice:
+
+```text
+RUBIK operator -> ai_cli -> public llama.cpp health
+                         \-> LanguageModel -> authenticated llama.cpp completion
+```
+
+The generic language-model port deliberately has no health method. Health is provider deployment
+evidence, while completion is the capability contract. There is no AI feature module yet because
+WP1 adds no prompt, triage, persistence, scheduling, retry, or mailbox behavior.
 
 ## Runtime behavior
 
@@ -229,7 +245,8 @@ process lifecycle or presentation. Business rules should remain reusable outside
 ## Future architecture, not current packages
 
 Future slices may introduce email, a local-AI task worker, speech, multiple identities and
-permissions, and worker registration. They should reuse domain models and use cases through ports.
+permissions, and worker registration. The current local-AI connectivity types and adapter should
+be reused through the port rather than expanded into a provider framework.
 Casadaqui is the first external operations adapter: it exposes concise status, AC control,
 notification policy, and operational alert delivery, but deliberately does not expose detailed
 histories.

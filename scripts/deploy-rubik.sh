@@ -132,7 +132,9 @@ set +a
 [[ -n "${DATABASE_PATH:-}" ]] || fail "DATABASE_PATH is missing from .env"
 
 log "Checking administrator access"
-sudo -v
+if ! sudo -n true 2>/dev/null; then
+    sudo -v
+fi
 
 TLS_DIRECTORY="/etc/personal-edge-lab/tls"
 TLS_CERTIFICATE="$TLS_DIRECTORY/rubik-edge-01.local.pem"
@@ -150,6 +152,7 @@ AUTH_ENABLED="${API_AUTH_ENABLED:-false}"
 CONTROL_ENABLED="${API_AC_CONTROL_ENABLED:-false}"
 TELEGRAM_ENABLED="${TELEGRAM_BOT_ENABLED:-false}"
 TELEGRAM_NOTIFICATIONS_ENABLED="${TELEGRAM_NOTIFICATION_DELIVERY_ENABLED:-false}"
+LOCAL_LLM_ENABLED_VALUE="${LOCAL_LLM_ENABLED:-false}"
 if [[ "$AUTH_ENABLED" == "true" ]]; then
     [[ "${PUBLIC_ORIGIN:-}" == "https://rubik-edge-01.local" ]] || {
         fail "authenticated deployment requires PUBLIC_ORIGIN=https://rubik-edge-01.local"
@@ -194,6 +197,37 @@ if [[ "$TELEGRAM_NOTIFICATIONS_ENABLED" == "true" ]]; then
     [[ "${OWNER_TIMEZONE:-Europe/Madrid}" == "Europe/Madrid" ]] || {
         fail "Stage 5B deployment requires OWNER_TIMEZONE=Europe/Madrid"
     }
+fi
+if [[ "$LOCAL_LLM_ENABLED_VALUE" == "true" ]]; then
+    [[ -n "${LOCAL_LLM_API_KEY_FILE:-}" ]] || {
+        fail "LOCAL_LLM_API_KEY_FILE is required when local inference is enabled"
+    }
+    [[ "$LOCAL_LLM_API_KEY_FILE" = /* ]] || {
+        fail "LOCAL_LLM_API_KEY_FILE must be absolute"
+    }
+    [[ ! -L "$LOCAL_LLM_API_KEY_FILE" ]] || {
+        fail "local inference key must not be a symbolic link"
+    }
+    [[ -f "$LOCAL_LLM_API_KEY_FILE" && -r "$LOCAL_LLM_API_KEY_FILE" ]] || {
+        fail "local inference key must be a readable regular file"
+    }
+    [[ "$(stat -c '%a' "$LOCAL_LLM_API_KEY_FILE")" == "600" ]] || {
+        fail "local inference key must have mode 600"
+    }
+    [[ "$(stat -c '%U' "$LOCAL_LLM_API_KEY_FILE")" == "$(id -un)" ]] || {
+        fail "local inference key must be owned by the deployment user"
+    }
+    mapfile -t LOCAL_LLM_KEY_LINES <"$LOCAL_LLM_API_KEY_FILE"
+    [[ "${#LOCAL_LLM_KEY_LINES[@]}" -eq 1 ]] || {
+        fail "local inference key must contain exactly one line"
+    }
+    [[ "${#LOCAL_LLM_KEY_LINES[0]}" -ge 32 && "${#LOCAL_LLM_KEY_LINES[0]}" -le 256 ]] || {
+        fail "local inference key must contain between 32 and 256 characters"
+    }
+    [[ ! "${LOCAL_LLM_KEY_LINES[0]}" =~ [[:space:]] ]] || {
+        fail "local inference key must not contain whitespace"
+    }
+    unset LOCAL_LLM_KEY_LINES
 fi
 
 if [[ "$DATABASE_PATH" = /* ]]; then
@@ -254,6 +288,10 @@ fi
 if [[ -n "${TELEGRAM_BOT_TOKEN_FILE:-}" && -f "$TELEGRAM_BOT_TOKEN_FILE" ]]; then
     cp --preserve=all "$TELEGRAM_BOT_TOKEN_FILE" \
         "$DEPLOY_BACKUP/telegram-bot.token"
+fi
+if [[ "$LOCAL_LLM_ENABLED_VALUE" == "true" ]]; then
+    cp --preserve=all "$LOCAL_LLM_API_KEY_FILE" \
+        "$DEPLOY_BACKUP/unoq-ai-01.key"
 fi
 sudo cp -a "$TLS_DIRECTORY" "$DEPLOY_BACKUP/tls"
 

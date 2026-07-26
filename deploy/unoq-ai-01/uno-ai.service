@@ -1,0 +1,14 @@
+[Unit]
+Description=UNO Q local LLM inference service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/arduino/projects/llama.cpp/build/bin/llama-server -m /home/arduino/models/Qwen3-1.7B-Q4_K_M.gguf -c 1024 -t 4 --parallel 1 --host 0.0.0.0 --port 8080 --api-key-file /home/arduino/.config/uno-ai/api-keys
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

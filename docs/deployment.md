@@ -637,3 +637,70 @@ survive.
 
 To roll back, set `TELEGRAM_NOTIFICATION_DELIVERY_ENABLED=false`, reinstall `0.7.2`, and restart
 Casadaqui plus the evaluator if the package changed. Migration `005` is additive and may remain.
+
+## Stage 6A WP1 local-inference connectivity rollout
+
+Release `0.9.0` adds only a packaged RUBIK diagnostic CLI. It adds no service, timer, migration,
+mailbox access, or dashboard surface. Add the `LOCAL_LLM_*` values from `.env.example` to the live
+configuration and deploy first with inference disabled:
+
+```dotenv
+LOCAL_LLM_ENABLED=false
+LOCAL_LLM_BASE_URL=http://unoq-ai-01.local:8080
+LOCAL_LLM_API_KEY_FILE=/home/ubuntu/personal-edge-lab/secrets/unoq-ai-01.key
+LOCAL_LLM_MODEL=qwen3-1.7b-q4-k-m
+LOCAL_LLM_HEALTH_TIMEOUT_SECONDS=5
+LOCAL_LLM_TIMEOUT_SECONDS=60
+LOCAL_LLM_MAX_INPUT_CHARS=512
+LOCAL_LLM_MAX_OUTPUT_TOKENS=32
+```
+
+```bash
+./scripts/deploy-rubik.sh
+set -a
+source .env
+set +a
+python -m personal_edge_lab.apps.ai_cli health
+python -m personal_edge_lab.apps.ai_cli complete --text "Return exactly ready"
+```
+
+Health must succeed without reading a key. Completion must exit `2` while disabled and must not
+contact UNO Q. Then set `LOCAL_LLM_ENABLED=true` and deploy again. The deployment guard verifies
+that the configured key is an absolute, non-symlinked, readable regular file owned by `ubuntu`
+with mode `0600`, and copies it into the private deployment backup.
+
+Run the bounded live test and both packaged commands:
+
+```bash
+RUN_UNOQ_LIVE_TESTS=true python -m pytest -m unoq_live
+python -m personal_edge_lab.apps.ai_cli health
+python -m personal_edge_lab.apps.ai_cli complete --text "Return exactly ready"
+```
+
+Any valid completion envelope is acceptance evidence; exact instruction-following is not a WP1
+quality gate. Confirm a temporary wrong key is categorized without exposing either key:
+
+```bash
+temporary_key="$(mktemp)"
+chmod 0600 "$temporary_key"
+python -c 'from pathlib import Path; import sys; Path(sys.argv[1]).write_text("x" * 32 + "\\n")' \
+  "$temporary_key"
+LOCAL_LLM_API_KEY_FILE="$temporary_key" \
+  python -m personal_edge_lab.apps.ai_cli complete --text "Return exactly ready"
+rm -f -- "$temporary_key"
+```
+
+That command must report `authentication` and exit `5`. Confirm connection categorization:
+
+```bash
+LOCAL_LLM_BASE_URL=http://127.0.0.1:9 LOCAL_LLM_TIMEOUT_SECONDS=1 \
+  python -m personal_edge_lab.apps.ai_cli complete --text "Return exactly ready"
+```
+
+It must report `connection` and exit `3`. Inspect the CLI output and application logs and confirm
+the real key/header, prompt, GGUF path, and provider error body are absent. Finally verify the API,
+collector, alert evaluator, Telegram, dashboard, AC behavior, and WP0 firewall remain healthy.
+
+Rollback requires only setting `LOCAL_LLM_ENABLED=false`, reinstalling the retained `0.8.1` wheel,
+and restarting whichever existing processes received the package. No schema or mailbox rollback
+exists, and the WP0 UNO Q firewall remains installed.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Restrict UNO Q local inference to RUBIK
+Wants=network-pre.target
+Before=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/personal-edge-lab/uno-ai-firewall
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

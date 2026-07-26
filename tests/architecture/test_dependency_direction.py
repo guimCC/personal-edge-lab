@@ -94,3 +94,34 @@ def test_only_expected_real_modules_exist() -> None:
         "platform_status",
         "telemetry",
     }
+
+
+def test_ai_domain_and_port_do_not_import_http_or_framework_packages() -> None:
+    paths = [
+        PACKAGE_ROOT / "domain/ai.py",
+        PACKAGE_ROOT / "application/ports/ai.py",
+    ]
+    forbidden = ("httpx", "pydantic", "fastapi", "personal_edge_lab.infrastructure")
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(forbidden)
+        )
+        for path in paths
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
+def test_ai_httpx_import_is_confined_to_infrastructure() -> None:
+    paths = [
+        PACKAGE_ROOT / "domain/ai.py",
+        PACKAGE_ROOT / "application/ports/ai.py",
+        PACKAGE_ROOT / "apps/ai_cli/__main__.py",
+        PACKAGE_ROOT / "apps/ai_cli/config.py",
+    ]
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name == "httpx"
+        )
+        for path in paths
+    }
+    assert not {path: names for path, names in violations.items() if names}

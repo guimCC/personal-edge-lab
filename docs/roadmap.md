@@ -464,7 +464,16 @@ latency/memory before choosing a model. Email credentials and retrieval stay out
 
 This work receives its own persistent task lifecycle; the notification outbox is not reused as a
 generic AI queue. Casadaqui may later start a triage task and present its result through a separate
-capability.
+capability. See [the Stage 6A implementation roadmap](stage-6a-local-ai-email-triage-plan.md).
+
+Work Package 0 was accepted on RUBIK on 2026-07-26. The UNO Q inference contract is frozen,
+authenticated, restricted to RUBIK at the network layer, stable across service and full-node
+restarts, and explicitly limited to Qwen3 1.7B with one parallel request.
+
+Work Package 1 was accepted on RUBIK as release `0.9.0` on 2026-07-26. The packaged diagnostic CLI
+proves public health and feature-gated authenticated completion with one bounded request, sanitized
+failures, no content logging, and no email, prompt, persistence, retry, scheduler, or dashboard
+scope.
 
 ## Definition of done for every stage
 
@@ -705,3 +714,79 @@ changed, how it was verified, decisions made, and what remains.
 
 - Implement Stage 4 durable alert evaluation and dashboard-visible incident/recovery history
   without adding an external notification channel yet.
+
+### 2026-07-26 — UNO Q inference contract accepted
+
+**Stage:** 6A Work Package 0
+**Status:** Done
+
+**Delivered**
+
+- Captured the real UNO Q service, llama.cpp revision, production model, API-key placement,
+  restart policy, user lingering, network bind, and resource baseline.
+- Installed the private key copy on RUBIK and made one inference slot explicit.
+- Added a persistent legacy-iptables service restricting TCP 8080 to RUBIK at `192.168.1.81`.
+- Removed the unused 4B benchmark model after explicit owner approval.
+- Fixed source-distribution selection so the ignored generated dashboard is present when the
+  isolated wheel-from-source build runs.
+
+**Decisions**
+
+- Use `http://unoq-ai-01.local:8080` as the canonical URL because RUBIK resolved it reliably before
+  and after reboot.
+- Use Qwen3 1.7B Q4_K_M with context 1024, four threads, and one parallel slot.
+- Keep unauthenticated health minimal; require the private bearer key for generation.
+
+**Verification**
+
+- RUBIK received health `200`, unauthenticated completion `401`, and authenticated completion
+  `200`; a non-RUBIK LAN source timed out while SSH remained available.
+- The inference and firewall services remained enabled and active after a full UNO Q reboot.
+- The production process used no swap during the recorded idle and bounded-request checks.
+- The final local gate passed 265 tests, Ruff lint/format, Pyright with the CI interpreter,
+  isolated source/wheel builds, wheel inspection, shell syntax checks, and Git diff checks.
+
+**Known limitations**
+
+- A bounded exact-text diagnostic produced a valid provider response but did not follow its output
+  instruction. Prompt quality remains deferred to the versioned prompt and evaluation packages.
+
+**Next**
+
+- Implement the Work Package 1 packaged `ai_cli` connectivity slice on RUBIK.
+
+### 2026-07-26 — RUBIK-to-UNO-Q connectivity accepted
+
+**Stage:** 6A Work Package 1
+**Status:** Done
+
+**Delivered**
+
+- Released the packaged `personal_edge_lab.apps.ai_cli` health and completion diagnostics as
+  `0.9.0`.
+- Added pure inference types, the narrow language-model port, a one-attempt llama.cpp adapter,
+  sanitized error categories, bounded configuration, and strict mode-`0600` key validation.
+- Extended the guarded deployment to validate and privately back up the inference key when enabled.
+- Kept prompts, email, persistence, retries, schedulers, services, migrations, and dashboard changes
+  out of the slice.
+
+**Verification**
+
+- Local and RUBIK gates each passed 341 tests plus frontend lint, 10 tests, production build, Ruff,
+  Pyright, ShellCheck, isolated packaging, and wheel inspection.
+- The opt-in live test and packaged health/completion commands succeeded on RUBIK.
+- Disabled completion exited `2`, a temporary wrong key returned sanitized `authentication` with
+  exit `5`, and an unavailable local origin returned `connection` with exit `3`.
+- The API reported `0.9.0`; existing platform services, SQLite integrity, the UNO Q service, and the
+  WP0 firewall remained healthy. A non-RUBIK source remained blocked.
+
+**Known limitations**
+
+- The valid diagnostic completion had empty visible message content; instruction quality is not a
+  WP1 gate and remains deferred to prompt/evaluation work.
+- Completion remains one synchronous attempt with no concurrency guard or retry.
+
+**Next**
+
+- Define WP2 concurrency, readiness, retry-policy, and operational evidence boundaries before
+  implementation.

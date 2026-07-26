@@ -10,6 +10,8 @@ REQUIRED_FILES = (
     "personal_edge_lab/apps/api/static/dashboard/index.html",
     "personal_edge_lab/apps/api/static/dashboard/.vite/manifest.json",
     "personal_edge_lab/apps/alert_evaluator/__main__.py",
+    "personal_edge_lab/apps/ai_cli/__main__.py",
+    "personal_edge_lab/apps/ai_cli/config.py",
     "personal_edge_lab/apps/telegram_bot/__main__.py",
     "personal_edge_lab/apps/telegram_bot/owner_bot.py",
     "personal_edge_lab/apps/telegram_bot/capabilities/ac.py",
