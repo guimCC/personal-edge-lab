@@ -2,7 +2,7 @@
 
 ## Scope
 
-Release `0.8.0` makes the existing owner bot an outbound interface for confirmed operational alert
+Release `0.8.1` makes the existing owner bot an outbound interface for confirmed operational alert
 and recovery transitions. No new service is introduced. Alert evaluation stays read-only with
 respect to external systems and Casadaqui remains the only Telegram network process.
 
@@ -52,6 +52,10 @@ Deploy once with delivery disabled, inspect migration `005`, then set
 `TELEGRAM_NOTIFICATION_DELIVERY_ENABLED=true` and restart Casadaqui. `/status` must show notification
 delivery as operational. Rollback reinstalls `0.7.2` and restarts the bot and evaluator as needed;
 the additive migration may remain.
+
+Telegram may return HTTP 400 for an edit whose text and keyboard are already identical, or when an
+old callback acknowledgement has expired. Those two responses are idempotent successes in `0.8.1`;
+other HTTP 400 responses remain failures.
 
 ## Acceptance
 

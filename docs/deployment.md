@@ -597,7 +597,7 @@ adds no migration; existing Telegram audit rows are valid command history and sh
 
 ## Stage 5B proactive Telegram alert rollout
 
-First deploy `0.8.0` with delivery disabled:
+First deploy `0.8.1` with delivery disabled:
 
 ```dotenv
 TELEGRAM_NOTIFICATION_DELIVERY_ENABLED=false

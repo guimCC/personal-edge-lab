@@ -426,7 +426,9 @@ users, webhooks, and remote dashboard exposure remain later slices. See
 
 ### 5B. Proactive Telegram alerts
 
-**Status:** Implemented locally as `0.8.0`; pending guarded RUBIK acceptance.
+**Status:** Implemented as `0.8.1`; pending guarded RUBIK acceptance. `0.8.1` treats Telegram's
+idempotent “message not modified” and expired-callback responses as successful no-ops so one stale
+callback cannot block later owner commands.
 
 Confirmed `alerting` and `recovered` transitions create an outbound Telegram delivery atomically
 with the transition. The existing Casadaqui service drains the SQLite outbox; the evaluator keeps
