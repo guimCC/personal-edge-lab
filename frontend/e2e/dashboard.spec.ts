@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({
       json: {
         status: "healthy",
-        version: "0.7.1",
+        version: "0.7.2",
         checked_at_utc: NOW,
         database: { status: "healthy" },
         telemetry: {

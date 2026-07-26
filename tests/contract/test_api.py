@@ -102,7 +102,7 @@ def test_health_reports_fresh_telemetry(tmp_path) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "healthy",
-        "version": "0.7.1",
+        "version": "0.7.2",
         "checked_at_utc": "2026-07-25T14:00:00Z",
         "database": {"status": "healthy"},
         "telemetry": {

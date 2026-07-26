@@ -27,7 +27,7 @@ export function installPreviewApi(): void {
     if (url === "/health") {
       return json({
         status: "healthy",
-        version: "0.7.1",
+        version: "0.7.2",
         checked_at_utc: NOW.toISOString(),
         database: { status: "healthy" },
         telemetry: {
