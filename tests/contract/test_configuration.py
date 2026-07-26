@@ -16,6 +16,10 @@ from personal_edge_lab.apps.api.config import (
     ConfigurationError as ApiConfigurationError,
 )
 from personal_edge_lab.apps.api.config import Settings as ApiSettings
+from personal_edge_lab.apps.telegram_bot.config import (
+    ConfigurationError as TelegramConfigurationError,
+)
+from personal_edge_lab.apps.telegram_bot.config import Settings as TelegramSettings
 from personal_edge_lab.apps.telemetry_collector.config import (
     ConfigurationError as TelemetryConfigurationError,
 )
@@ -72,6 +76,18 @@ ALERT_VARIABLES = (
     "ALERT_EDGE_ALERT_AFTER_SECONDS",
     "ALERT_RECOVERY_DISPLAY_SECONDS",
     "ALERT_EVALUATOR_STALE_AFTER_SECONDS",
+)
+TELEGRAM_VARIABLES = (
+    "TELEGRAM_BOT_ENABLED",
+    "TELEGRAM_BOT_TOKEN_FILE",
+    "TELEGRAM_OWNER_USER_ID",
+    "TELEGRAM_AC_COMMAND_RATE_LIMIT_PER_MINUTE",
+    "TELEGRAM_POLL_TIMEOUT_SECONDS",
+    "DATABASE_PATH",
+    "AC_DEVICE_ID",
+    "AC_NODE_BASE_URL",
+    "AC_COMMAND_TIMEOUT_SECONDS",
+    "LOG_LEVEL",
 )
 
 
@@ -296,6 +312,53 @@ def test_invalid_alert_evaluator_environment_is_rejected(
     monkeypatch.setenv(name, value)
     with pytest.raises(AlertConfigurationError, match=message):
         AlertSettings.from_env()
+
+
+def test_telegram_environment_requires_explicit_enablement_and_secret(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    clear(monkeypatch, TELEGRAM_VARIABLES)
+    token = tmp_path / "telegram-bot.token"
+    token.write_text("123456:secret-token\n", encoding="utf-8")
+    monkeypatch.setenv("TELEGRAM_BOT_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN_FILE", str(token))
+    monkeypatch.setenv("TELEGRAM_OWNER_USER_ID", "112233")
+
+    settings = TelegramSettings.from_env()
+
+    assert settings.token_file == token
+    assert settings.read_token() == "123456:secret-token"
+    assert settings.owner_user_id == 112233
+    assert settings.device_id == "ac-controller-01"
+    assert settings.command_rate_limit_per_minute == 6
+    assert settings.poll_timeout_seconds == 25
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("TELEGRAM_BOT_ENABLED", "false", "must be true"),
+        ("TELEGRAM_OWNER_USER_ID", "0", "greater than zero"),
+        ("TELEGRAM_POLL_TIMEOUT_SECONDS", "51", "must not exceed"),
+    ],
+)
+def test_invalid_telegram_environment_is_rejected(
+    monkeypatch,
+    tmp_path,
+    name: str,
+    value: str,
+    message: str,
+) -> None:
+    clear(monkeypatch, TELEGRAM_VARIABLES)
+    token = tmp_path / "telegram-bot.token"
+    token.write_text("123456:secret-token\n", encoding="utf-8")
+    monkeypatch.setenv("TELEGRAM_BOT_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN_FILE", str(token))
+    monkeypatch.setenv("TELEGRAM_OWNER_USER_ID", "112233")
+    monkeypatch.setenv(name, value)
+    with pytest.raises(TelegramConfigurationError, match=message):
+        TelegramSettings.from_env()
 
 
 @pytest.mark.parametrize(
