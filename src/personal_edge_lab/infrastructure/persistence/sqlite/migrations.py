@@ -237,6 +237,95 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version="005_notification_outbox",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS notification_policy (
+                channel TEXT NOT NULL,
+                recipient TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                mode TEXT NOT NULL
+                    CHECK (mode IN ('enabled', 'paused_until', 'paused_indefinitely')),
+                paused_until_utc TEXT,
+                changed_at_utc TEXT NOT NULL,
+                changed_by TEXT NOT NULL,
+                PRIMARY KEY (channel, recipient, topic),
+                CHECK (
+                    (mode = 'paused_until' AND paused_until_utc IS NOT NULL)
+                    OR (mode != 'paused_until' AND paused_until_utc IS NULL)
+                )
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS notification_outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                channel TEXT NOT NULL,
+                recipient TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                event_type TEXT NOT NULL
+                    CHECK (
+                        event_type IN (
+                            'operational_alert_started',
+                            'operational_alert_recovered'
+                        )
+                    ),
+                device_id TEXT NOT NULL,
+                alert_type TEXT NOT NULL
+                    CHECK (alert_type IN ('telemetry_stale', 'edge_unavailable')),
+                incident_id INTEGER NOT NULL,
+                transition_id INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                occurred_at_utc TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK (
+                        status IN (
+                            'pending', 'leased', 'delivered', 'suppressed', 'expired'
+                        )
+                    ),
+                attempt_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (attempt_count >= 0),
+                coalesced_count INTEGER NOT NULL DEFAULT 1
+                    CHECK (coalesced_count >= 1),
+                next_attempt_at_utc TEXT NOT NULL,
+                leased_until_utc TEXT,
+                last_attempt_at_utc TEXT,
+                delivered_at_utc TEXT,
+                external_message_id TEXT,
+                last_error_category TEXT,
+                last_error_message TEXT,
+                FOREIGN KEY (incident_id) REFERENCES alert_incidents (id),
+                FOREIGN KEY (transition_id) REFERENCES alert_transition_events (id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_notification_outbox_due
+            ON notification_outbox (status, next_attempt_at_utc, id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_notification_outbox_alert_flapping
+            ON notification_outbox (
+                channel, recipient, topic, device_id, alert_type, occurred_at_utc
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS notification_delivery_runtime (
+                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                last_started_at_utc TEXT NOT NULL,
+                last_finished_at_utc TEXT,
+                last_outcome TEXT
+                    CHECK (last_outcome IS NULL OR last_outcome IN ('success', 'failure')),
+                delivered_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (delivered_count >= 0),
+                failed_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (failed_count >= 0),
+                last_error_category TEXT,
+                last_error_message TEXT
+            )
+            """,
+        ),
+    ),
 )
 
 

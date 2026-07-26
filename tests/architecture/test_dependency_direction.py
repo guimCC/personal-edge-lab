@@ -90,6 +90,7 @@ def test_only_expected_real_modules_exist() -> None:
         "ac_control",
         "alerting",
         "authentication",
+        "notifications",
         "platform_status",
         "telemetry",
     }

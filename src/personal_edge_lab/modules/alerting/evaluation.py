@@ -22,6 +22,10 @@ from personal_edge_lab.domain.alerting import (
     AlertTransition,
     AlertType,
 )
+from personal_edge_lab.domain.notifications import (
+    NotificationEventType,
+    OperationalNotification,
+)
 from personal_edge_lab.domain.telemetry import (
     CollectionAttemptOutcome,
     CollectorRuntimeStatus,
@@ -126,6 +130,9 @@ class EvaluateOperationalAlerts:
                     states.append(state)
                     if transition is not None:
                         transitions.append(transition)
+                        notification = _notification_for_transition(repository, transition)
+                        if notification is not None:
+                            repository.enqueue_notification(notification)
                 repository.record_evaluator_success(evaluated_at)
                 repository.commit()
             except BaseException:
@@ -406,6 +413,36 @@ def _append_transition(
         transitioned_at=transitioned_at,
         evidence_category=current.evidence_category,
         evidence_message=current.evidence_message,
+    )
+
+
+def _notification_for_transition(
+    repository: AlertEvaluationRepository,
+    transition: AlertTransition,
+) -> OperationalNotification | None:
+    event_type: NotificationEventType
+    if transition.to_state is AlertLifecycleState.ALERTING:
+        event_type = NotificationEventType.OPERATIONAL_ALERT_STARTED
+    elif transition.to_state is AlertLifecycleState.RECOVERED:
+        event_type = NotificationEventType.OPERATIONAL_ALERT_RECOVERED
+    else:
+        return None
+    if transition.incident_id is None:
+        raise RuntimeError("notifiable alert transition has no incident")
+    incident = repository.get_incident(transition.incident_id)
+    if incident is None:
+        raise RuntimeError("notifiable alert transition has no stored incident")
+    return OperationalNotification(
+        transition_id=transition.id,
+        incident_id=incident.id,
+        device_id=transition.device_id,
+        alert_type=transition.alert_type,
+        event_type=event_type,
+        occurred_at=transition.transitioned_at,
+        suspect_started_at=incident.suspect_started_at,
+        alerting_at=incident.alerting_at,
+        recovered_at=incident.recovered_at,
+        evidence_category=transition.evidence_category,
     )
 
 

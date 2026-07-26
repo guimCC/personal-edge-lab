@@ -14,6 +14,7 @@ from personal_edge_lab.domain.alerting import (
     AlertTransition,
     AlertType,
 )
+from personal_edge_lab.domain.notifications import OperationalNotification
 from personal_edge_lab.domain.telemetry import CollectorRuntimeStatus, TemperatureReading
 
 
@@ -91,6 +92,8 @@ class AlertEvaluationRepository(Protocol):
         evidence_category: str,
         evidence_message: str,
     ) -> AlertTransition: ...
+
+    def enqueue_notification(self, notification: OperationalNotification) -> None: ...
 
 
 class AlertQueryRepository(Protocol):

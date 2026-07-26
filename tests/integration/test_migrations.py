@@ -39,6 +39,11 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         "idx_alert_incident_device_newest",
         "alert_transition_events",
         "idx_alert_transition_device_newest",
+        "notification_policy",
+        "notification_outbox",
+        "idx_notification_outbox_due",
+        "idx_notification_outbox_alert_flapping",
+        "notification_delivery_runtime",
     } <= object_names(database)
     with sqlite3.connect(database) as connection:
         versions = list(connection.execute("SELECT version FROM schema_migrations"))
@@ -47,6 +52,7 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         ("002_collector_runtime_status",),
         ("003_authenticated_control",),
         ("004_operational_alerts",),
+        ("005_notification_outbox",),
     ]
 
 
@@ -122,4 +128,5 @@ def test_concurrent_app_startup_applies_migration_once(tmp_path) -> None:
         ("002_collector_runtime_status", 1),
         ("003_authenticated_control", 1),
         ("004_operational_alerts", 1),
+        ("005_notification_outbox", 1),
     ]

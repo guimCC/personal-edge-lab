@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from personal_edge_lab.domain.alerting import (
@@ -13,6 +14,11 @@ from personal_edge_lab.domain.alerting import (
     AlertState,
     AlertTransition,
     AlertType,
+)
+from personal_edge_lab.domain.notifications import (
+    NotificationDeliveryStatus,
+    NotificationPolicyMode,
+    OperationalNotification,
 )
 from personal_edge_lab.domain.telemetry import (
     CollectionAttemptOutcome,
@@ -318,6 +324,120 @@ class SqliteAlertEvaluationRepository:
             transitioned_at=transitioned_at,
             evidence_category=evidence_category,
             evidence_message=evidence_message,
+        )
+
+    def enqueue_notification(self, notification: OperationalNotification) -> None:
+        policy = self._connection.execute(
+            """
+            SELECT mode, paused_until_utc
+            FROM notification_policy
+            WHERE channel = 'telegram'
+              AND recipient = 'owner'
+              AND topic = 'operational_alerts'
+            """
+        ).fetchone()
+        paused = False
+        if policy is not None:
+            mode = NotificationPolicyMode(str(policy["mode"]))
+            paused_until = _optional_datetime(policy["paused_until_utc"])
+            paused = mode is NotificationPolicyMode.PAUSED_INDEFINITELY or (
+                mode is NotificationPolicyMode.PAUSED_UNTIL
+                and paused_until is not None
+                and notification.occurred_at < paused_until
+            )
+
+        status = (
+            NotificationDeliveryStatus.SUPPRESSED if paused else NotificationDeliveryStatus.PENDING
+        )
+        next_attempt_at = notification.occurred_at
+        coalesced_count = 1
+        error_category = "notifications_paused" if paused else None
+        error_message = "Notification suppressed by owner policy" if paused else None
+
+        if not paused:
+            flap_window_start = notification.occurred_at - timedelta(minutes=15)
+            recent = self._connection.execute(
+                """
+                SELECT id, occurred_at_utc, status, last_error_category
+                FROM notification_outbox
+                WHERE channel = 'telegram'
+                  AND recipient = 'owner'
+                  AND topic = 'operational_alerts'
+                  AND device_id = ?
+                  AND alert_type = ?
+                  AND occurred_at_utc >= ?
+                  AND last_error_category IS NOT 'notifications_paused'
+                ORDER BY occurred_at_utc ASC, id ASC
+                """,
+                (
+                    notification.device_id,
+                    notification.alert_type.value,
+                    flap_window_start.isoformat(),
+                ),
+            ).fetchall()
+            if len(recent) >= 2:
+                first_at = datetime.fromisoformat(recent[0]["occurred_at_utc"])
+                next_attempt_at = max(
+                    notification.occurred_at,
+                    first_at + timedelta(minutes=15),
+                )
+                coalesced_count = len(recent) + 1
+                self._connection.execute(
+                    """
+                    UPDATE notification_outbox
+                    SET status = 'suppressed',
+                        leased_until_utc = NULL,
+                        last_error_category = 'coalesced',
+                        last_error_message = 'Superseded by a newer unstable-state event'
+                    WHERE channel = 'telegram'
+                      AND recipient = 'owner'
+                      AND topic = 'operational_alerts'
+                      AND device_id = ?
+                      AND alert_type = ?
+                      AND status = 'pending'
+                      AND coalesced_count > 1
+                    """,
+                    (notification.device_id, notification.alert_type.value),
+                )
+
+        payload = {
+            "suspect_started_at_utc": notification.suspect_started_at.isoformat(),
+            "alerting_at_utc": notification.alerting_at.isoformat(),
+            "recovered_at_utc": (
+                None if notification.recovered_at is None else notification.recovered_at.isoformat()
+            ),
+            "evidence_category": notification.evidence_category,
+        }
+        self._connection.execute(
+            """
+            INSERT INTO notification_outbox (
+                dedupe_key, channel, recipient, topic, event_type, device_id,
+                alert_type, incident_id, transition_id, payload_json,
+                occurred_at_utc, status, attempt_count, coalesced_count,
+                next_attempt_at_utc, leased_until_utc, last_attempt_at_utc,
+                delivered_at_utc, external_message_id, last_error_category,
+                last_error_message
+            ) VALUES (
+                ?, 'telegram', 'owner', 'operational_alerts', ?, ?, ?, ?, ?, ?,
+                ?, ?, 0, ?, ?, NULL, NULL, NULL, NULL, ?, ?
+            )
+            ON CONFLICT(dedupe_key) DO NOTHING
+            """,
+            (
+                f"alert-transition:{notification.transition_id}:telegram:owner",
+                notification.event_type.value,
+                notification.device_id,
+                notification.alert_type.value,
+                notification.incident_id,
+                notification.transition_id,
+                json.dumps(payload, separators=(",", ":"), sort_keys=True),
+                notification.occurred_at.isoformat(),
+                status.value,
+                coalesced_count,
+                next_attempt_at.isoformat(),
+                error_category,
+                error_message,
+            ),
         )
 
 

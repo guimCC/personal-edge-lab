@@ -109,4 +109,5 @@ def test_api_process_starts_migrates_and_stops_cleanly(tmp_path) -> None:
         ("002_collector_runtime_status",),
         ("003_authenticated_control",),
         ("004_operational_alerts",),
+        ("005_notification_outbox",),
     ]
