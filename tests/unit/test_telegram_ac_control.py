@@ -255,10 +255,10 @@ def test_status_shows_shared_operational_health_and_refreshes_in_place() -> None
 
     assert calls == 1
     assert "<b>API</b> · disponible" in gateway.sent[-1]["text"]
-    assert "<b>Colector</b> · activo · pulso hace 8 s" in gateway.sent[-1]["text"]
-    assert "<b>ESP32</b> · accesible · éxito hace 8 s" in gateway.sent[-1]["text"]
-    assert "<b>Telemetría</b> · fresca · muestra hace 8 s" in gateway.sent[-1]["text"]
-    assert "<b>Alertas</b> · normal · evaluación hace 10 s" in gateway.sent[-1]["text"]
+    assert "<b>Colector</b> · activo · 8 s" in gateway.sent[-1]["text"]
+    assert "<b>ESP32</b> · accesible · 8 s" in gateway.sent[-1]["text"]
+    assert "<b>Telemetría</b> · fresca · 8 s" in gateway.sent[-1]["text"]
+    assert "<b>Alertas</b> · normal · 10 s" in gateway.sent[-1]["text"]
     assert "<b>Estado general · OPERATIVO</b>" in gateway.sent[-1]["text"]
     refresh = keyboard_callback(gateway.sent[-1], 0)
 
@@ -303,9 +303,9 @@ def test_status_distinguishes_each_degraded_component() -> None:
     text = status_text(degraded)
 
     assert "<b>API</b> · no responde" in text
-    assert "<b>Colector</b> · sin pulso reciente · hace 1 min" in text
+    assert "<b>Colector</b> · sin pulso reciente · 1 min" in text
     assert "<b>ESP32</b> · no disponible" in text
-    assert "<b>Telemetría</b> · atrasada · muestra hace 1 min" in text
+    assert "<b>Telemetría</b> · atrasada · 1 min" in text
     assert "<b>Alertas</b> · 2 incidencias activas" in text
     assert "<b>Estado general · DEGRADADO</b>" in text
 

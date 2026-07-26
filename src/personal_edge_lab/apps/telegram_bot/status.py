@@ -83,9 +83,9 @@ def _api_line(reachable: bool) -> str:
 def _collector_line(status: CollectorHealthStatus, age_seconds: float | None) -> str:
     age = _age_label(age_seconds)
     if status is CollectorHealthStatus.RUNNING:
-        return f"✅ <b>Colector</b> · activo · pulso {age}"
+        return f"✅ <b>Colector</b> · activo · {age}"
     if status is CollectorHealthStatus.STOPPED:
-        return f"⏹ <b>Colector</b> · detenido · último pulso {age}"
+        return f"⏹ <b>Colector</b> · detenido · {age}"
     if status is CollectorHealthStatus.STALE:
         return f"⚠️ <b>Colector</b> · sin pulso reciente · {age}"
     return "❔ <b>Colector</b> · sin datos"
@@ -99,28 +99,22 @@ def _edge_line(
     checked_at: datetime,
 ) -> str:
     if status is EdgeNodeHealthStatus.REACHABLE:
-        return (
-            "✅ <b>ESP32</b> · accesible · éxito "
-            f"{_age_label(_seconds_since(last_success_at, checked_at))}"
-        )
+        age = _age_label(_seconds_since(last_success_at, checked_at))
+        return f"✅ <b>ESP32</b> · accesible · {age}"
     if status is EdgeNodeHealthStatus.UNREACHABLE:
-        return (
-            "❌ <b>ESP32</b> · no disponible · intento "
-            f"{_age_label(_seconds_since(last_attempt_at, checked_at))}"
-        )
+        age = _age_label(_seconds_since(last_attempt_at, checked_at))
+        return f"❌ <b>ESP32</b> · no disponible · {age}"
     if last_success_at is not None:
-        return (
-            "❔ <b>ESP32</b> · estado desconocido · último éxito "
-            f"{_age_label(_seconds_since(last_success_at, checked_at))}"
-        )
+        age = _age_label(_seconds_since(last_success_at, checked_at))
+        return f"❔ <b>ESP32</b> · estado desconocido · {age}"
     return "❔ <b>ESP32</b> · estado desconocido"
 
 
 def _telemetry_line(status: TelemetryFreshness, age_seconds: float | None) -> str:
     if status is TelemetryFreshness.FRESH:
-        return f"✅ <b>Telemetría</b> · fresca · muestra {_age_label(age_seconds)}"
+        return f"✅ <b>Telemetría</b> · fresca · {_age_label(age_seconds)}"
     if status is TelemetryFreshness.STALE:
-        return f"⚠️ <b>Telemetría</b> · atrasada · muestra {_age_label(age_seconds)}"
+        return f"⚠️ <b>Telemetría</b> · atrasada · {_age_label(age_seconds)}"
     return "❔ <b>Telemetría</b> · sin datos"
 
 
@@ -132,14 +126,14 @@ def _alerts_line(
 ) -> str:
     evaluated = _age_label(evaluator_age_seconds)
     if status is AlertStatusSummary.HEALTHY:
-        return f"✅ <b>Alertas</b> · normal · evaluación {evaluated}"
+        return f"✅ <b>Alertas</b> · normal · {evaluated}"
     if status is AlertStatusSummary.RECOVERED:
-        return f"✅ <b>Alertas</b> · recuperadas · evaluación {evaluated}"
+        return f"✅ <b>Alertas</b> · recuperadas · {evaluated}"
     if status is AlertStatusSummary.SUSPECT:
-        return f"⚠️ <b>Alertas</b> · observando · evaluación {evaluated}"
+        return f"⚠️ <b>Alertas</b> · observando · {evaluated}"
     if status is AlertStatusSummary.ALERTING:
         noun = "incidencia activa" if active_count == 1 else "incidencias activas"
-        return f"❌ <b>Alertas</b> · {active_count} {noun} · evaluación {evaluated}"
+        return f"❌ <b>Alertas</b> · {active_count} {noun} · {evaluated}"
     return "❔ <b>Alertas</b> · evaluación desconocida"
 
 
@@ -154,17 +148,17 @@ def _age_label(age_seconds: float | None) -> str:
         return "desconocido"
     seconds = max(0, round(age_seconds))
     if seconds < 1:
-        return "ahora"
+        return "0 s"
     if seconds < 60:
-        return f"hace {seconds} s"
+        return f"{seconds} s"
     minutes, _remaining_seconds = divmod(seconds, 60)
     if minutes < 60:
-        return f"hace {minutes} min"
+        return f"{minutes} min"
     hours, remaining_minutes = divmod(minutes, 60)
     if hours < 24:
-        return f"hace {hours} h {remaining_minutes} min"
+        return f"{hours} h {remaining_minutes} min"
     days = hours // 24
-    return f"hace {days} d"
+    return f"{days} d"
 
 
 def _utc_label(value: datetime) -> str:
