@@ -15,6 +15,11 @@ from personal_edge_lab.apps.telegram_bot.contracts import (
     HomeAction,
     TelegramGateway,
 )
+from personal_edge_lab.domain.notifications import (
+    NotificationOverview,
+    NotificationPolicyMode,
+    NotificationRuntimeOutcome,
+)
 from personal_edge_lab.modules.alerting import AlertStatusSummary
 from personal_edge_lab.modules.platform_status import PlatformHealth, PlatformHealthStatus
 from personal_edge_lab.modules.telemetry import (
@@ -41,6 +46,9 @@ class TelegramStatusSnapshot:
     platform: PlatformHealth
     api_reachable: bool
     version: str
+    notifications: NotificationOverview | None = None
+    notifications_enabled: bool = False
+    notification_runtime_stale_after_seconds: float = 90
 
 
 StatusProvider = Callable[[], TelegramStatusSnapshot]
@@ -76,6 +84,10 @@ class StatusCapability:
         )
 
     def handle_callback(self, action: str, callback: AuthorizedCallback) -> None:
+        if action == "open":
+            self._gateway.answer_callback(callback_query_id=callback.query_id)
+            self._show(chat_id=callback.chat_id)
+            return
         if action not in {"refresh", "refresh_status"}:
             raise ValueError("unknown status callback action")
         self._gateway.answer_callback(
@@ -114,7 +126,12 @@ class StatusCapability:
 
 def status_text(snapshot: TelegramStatusSnapshot) -> str:
     health = snapshot.platform
-    overall_healthy = snapshot.api_reachable and health.status is PlatformHealthStatus.HEALTHY
+    notifications_healthy = _notifications_healthy(snapshot, checked_at=health.checked_at)
+    overall_healthy = (
+        snapshot.api_reachable
+        and health.status is PlatformHealthStatus.HEALTHY
+        and notifications_healthy
+    )
     overall_icon = "✅" if overall_healthy else "⚠️"
     overall_label = "OPERATIVO" if overall_healthy else "DEGRADADO"
     lines = [
@@ -135,12 +152,63 @@ def status_text(snapshot: TelegramStatusSnapshot) -> str:
             active_count=health.alerts.active_count,
             evaluator_age_seconds=health.alerts.evaluator_age_seconds,
         ),
+        _notifications_line(snapshot, checked_at=health.checked_at),
         "✅ <b>Telegram</b> · conectado",
         "",
         f"{overall_icon} <b>Estado general · {overall_label}</b>",
         f"Versión {snapshot.version} · {_utc_label(health.checked_at)}",
     ]
     return "\n".join(lines)
+
+
+def _notifications_healthy(
+    snapshot: TelegramStatusSnapshot,
+    *,
+    checked_at: datetime,
+) -> bool:
+    if not snapshot.notifications_enabled:
+        return True
+    overview = snapshot.notifications
+    if overview is None or overview.policy.is_paused(checked_at):
+        return True
+    runtime = overview.runtime
+    if (
+        runtime is None
+        or runtime.last_finished_at is None
+        or runtime.last_outcome is not NotificationRuntimeOutcome.SUCCESS
+        or overview.failed_pending_count > 0
+    ):
+        return False
+    return (
+        checked_at - runtime.last_finished_at
+    ).total_seconds() <= snapshot.notification_runtime_stale_after_seconds
+
+
+def _notifications_line(
+    snapshot: TelegramStatusSnapshot,
+    *,
+    checked_at: datetime,
+) -> str:
+    if not snapshot.notifications_enabled:
+        return "⏸ <b>Notificaciones</b> · entrega desactivada"
+    overview = snapshot.notifications
+    if overview is None:
+        return "❔ <b>Notificaciones</b> · estado desconocido"
+    policy = overview.policy
+    if policy.mode is NotificationPolicyMode.PAUSED_INDEFINITELY:
+        return "🔕 <b>Notificaciones</b> · pausadas indefinidamente"
+    if policy.is_paused(checked_at):
+        remaining = (
+            None
+            if policy.paused_until is None
+            else max(0.0, (policy.paused_until - checked_at).total_seconds())
+        )
+        return f"🔕 <b>Notificaciones</b> · pausadas · {_age_label(remaining)}"
+    if not _notifications_healthy(snapshot, checked_at=checked_at):
+        return "⚠️ <b>Notificaciones</b> · entrega degradada"
+    if overview.pending_count:
+        return f"⏳ <b>Notificaciones</b> · {overview.pending_count} pendientes"
+    return "✅ <b>Notificaciones</b> · operativas"
 
 
 def status_unavailable_text(version: str) -> str:

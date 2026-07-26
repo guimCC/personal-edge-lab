@@ -41,3 +41,26 @@ def test_failed_delivery_keeps_the_update_available_for_safe_replay() -> None:
         polling._process([{"update_id": 8}])
 
     assert polling._offset is None
+
+
+def test_failed_proactive_delivery_does_not_starve_inbound_updates() -> None:
+    stop = threading.Event()
+    handled: list[int] = []
+
+    class OneUpdateSource:
+        def get_updates(self, *, offset: int | None, timeout_seconds: int):
+            stop.set()
+            return [{"update_id": 12}]
+
+    polling = TelegramPollingLoop(
+        source=OneUpdateSource(),
+        handle_update=lambda update: handled.append(update["update_id"]),
+        stop_event=stop,
+        poll_timeout_seconds=25,
+        before_poll=lambda: (_ for _ in ()).throw(RuntimeError("delivery failure")),
+    )
+
+    polling.run()
+
+    assert handled == [12]
+    assert polling._offset == 13

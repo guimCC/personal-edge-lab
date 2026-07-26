@@ -17,11 +17,15 @@ from personal_edge_lab.apps.telegram_bot.capabilities.ac import (
     PanelState,
     latest_requested_state,
 )
+from personal_edge_lab.apps.telegram_bot.capabilities.notifications import (
+    NotificationsCapability,
+)
 from personal_edge_lab.apps.telegram_bot.capabilities.status import (
     StatusCapability,
     TelegramStatusSnapshot,
 )
 from personal_edge_lab.apps.telegram_bot.config import ConfigurationError, Settings
+from personal_edge_lab.apps.telegram_bot.delivery import TelegramNotificationSender
 from personal_edge_lab.apps.telegram_bot.owner_bot import OwnerBot
 from personal_edge_lab.apps.telegram_bot.polling import TelegramPollingLoop
 from personal_edge_lab.domain.ac import CommandExecution, CommandRequestContext
@@ -36,6 +40,9 @@ from personal_edge_lab.infrastructure.persistence.sqlite.command_audit import (
     SqliteCommandAuditRepository,
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+from personal_edge_lab.infrastructure.persistence.sqlite.notifications import (
+    SqliteNotificationRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.telemetry import (
     SqliteTelemetryRepository,
 )
@@ -44,6 +51,10 @@ from personal_edge_lab.infrastructure.telegram.bot_api import (
     TelegramBotClient,
 )
 from personal_edge_lab.modules.ac_control import CommandService, ExecuteCoolOnlyCommand
+from personal_edge_lab.modules.notifications import (
+    DrainNotificationOutbox,
+    ManageNotificationPolicy,
+)
 from personal_edge_lab.modules.platform_status import GetPlatformHealth
 
 LOGGER = logging.getLogger(__name__)
@@ -114,10 +125,17 @@ def main(*, stop_event: threading.Event | None = None) -> int:
             collector_stale_after_seconds=settings.collector_stale_after_seconds,
             evaluator_stale_after_seconds=settings.alert_evaluator_stale_after_seconds,
         ).execute()
+        with SqliteNotificationRepository(settings.database_path) as repository:
+            notifications = repository.overview(now=platform.checked_at)
         return TelegramStatusSnapshot(
             platform=platform,
             api_reachable=api_reachable,
             version=__version__,
+            notifications=notifications,
+            notifications_enabled=settings.notification_delivery_enabled,
+            notification_runtime_stale_after_seconds=(
+                settings.notification_runtime_stale_after_seconds
+            ),
         )
 
     try:
@@ -142,6 +160,14 @@ def main(*, stop_event: threading.Event | None = None) -> int:
                 status_provider=platform_status,
                 version=__version__,
             )
+            notification_policy = ManageNotificationPolicy(
+                lambda: SqliteNotificationRepository(settings.database_path)
+            )
+            notifications_capability = NotificationsCapability(
+                gateway=telegram,
+                policy=notification_policy,
+                owner_timezone=settings.owner_timezone,
+            )
             ac_capability = AcCapability(
                 gateway=telegram,
                 owner_user_id=settings.owner_user_id,
@@ -153,14 +179,36 @@ def main(*, stop_event: threading.Event | None = None) -> int:
             owner_bot = OwnerBot(
                 gateway=telegram,
                 owner_user_id=settings.owner_user_id,
-                capabilities=(status_capability, ac_capability),
+                capabilities=(
+                    status_capability,
+                    ac_capability,
+                    notifications_capability,
+                ),
             )
             telegram.set_commands([command.as_api_payload() for command in owner_bot.commands])
+            before_poll = None
+            if settings.notification_delivery_enabled:
+                drain_notifications = DrainNotificationOutbox(
+                    lambda: SqliteNotificationRepository(settings.database_path),
+                    sender=TelegramNotificationSender(
+                        gateway=telegram,
+                        owner_user_id=settings.owner_user_id,
+                    ),
+                    batch_size=settings.notification_batch_size,
+                    lease_seconds=settings.notification_lease_seconds,
+                    max_age_seconds=settings.notification_max_age_seconds,
+                )
+
+                def deliver_notifications() -> None:
+                    drain_notifications.execute()
+
+                before_poll = deliver_notifications
             TelegramPollingLoop(
                 source=telegram,
                 handle_update=owner_bot.handle_update,
                 stop_event=shutdown,
                 poll_timeout_seconds=settings.poll_timeout_seconds,
+                before_poll=before_poll,
             ).run()
     except (OSError, sqlite3.Error, TelegramApiError) as error:
         LOGGER.error("Telegram bot stopped after an operational failure: %s", error)

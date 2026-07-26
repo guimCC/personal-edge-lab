@@ -30,18 +30,28 @@ class TelegramPollingLoop:
         stop_event: threading.Event,
         poll_timeout_seconds: int,
         retry_delay_seconds: float = 2,
+        before_poll: Callable[[], None] | None = None,
     ) -> None:
         self._source = source
         self._handle_update = handle_update
         self._stop_event = stop_event
         self._poll_timeout_seconds = poll_timeout_seconds
         self._retry_delay_seconds = retry_delay_seconds
+        self._before_poll = before_poll
         self._offset: int | None = None
 
     def run(self) -> None:
         LOGGER.info("Casadaqui owner operations bot started")
         try:
             while not self._stop_event.is_set():
+                if self._before_poll is not None:
+                    try:
+                        self._before_poll()
+                    except Exception:
+                        LOGGER.warning(
+                            "Proactive notification delivery cycle failed; "
+                            "continuing with inbound updates"
+                        )
                 try:
                     updates = self._source.get_updates(
                         offset=self._offset,

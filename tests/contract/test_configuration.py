@@ -83,6 +83,12 @@ TELEGRAM_VARIABLES = (
     "TELEGRAM_OWNER_USER_ID",
     "TELEGRAM_AC_COMMAND_RATE_LIMIT_PER_MINUTE",
     "TELEGRAM_POLL_TIMEOUT_SECONDS",
+    "TELEGRAM_NOTIFICATION_DELIVERY_ENABLED",
+    "TELEGRAM_NOTIFICATION_BATCH_SIZE",
+    "TELEGRAM_NOTIFICATION_LEASE_SECONDS",
+    "TELEGRAM_NOTIFICATION_MAX_AGE_SECONDS",
+    "TELEGRAM_NOTIFICATION_RUNTIME_STALE_AFTER_SECONDS",
+    "OWNER_TIMEZONE",
     "API_PORT",
     "API_TELEMETRY_STALE_AFTER_SECONDS",
     "API_COLLECTOR_STALE_AFTER_SECONDS",
@@ -343,6 +349,12 @@ def test_telegram_environment_requires_explicit_enablement_and_secret(
     assert settings.telemetry_stale_after_seconds == 45
     assert settings.collector_stale_after_seconds == 45
     assert settings.alert_evaluator_stale_after_seconds == 90
+    assert settings.notification_delivery_enabled is False
+    assert settings.notification_batch_size == 20
+    assert settings.notification_lease_seconds == 60
+    assert settings.notification_max_age_seconds == 86400
+    assert settings.notification_runtime_stale_after_seconds == 90
+    assert settings.owner_timezone.key == "Europe/Madrid"
 
 
 @pytest.mark.parametrize(
@@ -351,6 +363,8 @@ def test_telegram_environment_requires_explicit_enablement_and_secret(
         ("TELEGRAM_BOT_ENABLED", "false", "must be true"),
         ("TELEGRAM_OWNER_USER_ID", "0", "greater than zero"),
         ("TELEGRAM_POLL_TIMEOUT_SECONDS", "51", "must not exceed"),
+        ("TELEGRAM_NOTIFICATION_BATCH_SIZE", "101", "must not exceed"),
+        ("OWNER_TIMEZONE", "Mars/Olympus", "known timezone"),
     ],
 )
 def test_invalid_telegram_environment_is_rejected(

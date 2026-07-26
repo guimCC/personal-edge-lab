@@ -46,6 +46,30 @@ def test_api_failures_never_expose_the_bot_token() -> None:
 
     assert TOKEN not in str(caught.value)
     assert str(caught.value) == "Telegram rejected the request (code 401)"
+    assert caught.value.category == "http_status"
+
+
+def test_rate_limit_exposes_only_structured_retry_metadata() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={
+                "ok": False,
+                "error_code": 429,
+                "description": f"wait because {TOKEN}",
+                "parameters": {"retry_after": 17},
+            },
+        )
+
+    with (
+        TelegramBotClient(token=TOKEN, transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(TelegramApiError) as caught,
+    ):
+        client.get_me()
+
+    assert TOKEN not in str(caught.value)
+    assert caught.value.category == "rate_limited"
+    assert caught.value.retry_after_seconds == 17
 
 
 def test_messages_use_native_html_and_inline_button_styles() -> None:

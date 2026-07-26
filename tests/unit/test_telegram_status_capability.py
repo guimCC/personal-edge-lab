@@ -10,6 +10,13 @@ from personal_edge_lab.apps.telegram_bot.capabilities.status import (
     status_text,
 )
 from personal_edge_lab.apps.telegram_bot.owner_bot import OwnerBot
+from personal_edge_lab.domain.notifications import (
+    NotificationDeliveryRuntime,
+    NotificationOverview,
+    NotificationPolicy,
+    NotificationPolicyMode,
+    NotificationRuntimeOutcome,
+)
 from personal_edge_lab.modules.alerting import AlertOverview, AlertStatusSummary
 from personal_edge_lab.modules.platform_status import PlatformHealth, PlatformHealthStatus
 from personal_edge_lab.modules.telemetry import (
@@ -221,3 +228,58 @@ def test_status_database_failure_is_sanitized() -> None:
 
     assert "<b>ESTADO NO DISPONIBLE</b>" in gateway.sent[-1]["text"]
     assert "sensitive" not in gateway.sent[-1]["text"]
+
+
+def test_status_distinguishes_operational_paused_and_failed_notifications() -> None:
+    healthy = healthy_status()
+    runtime = NotificationDeliveryRuntime(
+        last_started_at=NOW - timedelta(seconds=5),
+        last_finished_at=NOW - timedelta(seconds=5),
+        last_outcome=NotificationRuntimeOutcome.SUCCESS,
+        delivered_count=0,
+        failed_count=0,
+        last_error_category=None,
+        last_error_message=None,
+    )
+    operational = replace(
+        healthy,
+        notifications_enabled=True,
+        notifications=NotificationOverview(
+            policy=NotificationPolicy(
+                mode=NotificationPolicyMode.ENABLED,
+                paused_until=None,
+                changed_at=NOW - timedelta(minutes=1),
+            ),
+            pending_count=0,
+            failed_pending_count=0,
+            oldest_pending_at=None,
+            runtime=runtime,
+        ),
+    )
+    assert "<b>Notificaciones</b> · operativas" in status_text(operational)
+
+    paused = replace(
+        operational,
+        notifications=replace(
+            operational.notifications,
+            policy=NotificationPolicy(
+                mode=NotificationPolicyMode.PAUSED_INDEFINITELY,
+                paused_until=None,
+                changed_at=NOW,
+            ),
+        ),
+    )
+    assert "pausadas indefinidamente" in status_text(paused)
+    assert "<b>Estado general · OPERATIVO</b>" in status_text(paused)
+
+    failed = replace(
+        operational,
+        notifications=replace(
+            operational.notifications,
+            pending_count=1,
+            failed_pending_count=1,
+            oldest_pending_at=NOW - timedelta(minutes=2),
+        ),
+    )
+    assert "<b>Notificaciones</b> · entrega degradada" in status_text(failed)
+    assert "<b>Estado general · DEGRADADO</b>" in status_text(failed)

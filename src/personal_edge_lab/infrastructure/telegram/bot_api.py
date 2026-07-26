@@ -11,6 +11,17 @@ import httpx
 class TelegramApiError(RuntimeError):
     """A sanitized Telegram transport or protocol failure."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: str = "telegram_failure",
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.category = category
+        self.retry_after_seconds = retry_after_seconds
+
 
 class TelegramBotClient:
     def __init__(
@@ -62,7 +73,10 @@ class TelegramBotClient:
             timeout_seconds=timeout_seconds + 5,
         )
         if not isinstance(result, list) or not all(isinstance(item, dict) for item in result):
-            raise TelegramApiError("Telegram returned an invalid updates response")
+            raise TelegramApiError(
+                "Telegram returned an invalid updates response",
+                category="invalid_response",
+            )
         return result
 
     def send_message(
@@ -137,14 +151,41 @@ class TelegramBotClient:
                 json=dict(payload or {}),
                 timeout=timeout_seconds,
             )
-        except httpx.HTTPError as error:
-            raise TelegramApiError("Telegram Bot API is unavailable") from error
+        except httpx.TimeoutException as error:
+            raise TelegramApiError(
+                "Telegram Bot API timed out",
+                category="timeout",
+            ) from error
+        except httpx.RequestError as error:
+            raise TelegramApiError(
+                "Telegram Bot API is unavailable",
+                category="connection",
+            ) from error
         try:
             body = response.json()
         except ValueError as error:
-            raise TelegramApiError("Telegram returned a non-JSON response") from error
+            raise TelegramApiError(
+                "Telegram returned a non-JSON response",
+                category="invalid_response",
+            ) from error
         if not isinstance(body, dict) or body.get("ok") is not True:
             error_code = body.get("error_code") if isinstance(body, dict) else None
             suffix = f" (code {error_code})" if isinstance(error_code, int) else ""
-            raise TelegramApiError(f"Telegram rejected the request{suffix}")
+            retry_after = _retry_after(body)
+            category = "rate_limited" if error_code == 429 else "http_status"
+            raise TelegramApiError(
+                f"Telegram rejected the request{suffix}",
+                category=category,
+                retry_after_seconds=retry_after,
+            )
         return body.get("result")
+
+
+def _retry_after(body: Mapping[str, Any]) -> float | None:
+    parameters = body.get("parameters")
+    if not isinstance(parameters, dict):
+        return None
+    value = parameters.get("retry_after")
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+        return None
+    return float(value)
