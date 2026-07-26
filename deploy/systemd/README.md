@@ -13,6 +13,9 @@ This directory records the configuration captured from `rubik-edge-01` on 2026-0
   access.
 - `personal-edge-lab-alert-evaluator.timer` invokes that evaluator every 30 seconds, starting 30
   seconds after boot. Its interval must match `ALERT_EVALUATION_INTERVAL_SECONDS`.
+- `personal-edge-lab-telegram-bot.service` runs the owner-only Casadaqui AC control conversation.
+  It uses Telegram long polling, reads its mode-`0600` token file, and composes the same audited
+  command use case as the dashboard without depending on the API or collector.
 
 Stage 3 keeps Uvicorn on loopback. `deploy/nginx/personal-edge-lab.conf` terminates local TLS for
 `https://rubik-edge-01.local/`, redirects HTTP, rejects unknown hosts, and prevents LAN access to
@@ -32,6 +35,7 @@ systemctl cat personal-edge-lab-api.service
 systemctl cat personal-edge-lab-alert-evaluator.service
 systemctl cat personal-edge-lab-alert-evaluator.timer
 systemctl list-timers personal-edge-lab-alert-evaluator.timer
+systemctl cat personal-edge-lab-telegram-bot.service
 ```
 
 See `docs/deployment.md` for backup, installation, verification, and rollback.

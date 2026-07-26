@@ -148,6 +148,7 @@ sudo openssl x509 -checkend 1209600 -noout -in "$TLS_CERTIFICATE" || {
 
 AUTH_ENABLED="${API_AUTH_ENABLED:-false}"
 CONTROL_ENABLED="${API_AC_CONTROL_ENABLED:-false}"
+TELEGRAM_ENABLED="${TELEGRAM_BOT_ENABLED:-false}"
 if [[ "$AUTH_ENABLED" == "true" ]]; then
     [[ "${PUBLIC_ORIGIN:-}" == "https://rubik-edge-01.local" ]] || {
         fail "authenticated deployment requires PUBLIC_ORIGIN=https://rubik-edge-01.local"
@@ -169,6 +170,20 @@ if [[ "$CONTROL_ENABLED" == "true" ]]; then
     [[ "$AUTH_ENABLED" == "true" ]] || fail "controls require API_AUTH_ENABLED=true"
     [[ "${API_DOCS_ENABLED:-}" == "false" ]] || {
         fail "controls require API_DOCS_ENABLED=false"
+    }
+fi
+if [[ "$TELEGRAM_ENABLED" == "true" ]]; then
+    [[ -n "${TELEGRAM_BOT_TOKEN_FILE:-}" ]] || {
+        fail "TELEGRAM_BOT_TOKEN_FILE is required when the Telegram bot is enabled"
+    }
+    [[ -r "$TELEGRAM_BOT_TOKEN_FILE" ]] || {
+        fail "Telegram bot token is not readable: $TELEGRAM_BOT_TOKEN_FILE"
+    }
+    [[ "$(stat -c '%a' "$TELEGRAM_BOT_TOKEN_FILE")" == "600" ]] || {
+        fail "Telegram bot token must have mode 600"
+    }
+    [[ "${TELEGRAM_OWNER_USER_ID:-0}" =~ ^[1-9][0-9]*$ ]] || {
+        fail "TELEGRAM_OWNER_USER_ID must be a positive integer"
     }
 fi
 
@@ -227,13 +242,18 @@ if [[ -n "${AUTH_PASSWORD_HASH_FILE:-}" && -f "$AUTH_PASSWORD_HASH_FILE" ]]; the
     cp --preserve=all "$AUTH_PASSWORD_HASH_FILE" \
         "$DEPLOY_BACKUP/owner-password.hash"
 fi
+if [[ -n "${TELEGRAM_BOT_TOKEN_FILE:-}" && -f "$TELEGRAM_BOT_TOKEN_FILE" ]]; then
+    cp --preserve=all "$TELEGRAM_BOT_TOKEN_FILE" \
+        "$DEPLOY_BACKUP/telegram-bot.token"
+fi
 sudo cp -a "$TLS_DIRECTORY" "$DEPLOY_BACKUP/tls"
 
 for unit in \
     telemetry-collector.service \
     personal-edge-lab-api.service \
     personal-edge-lab-alert-evaluator.service \
-    personal-edge-lab-alert-evaluator.timer; do
+    personal-edge-lab-alert-evaluator.timer \
+    personal-edge-lab-telegram-bot.service; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
         systemctl cat "$unit" >"$DEPLOY_BACKUP/$unit"
     fi
@@ -364,6 +384,9 @@ sudo install -m 0644 \
     deploy/systemd/personal-edge-lab-alert-evaluator.timer \
     /etc/systemd/system/personal-edge-lab-alert-evaluator.timer
 sudo install -m 0644 \
+    deploy/systemd/personal-edge-lab-telegram-bot.service \
+    /etc/systemd/system/personal-edge-lab-telegram-bot.service
+sudo install -m 0644 \
     deploy/nginx/personal-edge-lab.conf \
     /etc/nginx/sites-available/personal-edge-lab
 sudo ln -sfn /etc/nginx/sites-available/personal-edge-lab \
@@ -378,6 +401,12 @@ sudo systemctl enable telemetry-collector.service personal-edge-lab-api.service 
 sudo systemctl restart personal-edge-lab-api.service
 sudo systemctl start personal-edge-lab-alert-evaluator.service
 sudo systemctl enable --now personal-edge-lab-alert-evaluator.timer >/dev/null
+if [[ "$TELEGRAM_ENABLED" == "true" ]]; then
+    sudo systemctl enable personal-edge-lab-telegram-bot.service >/dev/null
+    sudo systemctl restart personal-edge-lab-telegram-bot.service
+else
+    sudo systemctl disable --now personal-edge-lab-telegram-bot.service >/dev/null 2>&1 || true
+fi
 sudo systemctl enable --now avahi-daemon.service nginx.service >/dev/null
 sudo systemctl reload nginx.service
 
@@ -390,6 +419,11 @@ for service in \
     nginx.service; do
     systemctl is-active --quiet "$service" || fail "$service is not active"
 done
+if [[ "$TELEGRAM_ENABLED" == "true" ]]; then
+    systemctl is-active --quiet personal-edge-lab-telegram-bot.service || {
+        fail "personal-edge-lab-telegram-bot.service is not active"
+    }
+fi
 
 EVALUATOR_RESULT="$(
     systemctl show personal-edge-lab-alert-evaluator.service --property=Result --value
@@ -456,6 +490,11 @@ printf '\nDeployment successful.\n'
 printf 'Version: %s\n' "$INSTALLED_VERSION"
 printf 'Backup: %s\n' "$DEPLOY_BACKUP"
 printf 'Dashboard: https://rubik-edge-01.local/\n'
+if [[ "$TELEGRAM_ENABLED" == "true" ]]; then
+    printf 'Telegram AC control: enabled\n'
+else
+    printf 'Telegram AC control: disabled\n'
+fi
 if [[ "${API_DOCS_ENABLED:-false}" == "true" ]]; then
     printf 'API docs: https://rubik-edge-01.local/docs\n'
 else
