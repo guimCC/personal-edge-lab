@@ -523,3 +523,65 @@ sudo systemctl disable --now personal-edge-lab-alert-evaluator.timer
 Restore the retained `0.4.0` wheel, previous `.env`, API unit, and any prior proxy configuration,
 then restart only affected services. Migration `004` may remain because `0.4.0` ignores its
 additive tables. Restore SQLite only if integrity evidence proves actual corruption.
+
+## Stage 5A Casadaqui Telegram AC control rollout
+
+Deploy `0.7.0` once with Telegram disabled so the package and administration CLI exist:
+
+```dotenv
+TELEGRAM_BOT_ENABLED=false
+TELEGRAM_BOT_TOKEN_FILE=/home/ubuntu/personal-edge-lab/secrets/telegram-bot.token
+TELEGRAM_OWNER_USER_ID=0
+TELEGRAM_AC_COMMAND_RATE_LIMIT_PER_MINUTE=6
+TELEGRAM_POLL_TIMEOUT_SECONDS=25
+```
+
+```bash
+./scripts/deploy-rubik.sh
+set -a
+source .env
+set +a
+python -m personal_edge_lab.apps.telegram_cli set-token
+```
+
+The token prompt is hidden. It validates the token against Telegram and writes it atomically with
+mode `0600`; do not paste the token into `.env`, Git, shell history, or deployment logs.
+
+Send `/start` to `Casadaqui_bot` while the service is stopped, then run:
+
+```bash
+python -m personal_edge_lab.apps.telegram_cli discover-owner
+```
+
+Copy the emitted positive numeric value into `TELEGRAM_OWNER_USER_ID`, set
+`TELEGRAM_BOT_ENABLED=true`, and deploy again:
+
+```bash
+./scripts/deploy-rubik.sh
+systemctl status personal-edge-lab-telegram-bot.service --no-pager
+journalctl -u personal-edge-lab-telegram-bot.service -n 50 --no-pager
+```
+
+This enables an internet-mediated control channel even though the dashboard remains LAN-only.
+Before enabling it, protect the owner Telegram account with 2-Step Verification and an app
+passcode. Never send the bot token, dashboard password, or Telegram login code through the bot.
+
+Open `/ac` and exercise adjustments and cancellation first. Cancellation must add no AC audit row.
+The first Set State and Power Off confirmations are physical acceptance actions and remain under
+explicit operator control. Inspect their attribution without exposing the token:
+
+```bash
+sqlite3 -header -column data/telemetry.db \
+  "SELECT id, actor_id, request_source, command_type, outcome
+   FROM ac_command_audit ORDER BY id DESC LIMIT 10;"
+```
+
+After testing update replay/double taps and an unavailable controller, reboot and verify the bot
+starts independently. Roll back the channel without touching telemetry or the API:
+
+```bash
+sudo systemctl disable --now personal-edge-lab-telegram-bot.service
+```
+
+Restore the previous wheel and `.env` only if the complete release must be rolled back. Stage 5A
+adds no migration; existing Telegram audit rows are valid command history and should remain.

@@ -27,6 +27,8 @@ apps -> application/ports <- infrastructure
 - `modules/alerting` evaluates stored operational evidence into durable alert transitions and
   exposes bounded alert queries without importing FastAPI, systemd, or SQLite.
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
+- `infrastructure/telegram` implements the narrow Bot API transport and never exposes the bot
+  token through its public errors.
 - `infrastructure/persistence/sqlite` owns migrations, applies one shared connection policy
   (`foreign_keys`, busy timeout, row mapping), and maps SQLite rows to domain objects.
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
@@ -38,6 +40,10 @@ apps -> application/ports <- infrastructure
 - `apps/auth_cli` manages the owner Argon2id hash and session revocation locally.
 - `apps/alert_evaluator` is the one-shot composition root scheduled by systemd every 30 seconds.
   It has no network adapter and records evaluator health independently from the collector and API.
+- `apps/telegram_bot` is an independent long-polling delivery adapter. It authorizes one numeric
+  owner identity in a private chat and composes the existing cool-only AC command use case.
+- `apps/telegram_cli` validates and stores the bot token and discovers the numeric owner identity
+  without placing either operation in the dashboard.
 
 Architecture tests parse imports to keep domain isolated, application ports inward-facing,
 feature modules independent from adapters, and infrastructure independent from apps and feature
@@ -87,6 +93,23 @@ Only SHA-256 hashes of random session cookies are stored. A session owns a separ
 token, seven-day absolute expiry, and 24-hour idle expiry. Password verification uses an Argon2id
 hash stored outside SQLite. Expired device leases are recovered as an unknown physical outcome and
 are never resent automatically.
+
+Telegram controls use the same reservation path without pretending that browser cookies apply to
+another channel:
+
+```text
+private Telegram user -> inline review -> explicit Confirm
+                                           |
+                                           v
+owner user ID -> deterministic confirmation key -> CommandService
+                                                    |
+                                      SQLite reservation -> one ESP32 request
+```
+
+The callback carries a bounded normalized Cool request and an opaque confirmation key, not a
+credential. Re-delivery or a double tap reuses that key and therefore retrieves the stored result
+instead of transmitting again. The bot token remains in a mode-`0600` file and HTTP client request
+logging is disabled in the bot process because Telegram places the token in its API URL.
 
 The local API is a separate process:
 
@@ -172,10 +195,10 @@ process lifecycle or presentation. Business rules should remain reusable outside
 
 ## Future architecture, not current packages
 
-Future slices may introduce Telegram delivery, speech, email, a task worker, multiple identities
-and permissions, and worker registration. They should reuse domain models and use cases through
-ports. Stage 4 intentionally stops at persisted alerts, structured transition logs, and the
-dashboard; it has no external delivery adapter.
+Future slices may introduce Telegram alert delivery, speech, email, a task worker, multiple
+identities and permissions, and worker registration. They should reuse domain models and use cases
+through ports. Telegram AC control is the first external delivery adapter; it deliberately does
+not yet deliver monitoring data or operational alerts.
 No empty placeholder packages exist for these ideas. A package is added only with its first
 end-to-end behavior and tests.
 

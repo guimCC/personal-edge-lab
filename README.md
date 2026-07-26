@@ -76,6 +76,22 @@ Each accepted command makes exactly one HTTP attempt and is audited. There are n
 retries. A timeout is `timeout_unknown` because the ESP32 may already have transmitted IR. An
 HTTP 200 confirms accepted transmission, not the physical state of the AC.
 
+The owner-only Casadaqui Telegram bot is a second control adapter over the same command use case:
+
+```bash
+python -m personal_edge_lab.apps.telegram_cli set-token
+python -m personal_edge_lab.apps.telegram_cli discover-owner
+python -m personal_edge_lab.apps.telegram_bot
+```
+
+`/ac` opens an inline Cool-mode control panel and `/off` opens a Power Off review. Neither sends
+anything until the owner presses Confirm. Telegram is authorized by the immutable numeric owner
+user ID in a private chat; groups and other users are ignored. Confirmations use the same durable
+audit, rate limit, per-device lease, idempotency, and unknown-outcome rules as the dashboard.
+The token is stored separately in a mode-`0600` file and is suppressed from HTTP logs.
+The dashboard remains LAN-only, while Telegram control is internet-mediated and therefore requires
+2-Step Verification and an app passcode on the owner's Telegram account.
+
 Exit codes remain:
 
 | Code | Meaning |
@@ -181,6 +197,6 @@ Provision the local certificate first from a trusted workstation:
 ```
 
 The deployment script preserves a pre-deployment backup, validates the TLS/security prerequisites,
-installs and verifies the independent alert-evaluator timer, and skips dependency installation when
-lockfiles are unchanged. It does not restart the collector. Use `--skip-tests` only for a quick
-iteration that will receive a full checked deployment later.
+installs and verifies the independent alert-evaluator timer and optional Telegram service, and
+skips dependency installation when lockfiles are unchanged. It does not restart the collector.
+Use `--skip-tests` only for a quick iteration that will receive a full checked deployment later.

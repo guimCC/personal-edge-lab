@@ -51,8 +51,9 @@ automation.
 | 3. Authenticated dashboard AC control | Done | HTTPS owner access and intentional AC control accepted on RUBIK |
 | 4. Stale telemetry and availability alerts | Done | Durable failure and recovery incidents accepted on RUBIK |
 | 4.5. Platform consolidation | Implemented | Backend boundaries and automated quality gates ready for RUBIK acceptance |
-| 4.6. Modular lab console | Implemented | Extensible frontend shell with Climate as its first module |
-| 5. External interfaces and automation | Later | Telegram, rules, speech, and local AI, in that order |
+| 4.6. Modular lab console | Done | Extensible frontend shell with Climate as its first module |
+| 5A. Telegram AC control | Implemented | Owner-only deliberate AC control through Casadaqui |
+| 5B–D. Automation, speech, local AI | Later | Separate bounded slices after Telegram acceptance |
 
 `Planned` does not mean committed scope. Before each stage starts, its open decisions are resolved
 and its acceptance criteria become the implementation checklist.
@@ -80,7 +81,7 @@ The frontend component refactor is deliberately outside this consolidation stage
 
 ## Stage 4.6 — Modular lab console
 
-**Status:** Implemented locally as `0.6.0`; pending RUBIK acceptance.
+**Status:** Done as `0.6.0`; accepted on RUBIK on 2026-07-26.
 
 The dashboard is now the first workspace of Personal Edge Lab rather than a climate-specific
 product shell:
@@ -99,6 +100,9 @@ product shell:
 
 Future modules can join the shell without changing Climate internals or turning the root component
 back into a dashboard monolith.
+
+RUBIK acceptance covered the authenticated desktop and phone layouts, control workflow, chart,
+activity, operational disclosure, local HTTPS, and light/dark behavior.
 
 ## Stage 0 — Modular foundation
 
@@ -391,8 +395,25 @@ These are separate later slices, not one large project.
 
 ### 5A. Telegram
 
-Start with authenticated read-only queries and alerts. Add AC commands only after identity mapping,
-authorization, explicit confirmation, and audit attribution are designed.
+**Status:** Implemented locally as `0.7.0`; pending RUBIK acceptance.
+
+The initial Telegram slice deliberately focuses on AC control because the dashboard already owns
+monitoring. Casadaqui is an independent long-polling service with:
+
+- one immutable numeric owner user ID and private-chat-only authorization;
+- `/ac` for a stateless Cool-mode temperature/fan/vane panel;
+- `/off` as a shortcut to a Power Off review;
+- an explicit review and Confirm step before every physical action;
+- durable `telegram_bot` audit attribution and a stable `telegram:<user_id>` actor;
+- the existing rate limit, device lease, cool-only policy, exactly-one ESP32 attempt, and
+  idempotent result replay;
+- explicit unknown-outcome language and no automatic physical retries;
+- a token-safe local administration CLI and a mode-`0600` token file;
+- an independently restartable, hardened systemd service.
+
+Monitoring queries, alert delivery, notification acknowledgement, groups, multiple Telegram users,
+webhooks, and remote dashboard exposure remain later slices. See
+[the Stage 5A implementation and acceptance plan](stage-5a-telegram-ac-plan.md).
 
 ### 5B. Automation rules
 
