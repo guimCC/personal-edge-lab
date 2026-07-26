@@ -578,6 +578,10 @@ sqlite3 -header -column data/telemetry.db \
    FROM ac_command_audit ORDER BY id DESC LIMIT 10;"
 ```
 
+Open `/status` and confirm the API, collector, ESP32, telemetry, alerts, and Telegram lines agree
+with the authenticated dashboard. Press **Actualizar** and confirm the same Telegram message is
+edited without creating an AC audit row or changing collector cadence.
+
 After testing update replay/double taps and an unavailable controller, reboot and verify the bot
 starts independently. Roll back the channel without touching telemetry or the API:
 

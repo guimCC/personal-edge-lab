@@ -90,6 +90,11 @@ edit that Telegram message; the visible normalized settings are sent when the ow
 accidentally. Telegram is authorized by the immutable numeric owner user ID in a private chat;
 groups and other users are ignored. Transmissions use the same durable audit, rate limit,
 per-device lease, idempotency, and unknown-outcome rules as the dashboard.
+
+`/status` is read-only. It reuses the platform-health use case to show the API, collector, ESP32,
+telemetry, alert evaluator, and Telegram connection in one message. Its **Actualizar** button edits
+the message in place and never contacts the ESP32 or creates an AC audit row.
+
 The token is stored separately in a mode-`0600` file and is suppressed from HTTP logs.
 The dashboard remains LAN-only, while Telegram control is internet-mediated and therefore requires
 2-Step Verification and an app passcode on the owner's Telegram account.

@@ -403,6 +403,7 @@ monitoring. Casadaqui is an independent long-polling service with:
 - one immutable numeric owner user ID and private-chat-only authorization;
 - `/ac` for a stateless Cool-mode temperature panel with fan and vane submenus;
 - `/off` as a shortcut to a Power Off review;
+- `/status` for the shared read-only API/collector/ESP32/telemetry/alerts snapshot;
 - a direct **Enviar ajuste** action from the normalized panel and a separate Power Off confirmation;
 - durable `telegram_bot` audit attribution and a stable `telegram:<user_id>` actor;
 - the existing rate limit, device lease, cool-only policy, exactly-one ESP32 attempt, and
@@ -411,8 +412,8 @@ monitoring. Casadaqui is an independent long-polling service with:
 - a token-safe local administration CLI and a mode-`0600` token file;
 - an independently restartable, hardened systemd service.
 
-Monitoring queries, alert delivery, notification acknowledgement, groups, multiple Telegram users,
-webhooks, and remote dashboard exposure remain later slices. See
+Detailed monitoring/history queries, alert delivery, notification acknowledgement, groups,
+multiple Telegram users, webhooks, and remote dashboard exposure remain later slices. See
 [the Stage 5A implementation and acceptance plan](stage-5a-telegram-ac-plan.md).
 
 ### 5B. Automation rules

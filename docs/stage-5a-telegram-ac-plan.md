@@ -11,12 +11,13 @@ The first conversation supports:
 
 - `/ac`: open a Cool-mode temperature panel with fan and vertical-vane submenus;
 - `/off`: open a Power Off review directly;
+- `/status`: show the shared operational-health snapshot and refresh it in place;
 - `/help`: explain the bounded command surface;
 - one explicit **Enviar ajuste** action from the normalized Set State panel;
 - a separate confirmation before Power Off.
 
-It excludes monitoring queries, alert notifications, multiple users, groups, webhooks, natural
-language, automation, and physical-state inference.
+It excludes detailed monitoring/history queries, alert notifications, multiple users, groups,
+webhooks, natural language, automation, and physical-state inference.
 
 Unlike the dashboard, this channel is reachable while the owner is away from the home LAN because
 RUBIK maintains an outbound connection to Telegram. Bot conversations are Telegram cloud chats,
@@ -44,6 +45,10 @@ Verification and a local app passcode before remote physical control is enabled.
 
 The implementation uses Telegram's documented long polling, inline keyboard, callback answer, and
 message-editing APIs: <https://core.telegram.org/bots/api>.
+
+`/status` remains a read-only adapter over `GetPlatformHealth`. It reports the API through the
+loopback liveness endpoint and obtains collector, ESP32, telemetry, and alert status from persisted
+evidence. It never queries systemd, contacts the ESP32, or creates an AC audit row.
 
 ## Runtime
 
@@ -89,8 +94,8 @@ unit, and starts the service.
 
 1. Confirm the service remains active and logs identify `@Casadaqui_bot` without printing its
    token.
-2. Confirm `/start`, `/help`, `/ac`, temperature adjustments, fan/vane submenus, and `/off` review
-   work.
+2. Confirm `/start`, `/help`, `/ac`, `/status`, temperature adjustments, fan/vane submenus, and
+   `/off` review work.
 3. Confirm another Telegram account and a group cannot open or operate the controls.
 4. Exercise every Set State selector without pressing **Enviar ajuste**, then cancel one Power Off
    review; neither may create an audit row.
@@ -100,9 +105,10 @@ unit, and starts the service.
    request.
 7. Confirm one Power Off request under operator control with the same evidence.
 8. Exercise an unavailable ESP32 and an unknown response without automatic retransmission.
-9. Verify dashboard controls, CLI output, telemetry cadence, alert evaluation, and HTTPS remain
-   unchanged.
-10. Reboot RUBIK and verify the bot, collector, API, alert timer, Nginx, and Avahi start
+9. Refresh `/status`, compare every line with the dashboard, and verify it creates no AC audit row.
+10. Verify dashboard controls, CLI output, telemetry cadence, alert evaluation, and HTTPS remain
+    unchanged.
+11. Reboot RUBIK and verify the bot, collector, API, alert timer, Nginx, and Avahi start
     independently.
 
 Rollback disables and stops `personal-edge-lab-telegram-bot.service`, restores the prior wheel and

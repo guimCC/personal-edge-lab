@@ -113,6 +113,11 @@ retrieves the stored result instead of transmitting again. The bot token remains
 file and HTTP client request logging is disabled in the bot process because Telegram places the
 token in its API URL.
 
+The read-only `/status` command composes the same framework-independent `GetPlatformHealth` use
+case as the dashboard. It reads persisted heartbeats, telemetry, and alert-evaluator state through
+fresh SQLite connections, and checks the API through its loopback-only liveness endpoint. It does
+not inspect systemd or contact the ESP32 directly.
+
 The local API is a separate process:
 
 ```text
