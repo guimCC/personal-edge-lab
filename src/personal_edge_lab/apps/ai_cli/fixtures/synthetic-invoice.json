@@ -1,0 +1,5 @@
+{
+  "sender": "billing@example.test",
+  "subject": "Invoice INV-2026-0715",
+  "message": "Attached is the synthetic July invoice for EUR 42.00, due on 15 August 2026."
+}

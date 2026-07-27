@@ -62,7 +62,7 @@ class CompletionSettings:
             "LOCAL_LLM_API_KEY_FILE",
             "/home/ubuntu/personal-edge-lab/secrets/unoq-ai-01.key",
         )
-        api_key = _read_private_key(api_key_file)
+        api_key = _read_private_key(api_key_file, "LOCAL_LLM_API_KEY_FILE")
         model_alias = read_nonblank("LOCAL_LLM_MODEL", "qwen3-1.7b-q4-k-m")
         if MODEL_ALIAS_PATTERN.fullmatch(model_alias) is None:
             raise ConfigurationError("LOCAL_LLM_MODEL is not a valid logical model alias")
@@ -96,6 +96,71 @@ class CompletionSettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class LangfuseSettings:
+    enabled: bool
+    base_url: str
+    public_key_file: Path | None
+    public_key: str | None = field(repr=False)
+    secret_key_file: Path | None
+    secret_key: str | None = field(repr=False)
+    timeout_seconds: float
+    log_level: int
+
+    @classmethod
+    def from_env(cls, *, require_enabled: bool = False) -> LangfuseSettings:
+        enabled = read_bool("LANGFUSE_ENABLED", "false")
+        if require_enabled and not enabled:
+            raise ConfigurationError("LANGFUSE_ENABLED must be true for prompt-publish")
+        timeout = read_positive_float("LANGFUSE_TIMEOUT_SECONDS", "2")
+        if timeout > 30:
+            raise ConfigurationError("LANGFUSE_TIMEOUT_SECONDS must not exceed 30")
+        level, _level_name = read_log_level()
+        if not enabled:
+            return cls(
+                enabled=False,
+                base_url="https://cloud.langfuse.com",
+                public_key_file=None,
+                public_key=None,
+                secret_key_file=None,
+                secret_key=None,
+                timeout_seconds=timeout,
+                log_level=level,
+            )
+        base_url = _read_langfuse_url()
+        public_key_file = read_file_path(
+            "LANGFUSE_PUBLIC_KEY_FILE",
+            "/home/ubuntu/personal-edge-lab/secrets/langfuse-public.key",
+        )
+        secret_key_file = read_file_path(
+            "LANGFUSE_SECRET_KEY_FILE",
+            "/home/ubuntu/personal-edge-lab/secrets/langfuse-secret.key",
+        )
+        return cls(
+            enabled=True,
+            base_url=base_url,
+            public_key_file=public_key_file,
+            public_key=_read_private_key(public_key_file, "LANGFUSE_PUBLIC_KEY_FILE"),
+            secret_key_file=secret_key_file,
+            secret_key=_read_private_key(secret_key_file, "LANGFUSE_SECRET_KEY_FILE"),
+            timeout_seconds=timeout,
+            log_level=level,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TriageSettings:
+    completion: CompletionSettings
+    langfuse: LangfuseSettings
+
+    @classmethod
+    def from_env(cls) -> TriageSettings:
+        return cls(
+            completion=CompletionSettings.from_env(),
+            langfuse=LangfuseSettings.from_env(),
+        )
+
+
 def _read_origin_url() -> str:
     value = read_nonblank("LOCAL_LLM_BASE_URL", "http://unoq-ai-01.local:8080").rstrip("/")
     parsed = urlparse(value)
@@ -121,32 +186,55 @@ def _read_origin_url() -> str:
     return value
 
 
-def _read_private_key(path: Path) -> str:
+def _read_langfuse_url() -> str:
+    value = read_nonblank("LANGFUSE_BASE_URL", "https://cloud.langfuse.com").rstrip("/")
+    parsed = urlparse(value)
+    try:
+        parsed_port = parsed.port
+    except ValueError as error:
+        raise ConfigurationError("LANGFUSE_BASE_URL must be an origin-only HTTPS URL") from error
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.netloc.endswith(":")
+        or any(character.isspace() for character in parsed.netloc)
+        or (parsed_port is not None and not 1 <= parsed_port <= 65535)
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigurationError("LANGFUSE_BASE_URL must be an origin-only HTTPS URL")
+    return value
+
+
+def _read_private_key(path: Path, setting: str) -> str:
     if not path.is_absolute():
-        raise ConfigurationError("LOCAL_LLM_API_KEY_FILE must be an absolute path")
+        raise ConfigurationError(f"{setting} must be an absolute path")
     if path.is_symlink():
-        raise ConfigurationError("LOCAL_LLM_API_KEY_FILE must not be a symbolic link")
+        raise ConfigurationError(f"{setting} must not be a symbolic link")
     try:
         metadata = path.stat()
     except OSError as error:
-        raise ConfigurationError(
-            "LOCAL_LLM_API_KEY_FILE must be a readable private file"
-        ) from error
+        raise ConfigurationError(f"{setting} must be a readable private file") from error
     if not stat.S_ISREG(metadata.st_mode):
-        raise ConfigurationError("LOCAL_LLM_API_KEY_FILE must be a regular file")
+        raise ConfigurationError(f"{setting} must be a regular file")
     if stat.S_IMODE(metadata.st_mode) != 0o600:
-        raise ConfigurationError("LOCAL_LLM_API_KEY_FILE must have mode 0600")
+        raise ConfigurationError(f"{setting} must have mode 0600")
     if metadata.st_uid != os.geteuid():
-        raise ConfigurationError("LOCAL_LLM_API_KEY_FILE must be owned by the current user")
+        raise ConfigurationError(f"{setting} must be owned by the current user")
     try:
         value = path.read_text(encoding="utf-8")
     except OSError as error:
-        raise ConfigurationError("LOCAL_LLM_API_KEY_FILE must be readable") from error
+        raise ConfigurationError(f"{setting} must be readable") from error
     lines = value.splitlines()
     if (
         len(lines) != 1
         or not 32 <= len(lines[0]) <= 256
         or any(character.isspace() for character in lines[0])
     ):
-        raise ConfigurationError("LOCAL_LLM_API_KEY_FILE contains an invalid key")
+        raise ConfigurationError(f"{setting} contains an invalid key")
     return lines[0]

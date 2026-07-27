@@ -48,6 +48,57 @@ def success_payload(content: str = "ready") -> dict[str, object]:
     }
 
 
+def test_synthetic_triage_uses_local_fallback_and_strict_structured_request(
+    monkeypatch,
+    tmp_path,
+    caplog,
+) -> None:
+    configure_completion(monkeypatch, tmp_path)
+    monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+    observed_payload = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal observed_payload
+        observed_payload = __import__("json").loads(request.content)
+        return httpx.Response(
+            200,
+            json=success_payload('{"label":"billing","reason":"The message contains an invoice"}'),
+        )
+
+    caplog.set_level(logging.INFO)
+    exit_code, stdout, stderr = run_cli(
+        ["triage", "--fixture", "synthetic-invoice"],
+        handler,
+    )
+    assert exit_code == 0
+    assert stderr == ""
+    assert "Label: billing" in stdout
+    assert "Reason: The message contains an invoice" in stdout
+    assert "Prompt source: local_fallback" in stdout
+    assert "Prompt version: 1.0.0" in stdout
+    assert "Trace: unavailable" in stdout
+    assert observed_payload["max_tokens"] == 64
+    assert observed_payload["reasoning_effort"] == "none"
+    assert observed_payload["response_format"]["type"] == "json_schema"
+    assert "billing@example.test" not in caplog.text
+    assert "The message contains an invoice" not in caplog.text
+    assert API_KEY not in caplog.text
+
+
+def test_triage_rejects_invalid_model_output(monkeypatch, tmp_path, caplog) -> None:
+    configure_completion(monkeypatch, tmp_path)
+    monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+    caplog.set_level(logging.WARNING)
+    exit_code, stdout, stderr = run_cli(
+        ["triage", "--fixture", "synthetic-invoice"],
+        lambda _: httpx.Response(200, json=success_payload("not json")),
+    )
+    assert exit_code == 5
+    assert stdout == ""
+    assert "invalid_model_output" in stderr
+    assert "not json" not in caplog.text
+
+
 def test_health_works_while_disabled_and_without_key(monkeypatch) -> None:
     monkeypatch.setenv("LOCAL_LLM_ENABLED", "false")
     monkeypatch.setenv("LOCAL_LLM_API_KEY_FILE", "/missing/key")

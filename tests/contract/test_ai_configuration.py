@@ -10,6 +10,7 @@ from personal_edge_lab.apps.ai_cli.config import (
     CompletionSettings,
     ConfigurationError,
     HealthSettings,
+    LangfuseSettings,
 )
 
 AI_VARIABLES = (
@@ -23,6 +24,11 @@ AI_VARIABLES = (
     "LOCAL_LLM_MAX_OUTPUT_TOKENS",
     "LOCAL_LLM_MAX_CONCURRENCY",
     "LOCAL_LLM_QUEUE_TIMEOUT_SECONDS",
+    "LANGFUSE_ENABLED",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY_FILE",
+    "LANGFUSE_SECRET_KEY_FILE",
+    "LANGFUSE_TIMEOUT_SECONDS",
     "LOG_LEVEL",
 )
 
@@ -73,6 +79,66 @@ def test_completion_requires_explicit_enablement(monkeypatch) -> None:
     clear(monkeypatch)
     with pytest.raises(ConfigurationError, match="must be true"):
         CompletionSettings.from_env()
+
+
+def test_disabled_langfuse_requires_no_keys(monkeypatch) -> None:
+    clear(monkeypatch)
+    settings = LangfuseSettings.from_env()
+    assert settings.enabled is False
+    assert settings.base_url == "https://cloud.langfuse.com"
+    assert settings.public_key is None
+    assert settings.secret_key is None
+    assert settings.timeout_seconds == 2
+
+
+def test_enabled_langfuse_reads_two_private_keys(monkeypatch, tmp_path) -> None:
+    clear(monkeypatch)
+    public = private_key(tmp_path, "p" * 64)
+    public = public.rename(tmp_path / "public.key")
+    secret = private_key(tmp_path, "s" * 64)
+    secret = secret.rename(tmp_path / "secret.key")
+    monkeypatch.setenv("LANGFUSE_ENABLED", "true")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY_FILE", str(public))
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY_FILE", str(secret))
+    settings = LangfuseSettings.from_env()
+    assert settings.enabled is True
+    assert settings.public_key == "p" * 64
+    assert settings.secret_key == "s" * 64
+    assert "p" * 64 not in repr(settings)
+    assert "s" * 64 not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("LANGFUSE_BASE_URL", "http://cloud.langfuse.com", "HTTPS"),
+        ("LANGFUSE_BASE_URL", "https://cloud.langfuse.com/path", "origin-only"),
+        ("LANGFUSE_BASE_URL", "https://user:secret@cloud.langfuse.com", "origin-only"),
+        ("LANGFUSE_TIMEOUT_SECONDS", "31", "must not exceed 30"),
+    ],
+)
+def test_invalid_langfuse_configuration(
+    monkeypatch,
+    tmp_path,
+    name: str,
+    value: str,
+    message: str,
+) -> None:
+    clear(monkeypatch)
+    public = private_key(tmp_path, "p" * 64).rename(tmp_path / "public.key")
+    secret = private_key(tmp_path, "s" * 64).rename(tmp_path / "secret.key")
+    monkeypatch.setenv("LANGFUSE_ENABLED", "true")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY_FILE", str(public))
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY_FILE", str(secret))
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigurationError, match=message):
+        LangfuseSettings.from_env()
+
+
+def test_prompt_publish_requires_langfuse_enablement(monkeypatch) -> None:
+    clear(monkeypatch)
+    with pytest.raises(ConfigurationError, match="prompt-publish"):
+        LangfuseSettings.from_env(require_enabled=True)
 
 
 @pytest.mark.parametrize(

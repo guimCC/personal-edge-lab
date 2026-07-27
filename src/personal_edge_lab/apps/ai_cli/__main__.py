@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from contextlib import suppress
+from importlib.resources import files
 from typing import Any, TextIO
 
+from personal_edge_lab import __version__
 from personal_edge_lab.application.ports.ai import (
     CompletionFailureCategory,
     LanguageModelError,
 )
+from personal_edge_lab.application.ports.email_triage import NoOpTriageTraceSink
 from personal_edge_lab.apps.ai_cli.config import (
     CompletionSettings,
     ConfigurationError,
     HealthSettings,
+    LangfuseSettings,
+    TriageSettings,
 )
 from personal_edge_lab.apps.logging_config import configure_logging
 from personal_edge_lab.domain.ai import (
@@ -26,11 +33,21 @@ from personal_edge_lab.domain.ai import (
     ModelMessage,
     ModelRole,
 )
+from personal_edge_lab.domain.email_triage import TriageEmail, TriageOutputError
 from personal_edge_lab.infrastructure.ai.concurrency import ConcurrencyLimitedLanguageModel
 from personal_edge_lab.infrastructure.ai.llama_cpp import (
     LlamaCppHealthProbe,
     LlamaCppLanguageModel,
     LlamaCppReadinessProbe,
+)
+from personal_edge_lab.infrastructure.ai.triage_decoder import PydanticTriageDecisionDecoder
+from personal_edge_lab.infrastructure.observability.langfuse import (
+    LangfuseTriageRuntime,
+)
+from personal_edge_lab.modules.email_triage import EmailTriageService
+from personal_edge_lab.modules.email_triage.prompt import (
+    LocalTriagePromptSource,
+    load_packaged_prompt,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -55,6 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("ready", help="check public local-model readiness")
     complete_parser = subparsers.add_parser("complete", help="run one bounded completion")
     complete_parser.add_argument("--text", required=True)
+    triage_parser = subparsers.add_parser("triage", help="classify one synthetic email fixture")
+    triage_parser.add_argument("--fixture", required=True, choices=("synthetic-invoice",))
+    subparsers.add_parser(
+        "prompt-publish",
+        help="publish the packaged email-triage prompt to Langfuse",
+    )
     return parser
 
 
@@ -82,13 +105,23 @@ def main(
             stderr=stderr,
             transport=transport,
         )
-    return _run_complete(
-        operation_id,
-        args.text,
-        stdout=stdout,
-        stderr=stderr,
-        transport=transport,
-    )
+    if args.command == "complete":
+        return _run_complete(
+            operation_id,
+            args.text,
+            stdout=stdout,
+            stderr=stderr,
+            transport=transport,
+        )
+    if args.command == "triage":
+        return _run_triage(
+            operation_id,
+            args.fixture,
+            stdout=stdout,
+            stderr=stderr,
+            transport=transport,
+        )
+    return _run_prompt_publish(operation_id, stdout=stdout, stderr=stderr)
 
 
 def _run_health(
@@ -273,6 +306,197 @@ def _run_complete(
     print(f"Provider elapsed: {result.timing.provider_seconds:.3f}s", file=stdout)
     print(f"Elapsed: {result.elapsed_seconds:.3f}s", file=stdout)
     return 0
+
+
+def _run_triage(
+    operation_id: str,
+    fixture_name: str,
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    transport: Any | None,
+) -> int:
+    try:
+        settings = TriageSettings.from_env()
+        email = _load_fixture(fixture_name)
+    except (ConfigurationError, ValueError) as error:
+        return _configuration_failure(
+            operation_id,
+            ConfigurationError(str(error)),
+            stderr=stderr,
+        )
+    configure_logging(settings.completion.log_level)
+    started = time.perf_counter()
+    manifest = load_packaged_prompt()
+    runtime: LangfuseTriageRuntime | None = None
+    prompt_source = LocalTriagePromptSource(manifest)
+    trace_sink: Any = NoOpTriageTraceSink()
+    if settings.langfuse.enabled:
+        assert settings.langfuse.public_key is not None
+        assert settings.langfuse.secret_key is not None
+        try:
+            runtime = LangfuseTriageRuntime(
+                public_key=settings.langfuse.public_key,
+                secret_key=settings.langfuse.secret_key,
+                base_url=settings.langfuse.base_url,
+                timeout_seconds=settings.langfuse.timeout_seconds,
+                release=__version__,
+                manifest=manifest,
+            )
+        except Exception:
+            LOGGER.warning(
+                "email_triage operation_id=%s command=triage trace_unavailable=true",
+                operation_id,
+            )
+        else:
+            prompt_source = runtime
+            trace_sink = runtime
+    try:
+        with LlamaCppLanguageModel(
+            base_url=settings.completion.base_url,
+            api_key=settings.completion.api_key,
+            timeout_seconds=settings.completion.timeout_seconds,
+            transport=transport,
+        ) as adapter:
+            model = ConcurrencyLimitedLanguageModel(
+                adapter,
+                max_concurrency=settings.completion.max_concurrency,
+                wait_timeout_seconds=settings.completion.queue_timeout_seconds,
+            )
+            result = EmailTriageService(
+                model=model,
+                prompt_source=prompt_source,
+                decoder=PydanticTriageDecisionDecoder(),
+                trace_sink=trace_sink,
+                model_alias=settings.completion.model_alias,
+            ).classify(email, operation_id=operation_id)
+    except LanguageModelError as error:
+        return _provider_failure(
+            operation_id,
+            "triage",
+            error,
+            elapsed_seconds=time.perf_counter() - started,
+            stderr=stderr,
+        )
+    except TriageOutputError:
+        elapsed = time.perf_counter() - started
+        LOGGER.warning(
+            "email_triage operation_id=%s command=triage outcome=failure "
+            "category=triage_output elapsed_seconds=%.3f trace_unavailable=%s",
+            operation_id,
+            elapsed,
+            not settings.langfuse.enabled,
+        )
+        print(f"Operation: {operation_id}", file=stderr)
+        print("Triage failed: invalid_model_output", file=stderr)
+        return 5
+    finally:
+        if runtime is not None:
+            try:
+                runtime.close()
+            except Exception:
+                LOGGER.warning(
+                    "email_triage operation_id=%s command=triage trace_unavailable=true",
+                    operation_id,
+                )
+    completion = result.evidence.completion
+    usage = completion.usage
+    LOGGER.info(
+        "email_triage operation_id=%s command=triage outcome=success "
+        "provider=%s model=%s prompt_source=%s prompt_version=%s "
+        "queue_wait_seconds=%.3f provider_seconds=%.3f elapsed_seconds=%.3f "
+        "attempt_count=1 prompt_tokens=%s completion_tokens=%s total_tokens=%s "
+        "trace_unavailable=%s",
+        operation_id,
+        completion.provider,
+        completion.model_alias,
+        result.evidence.prompt.source.value,
+        result.evidence.prompt.version,
+        completion.timing.queue_wait_seconds,
+        completion.timing.provider_seconds,
+        completion.elapsed_seconds,
+        usage.prompt_tokens if usage else "unavailable",
+        usage.completion_tokens if usage else "unavailable",
+        usage.total_tokens if usage else "unavailable",
+        result.evidence.trace_unavailable,
+    )
+    print(f"Operation: {operation_id}", file=stdout)
+    print(f"Label: {result.decision.label.value}", file=stdout)
+    print(f"Reason: {_sanitize_terminal_text(result.decision.reason)}", file=stdout)
+    print(f"Prompt source: {result.evidence.prompt.source.value}", file=stdout)
+    print(f"Prompt version: {result.evidence.prompt.version}", file=stdout)
+    print(f"Trace: {result.evidence.trace_id or 'unavailable'}", file=stdout)
+    print(f"Provider: {completion.provider}", file=stdout)
+    print(f"Model: {completion.model_alias}", file=stdout)
+    if usage:
+        print(
+            f"Tokens: prompt={usage.prompt_tokens} completion={usage.completion_tokens} "
+            f"total={usage.total_tokens}",
+            file=stdout,
+        )
+    else:
+        print("Tokens: unavailable", file=stdout)
+    print(f"Queue wait: {completion.timing.queue_wait_seconds:.3f}s", file=stdout)
+    print(f"Provider elapsed: {completion.timing.provider_seconds:.3f}s", file=stdout)
+    print(f"Elapsed: {completion.elapsed_seconds:.3f}s", file=stdout)
+    return 0
+
+
+def _run_prompt_publish(operation_id: str, *, stdout: TextIO, stderr: TextIO) -> int:
+    try:
+        settings = LangfuseSettings.from_env(require_enabled=True)
+    except ConfigurationError as error:
+        return _configuration_failure(operation_id, error, stderr=stderr)
+    configure_logging(settings.log_level)
+    assert settings.public_key is not None
+    assert settings.secret_key is not None
+    runtime: LangfuseTriageRuntime | None = None
+    try:
+        runtime = LangfuseTriageRuntime(
+            public_key=settings.public_key,
+            secret_key=settings.secret_key,
+            base_url=settings.base_url,
+            timeout_seconds=settings.timeout_seconds,
+            release=__version__,
+            manifest=load_packaged_prompt(),
+        )
+        outcome, version = runtime.publish_packaged_prompt()
+    except Exception:
+        LOGGER.warning(
+            "email_triage operation_id=%s command=prompt-publish outcome=failure "
+            "category=provider_failure",
+            operation_id,
+        )
+        print(f"Operation: {operation_id}", file=stderr)
+        print("Prompt publication failed: provider_failure", file=stderr)
+        return 5
+    finally:
+        if runtime is not None:
+            with suppress(Exception):
+                runtime.close()
+    print(f"Operation: {operation_id}", file=stdout)
+    print("Prompt: personal-edge-lab/email-triage", file=stdout)
+    print(f"Outcome: {outcome}", file=stdout)
+    print(f"Version: {version}", file=stdout)
+    LOGGER.info(
+        "email_triage operation_id=%s command=prompt-publish outcome=%s prompt_version=%s",
+        operation_id,
+        outcome,
+        version,
+    )
+    return 0
+
+
+def _load_fixture(name: str) -> TriageEmail:
+    resource = files("personal_edge_lab.apps.ai_cli.fixtures").joinpath(f"{name}.json")
+    payload = json.loads(resource.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or set(payload) != {"sender", "subject", "message"}:
+        raise ValueError("synthetic fixture is invalid")
+    return TriageEmail(
+        sender=payload["sender"],
+        subject=payload["subject"],
+        message=payload["message"],
+    )
 
 
 def _configuration_failure(
