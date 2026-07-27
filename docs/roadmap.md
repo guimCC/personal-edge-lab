@@ -484,14 +484,16 @@ foundation and were accepted on RUBIK and Langfuse Cloud on 2026-07-27. The firs
 resolves a production-labelled Langfuse prompt with a packaged fallback, requests strict `label`
 and `reason` JSON through the existing queued model, and emits one isolated
 root-plus-generation trace. This release does not connect Gmail or claim classification quality.
-WP4 remains deferred; WP6 may add read-only Gmail retrieval, but real Gmail-to-model execution
-remains blocked on privacy and minimum-quality decisions.
+WP4 remains deferred. WP6 adds read-only Gmail retrieval without connecting it to the model; real
+Gmail-to-model execution remains blocked on privacy and minimum-quality decisions.
 
-Work Package 6 is implemented locally in release `0.12.0` and awaits RUBIK/personal-Gmail
-acceptance. It adds a bounded GET-only `EmailSource`, secure Desktop OAuth bootstrap and refresh,
-conservative MIME/HTML normalization, and a metadata-only diagnostic CLI. It does not connect
-retrieved email to the model, Langfuse, persistence, scheduling, or mailbox actions. WP7 remains
-blocked until privacy and minimum-quality decisions are revisited.
+Work Package 6 was accepted on RUBIK and personal Gmail as release `0.12.0` on 2026-07-28. It adds
+a bounded GET-only `EmailSource`, secure Desktop OAuth bootstrap and refresh, conservative
+MIME/HTML normalization, and a metadata-only diagnostic CLI. The owner confirmed bounded
+retrieval, body-free output/logging, unchanged mailbox state, authorization failure/recovery,
+and existing-platform regression checks. It does not connect retrieved email to the model,
+Langfuse, persistence, scheduling, or mailbox actions. WP7 remains blocked until privacy and
+minimum-quality decisions are revisited.
 
 ## Definition of done for every stage
 
@@ -887,6 +889,26 @@ changed, how it was verified, decisions made, and what remains.
 
 **Next**
 
-- Deploy and accept WP6 as release `0.12.0` using a tiny explicit personal-Gmail query. Keep WP4
-  quality work deferred and revisit privacy before any real Gmail-to-model execution or
-  trace-content capture.
+- Plan WP7 as the smallest durable read-only Gmail-to-UNO-Q dry-run. Keep WP4 quality work deferred
+  and resolve content/trace privacy before any real Gmail-to-model execution.
+
+### 2026-07-28 — Gmail read-only source accepted
+
+**Stage:** 6A, Work Package 6
+**Status:** Accepted on RUBIK and personal Gmail
+
+**Accepted behavior**
+
+- Desktop OAuth through the SSH loopback flow created the private personal-Gmail authorization on
+  RUBIK using only `gmail.readonly`.
+- Explicit bounded retrieval returned trusted sender/subject metadata and normalization evidence
+  without printing bodies or exposing credentials.
+- The owner confirmed the documented small-batch, authorization failure/recovery, unchanged-mailbox,
+  and existing-platform regression checks passed.
+- No model call, Langfuse trace, persistence, scheduler, service, migration, dashboard feature, or
+  Gmail mutation was introduced.
+
+**Next**
+
+- Plan WP7 only after explicitly deciding how real Gmail content may enter local inference and
+  whether any real content may enter Langfuse traces.

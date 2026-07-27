@@ -1,7 +1,7 @@
 # Stage 6A Work Package 6 handoff
 
 **Release:** `0.12.0`
-**Status:** Implemented locally; pending RUBIK and personal-Gmail acceptance
+**Status:** Accepted on RUBIK and personal Gmail on 2026-07-28
 
 ## Delivered
 
@@ -52,20 +52,20 @@
 
 ## RUBIK acceptance
 
-Pending owner execution:
+On 2026-07-28 the owner confirmed that the documented WP6 checks passed:
 
-1. Deploy `0.12.0` with `GMAIL_READ_ENABLED=false`.
-2. Install a Google Desktop OAuth client JSON at the configured mode-`0600` path.
-3. Open the documented SSH loopback tunnel and run `email_triage_cli authorize`.
-4. Enable retrieval, redeploy, and fetch limits 3 and 10 with
-   `in:inbox newer_than:7d`.
-5. Compare sender, subject, timestamp, and normalized lengths against Gmail; confirm bodies are
-   absent and mailbox state is unchanged.
-6. Revoke authorization, verify sanitized `authentication` with exit `5`, and restore it using
-   `authorize --replace-token`.
-7. Re-run the accepted AI, Langfuse, SQLite, platform, UNO Q, and firewall checks.
+- release `0.12.0` was deployed on RUBIK;
+- the personal Gmail account was authorized through the Desktop OAuth and SSH loopback flow;
+- the private client and token files passed the documented ownership and mode checks;
+- bounded retrieval with the explicit inbox query worked for the requested small batches;
+- sender, subject, timestamp, content source, length, and cleanup evidence were usable;
+- normalized bodies and credentials were absent from CLI output and normal logs;
+- Gmail read state, labels, archive state, and mailbox contents remained unchanged;
+- the documented authorization-failure/recovery and existing-platform regression checks completed
+  successfully.
 
-Do not mark WP6 accepted until the owner supplies or explicitly confirms this evidence.
+No Gmail address, message ID, subject, body, OAuth value, query result, or raw command output is
+recorded because those exact values were not supplied to the repository.
 
 ## Known limitations and next boundary
 

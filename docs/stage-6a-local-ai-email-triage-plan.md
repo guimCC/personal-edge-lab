@@ -1016,10 +1016,10 @@ Additional Stage 6A gates:
 - [ ] UNO Q API key exists only in private secret files.
 - [ ] RUBIK service account can read the key; other users cannot.
 - [ ] Authorization headers are absent from logs and traces.
-- [ ] Gmail client secret and token files are mode `0600`.
-- [ ] Gmail OAuth uses read-only scope in Stage 6A.
-- [ ] Raw email bodies are absent from normal logs.
-- [ ] Real email content is absent from Langfuse by default.
+- [x] Gmail client secret and token files are mode `0600`.
+- [x] Gmail OAuth uses read-only scope in Stage 6A.
+- [x] Raw email bodies are absent from normal logs.
+- [x] Real email content is absent from Langfuse by default.
 - [ ] Fixture data is synthetic or irreversibly sanitized.
 - [ ] Model input has character/token bounds.
 - [ ] Email content is delimited and treated as untrusted data.
@@ -1183,7 +1183,7 @@ Agents working from this document must:
 | WP3. Triage prompt and schema | Accepted on RUBIK | Versioned validated triage profile |
 | WP4. Fixture evaluation | Not started | Reproducible quality/latency report |
 | WP5. Langfuse observability | Accepted on RUBIK | Non-blocking synthetic trace contract |
-| WP6. Gmail read-only source | Implemented locally | Bounded normalized Gmail retrieval |
+| WP6. Gmail read-only source | Accepted on RUBIK | Bounded normalized Gmail retrieval |
 | WP7. Durable dry-run pipeline | Not started | Audited Gmail-to-UNO-Q recommendations |
 | WP8. Shadow-mode presentation | Not started | Human-inspectable dry-run results |
 | WP9. Scheduled shadow operation | Optional | Bounded independent worker/timer |
@@ -1418,5 +1418,5 @@ Release `0.12.0` implements bounded read-only Gmail retrieval:
   mailbox mutation.
 
 The detailed implementation, security, deployment, rollback, and acceptance record is
-[`stage-6a-wp6-handoff.md`](stage-6a-wp6-handoff.md). WP6 remains pending live acceptance. WP7 is
-still blocked on explicit privacy and minimum-quality decisions.
+[`stage-6a-wp6-handoff.md`](stage-6a-wp6-handoff.md). WP6 was accepted on RUBIK and personal Gmail
+on 2026-07-28. WP7 is still blocked on explicit privacy and minimum-quality decisions.
