@@ -50,6 +50,26 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, enabled: bool
     monkeypatch.setenv("GMAIL_TOKEN_FILE", str(token))
 
 
+def _configure_triage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    enabled: bool = True,
+) -> Path:
+    _configure(monkeypatch, tmp_path)
+    key = tmp_path / "unoq.key"
+    key.write_text("u" * 64 + "\n", encoding="utf-8")
+    key.chmod(0o600)
+    database = tmp_path / "triage.db"
+    monkeypatch.setenv("GMAIL_TRIAGE_ENABLED", str(enabled).lower())
+    monkeypatch.setenv("LOCAL_LLM_ENABLED", "true")
+    monkeypatch.setenv("LOCAL_LLM_API_KEY_FILE", str(key))
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://uno.local:8080")
+    monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("DATABASE_PATH", str(database))
+    return database
+
+
 def _message(*, body: str = "private-body-sentinel") -> dict[str, object]:
     return {
         "id": "message-id-1",
@@ -290,4 +310,156 @@ def test_invalid_input_exits_two_before_http(
     )
 
     assert exit_code == 2
+    assert calls == 0
+
+
+def test_disabled_mailbox_triage_performs_zero_http_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_triage(monkeypatch, tmp_path, enabled=False)
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    stderr = StringIO()
+    exit_code = main(
+        ["triage", "--query", "in:inbox", "--limit", "1"],
+        stdout=StringIO(),
+        stderr=stderr,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert exit_code == 2
+    assert calls == 0
+    assert "GMAIL_TRIAGE_ENABLED" in stderr.getvalue()
+
+
+def test_mailbox_triage_is_durable_private_and_reuses_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    database = _configure_triage(monkeypatch, tmp_path)
+    model_calls = 0
+    query = "in:inbox private-query-sentinel"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal model_calls
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(
+                200,
+                json={"messages": [{"id": "message-id-1", "threadId": "thread-id-1"}]},
+            )
+        if request.url.path.startswith("/gmail/"):
+            return httpx.Response(200, json=_message())
+        model_calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "model": "/private/model/path.gguf",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": ('{"label":"billing","reason":"private-reason-sentinel"}'),
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+            },
+        )
+
+    caplog.set_level(logging.INFO)
+    first_out = StringIO()
+    first = main(
+        ["triage", "--query", query, "--limit", "1"],
+        stdout=first_out,
+        stderr=StringIO(),
+        transport=httpx.MockTransport(handler),
+        operation_id_factory=lambda: "run-one",
+    )
+    second_out = StringIO()
+    second = main(
+        ["triage", "--query", query, "--limit", "1"],
+        stdout=second_out,
+        stderr=StringIO(),
+        transport=httpx.MockTransport(handler),
+        operation_id_factory=lambda: "run-two",
+    )
+
+    assert first == second == 0
+    assert model_calls == 1
+    assert "Proposed label: billing" in first_out.getvalue()
+    assert "Reason: private-reason-sentinel" in first_out.getvalue()
+    assert "Item 1: reused" in second_out.getvalue()
+    assert "Reason: intentionally not retained" in second_out.getvalue()
+    assert "Gmail changes: none" in first_out.getvalue()
+    persisted = database.read_bytes()
+    for sentinel in (
+        b"private-query-sentinel",
+        b"sender@example.test",
+        b"private-body-sentinel",
+        b"private-reason-sentinel",
+        b"/private/model/path.gguf",
+    ):
+        assert sentinel not in persisted
+        assert sentinel.decode() not in caplog.text
+
+    monkeypatch.setenv("GMAIL_TRIAGE_ENABLED", "false")
+    monkeypatch.setenv("GMAIL_READ_ENABLED", "false")
+    monkeypatch.setenv("LOCAL_LLM_ENABLED", "false")
+    history = StringIO()
+    assert (
+        main(
+            ["runs"],
+            stdout=history,
+            stderr=StringIO(),
+            operation_id_factory=lambda: "history-operation",
+        )
+        == 0
+    )
+    assert "run-one" in history.getvalue()
+    details = StringIO()
+    assert (
+        main(
+            ["show", "--run-id", "run-one"],
+            stdout=details,
+            stderr=StringIO(),
+            operation_id_factory=lambda: "show-operation",
+        )
+        == 0
+    )
+    assert "Label: billing" in details.getvalue()
+    assert "private-reason-sentinel" not in details.getvalue()
+
+
+def test_mailbox_triage_limit_is_rejected_before_http(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_triage(monkeypatch, tmp_path)
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    assert (
+        main(
+            ["triage", "--query", "in:inbox", "--limit", "11"],
+            stdout=StringIO(),
+            stderr=StringIO(),
+            transport=httpx.MockTransport(handler),
+        )
+        == 2
+    )
     assert calls == 0

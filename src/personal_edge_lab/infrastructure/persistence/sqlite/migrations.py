@@ -326,6 +326,164 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version="006_email_triage_runs",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS email_triage_runs (
+                run_id TEXT PRIMARY KEY,
+                operation_id TEXT NOT NULL UNIQUE,
+                query_sha256 TEXT NOT NULL,
+                requested_limit INTEGER NOT NULL
+                    CHECK (requested_limit BETWEEN 1 AND 10),
+                force_new_attempt INTEGER NOT NULL
+                    CHECK (force_new_attempt IN (0, 1)),
+                status TEXT NOT NULL
+                    CHECK (
+                        status IN (
+                            'requested', 'retrieving', 'classifying',
+                            'completed_with_results', 'completed_with_failures',
+                            'failed_before_items', 'interrupted'
+                        )
+                    ),
+                requested_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL,
+                completed_at_utc TEXT,
+                document_count INTEGER NOT NULL DEFAULT 0 CHECK (document_count >= 0),
+                retrieval_failure_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (retrieval_failure_count >= 0),
+                pages_fetched INTEGER NOT NULL DEFAULT 0 CHECK (pages_fetched >= 0),
+                api_call_count INTEGER NOT NULL DEFAULT 0 CHECK (api_call_count >= 0),
+                retrieval_seconds REAL NOT NULL DEFAULT 0 CHECK (retrieval_seconds >= 0),
+                has_more INTEGER NOT NULL DEFAULT 0 CHECK (has_more IN (0, 1)),
+                failure_category TEXT
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_email_triage_runs_recent
+            ON email_triage_runs (requested_at_utc DESC, run_id DESC)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS email_triage_evaluations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                identity_sha256 TEXT NOT NULL UNIQUE,
+                gmail_message_id TEXT NOT NULL,
+                gmail_thread_id TEXT NOT NULL,
+                received_at_utc TEXT NOT NULL,
+                message_fingerprint TEXT NOT NULL,
+                normalized_sha256 TEXT NOT NULL,
+                model_input_sha256 TEXT NOT NULL,
+                sender_chars INTEGER NOT NULL CHECK (sender_chars >= 0),
+                subject_chars INTEGER NOT NULL CHECK (subject_chars >= 0),
+                normalized_chars INTEGER NOT NULL CHECK (normalized_chars >= 0),
+                model_message_chars INTEGER NOT NULL CHECK (model_message_chars >= 0),
+                original_size_bytes INTEGER NOT NULL CHECK (original_size_bytes >= 0),
+                content_source TEXT NOT NULL
+                    CHECK (content_source IN ('plain_text', 'html', 'empty')),
+                source_truncated INTEGER NOT NULL CHECK (source_truncated IN (0, 1)),
+                model_input_truncated INTEGER NOT NULL
+                    CHECK (model_input_truncated IN (0, 1)),
+                metadata_truncated INTEGER NOT NULL CHECK (metadata_truncated IN (0, 1)),
+                cleanup_flags_json TEXT NOT NULL,
+                profile_name TEXT NOT NULL,
+                profile_version TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                schema_version TEXT NOT NULL,
+                generation_parameters_version TEXT NOT NULL,
+                prompt_name TEXT NOT NULL,
+                prompt_source TEXT NOT NULL
+                    CHECK (prompt_source IN ('langfuse', 'local_fallback')),
+                prompt_version TEXT NOT NULL,
+                model_alias TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS email_triage_run_items (
+                run_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+                gmail_message_id TEXT,
+                message_fingerprint TEXT NOT NULL,
+                received_at_utc TEXT,
+                evaluation_id INTEGER,
+                selected_attempt_id INTEGER,
+                status TEXT NOT NULL
+                    CHECK (
+                        status IN (
+                            'pending', 'classifying', 'succeeded',
+                            'reused', 'failed', 'interrupted'
+                        )
+                    ),
+                failure_category TEXT,
+                recorded_at_utc TEXT NOT NULL,
+                completed_at_utc TEXT,
+                PRIMARY KEY (run_id, ordinal),
+                FOREIGN KEY (run_id) REFERENCES email_triage_runs (run_id),
+                FOREIGN KEY (evaluation_id) REFERENCES email_triage_evaluations (id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_email_triage_items_evaluation
+            ON email_triage_run_items (evaluation_id, run_id)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS email_triage_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                evaluation_id INTEGER NOT NULL,
+                run_id TEXT NOT NULL,
+                item_ordinal INTEGER NOT NULL,
+                operation_id TEXT NOT NULL UNIQUE,
+                attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
+                status TEXT NOT NULL
+                    CHECK (status IN ('reserved', 'running', 'succeeded', 'failed', 'interrupted')),
+                reserved_at_utc TEXT NOT NULL,
+                started_at_utc TEXT,
+                completed_at_utc TEXT,
+                provider TEXT,
+                model_alias TEXT,
+                queue_wait_seconds REAL NOT NULL DEFAULT 0 CHECK (queue_wait_seconds >= 0),
+                provider_seconds REAL CHECK (provider_seconds IS NULL OR provider_seconds >= 0),
+                total_seconds REAL CHECK (total_seconds IS NULL OR total_seconds >= 0),
+                provider_attempt_count INTEGER NOT NULL DEFAULT 1
+                    CHECK (provider_attempt_count >= 1),
+                retry_eligible INTEGER CHECK (retry_eligible IN (0, 1)),
+                retry_after_seconds REAL
+                    CHECK (retry_after_seconds IS NULL OR retry_after_seconds >= 0),
+                prompt_tokens INTEGER CHECK (prompt_tokens IS NULL OR prompt_tokens >= 0),
+                completion_tokens INTEGER
+                    CHECK (completion_tokens IS NULL OR completion_tokens >= 0),
+                total_tokens INTEGER CHECK (total_tokens IS NULL OR total_tokens >= 0),
+                label TEXT
+                    CHECK (
+                        label IS NULL
+                        OR label IN (
+                            'work', 'billing', 'notification',
+                            'newsletter', 'personal', 'other'
+                        )
+                    ),
+                decision_sha256 TEXT,
+                reason_chars INTEGER CHECK (reason_chars IS NULL OR reason_chars BETWEEN 1 AND 160),
+                failure_category TEXT,
+                trace_id TEXT,
+                trace_unavailable INTEGER NOT NULL DEFAULT 1
+                    CHECK (trace_unavailable IN (0, 1)),
+                FOREIGN KEY (evaluation_id) REFERENCES email_triage_evaluations (id),
+                FOREIGN KEY (run_id, item_ordinal)
+                    REFERENCES email_triage_run_items (run_id, ordinal),
+                UNIQUE (evaluation_id, attempt_number)
+            )
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_email_triage_one_active_attempt
+            ON email_triage_attempts (evaluation_id)
+            WHERE status IN ('reserved', 'running')
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_email_triage_attempts_run
+            ON email_triage_attempts (run_id, item_ordinal, id)
+            """,
+        ),
+    ),
 )
 
 

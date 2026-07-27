@@ -10,6 +10,8 @@ from personal_edge_lab.apps.email_triage_cli.config import (
     ConfigurationError,
     GmailAuthorizationSettings,
     GmailFetchSettings,
+    MailboxTriageSettings,
+    TriageHistorySettings,
 )
 from personal_edge_lab.infrastructure.gmail.oauth import GMAIL_READONLY_SCOPE
 
@@ -88,6 +90,29 @@ def test_fetch_requires_explicit_enablement(
 
     with pytest.raises(ConfigurationError, match="GMAIL_READ_ENABLED"):
         GmailFetchSettings.from_env()
+
+
+def test_mailbox_triage_requires_its_own_gate_before_other_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GMAIL_TRIAGE_ENABLED", "false")
+    with pytest.raises(ConfigurationError, match="GMAIL_TRIAGE_ENABLED"):
+        MailboxTriageSettings.from_env()
+
+
+def test_history_requires_only_database_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "history.db"
+    monkeypatch.setenv("DATABASE_PATH", str(database))
+    monkeypatch.setenv("GMAIL_READ_ENABLED", "false")
+    monkeypatch.setenv("LOCAL_LLM_ENABLED", "false")
+    monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+
+    settings = TriageHistorySettings.from_env()
+
+    assert settings.database_path == database
 
 
 @pytest.mark.parametrize(

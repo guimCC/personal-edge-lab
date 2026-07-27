@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 
 from personal_edge_lab.application.ports.ai import LanguageModel, LanguageModelError
 from personal_edge_lab.application.ports.email_triage import (
@@ -17,6 +18,9 @@ from personal_edge_lab.domain.ai import (
     StructuredOutputContract,
 )
 from personal_edge_lab.domain.email_triage import (
+    PreparedTriage,
+    RedactedTriageTracePayload,
+    SyntheticTriageTracePayload,
     TriageEmail,
     TriageEvidence,
     TriageOutputError,
@@ -70,6 +74,9 @@ class EmailTriageService:
         self._profile = profile
 
     def classify(self, email: TriageEmail, *, operation_id: str) -> TriageResult:
+        return self.classify_prepared(self.prepare(email), operation_id=operation_id)
+
+    def prepare(self, email: TriageEmail) -> PreparedTriage:
         email_json = json.dumps(
             {"message": email.message, "sender": email.sender, "subject": email.subject},
             ensure_ascii=False,
@@ -93,23 +100,44 @@ class EmailTriageService:
             ),
             reasoning_mode=ReasoningMode.DISABLED,
         )
+        return PreparedTriage(
+            email=email,
+            prompt=prompt,
+            profile=self._profile,
+            request=request,
+        )
+
+    def classify_prepared(
+        self,
+        prepared: PreparedTriage,
+        *,
+        operation_id: str,
+        redacted_trace: RedactedTriageTracePayload | None = None,
+    ) -> TriageResult:
         trace_id = _trace_id(operation_id)
         try:
-            completion = self._model.complete(request)
+            completion = self._model.complete(prepared.request)
         except LanguageModelError as error:
             self._safe_trace(
                 TriageTraceRecord(
                     trace_id=trace_id,
                     operation_id=operation_id,
-                    email=email,
-                    prompt=prompt.identity,
-                    prompt_messages=prompt.messages,
-                    profile=self._profile,
+                    prompt=prepared.prompt.identity,
+                    profile=prepared.profile,
                     provider="llama_cpp",
                     model_alias=self._model_alias,
-                    completion=None,
-                    raw_output=None,
-                    decision=None,
+                    usage=None,
+                    timing=None,
+                    payload=(
+                        redacted_trace
+                        if redacted_trace is not None
+                        else SyntheticTriageTracePayload(
+                            email=prepared.email,
+                            prompt_messages=prepared.prompt.messages,
+                            raw_output=None,
+                            decision=None,
+                        )
+                    ),
                     outcome="failure",
                     failure_category=error.category.value,
                     failure_queue_wait_seconds=error.queue_wait_seconds,
@@ -127,15 +155,22 @@ class EmailTriageService:
                 TriageTraceRecord(
                     trace_id=trace_id,
                     operation_id=operation_id,
-                    email=email,
-                    prompt=prompt.identity,
-                    prompt_messages=prompt.messages,
-                    profile=self._profile,
+                    prompt=prepared.prompt.identity,
+                    profile=prepared.profile,
                     provider=completion.provider,
                     model_alias=completion.model_alias,
-                    completion=completion,
-                    raw_output=completion.text,
-                    decision=None,
+                    usage=completion.usage,
+                    timing=completion.timing,
+                    payload=(
+                        redacted_trace
+                        if redacted_trace is not None
+                        else SyntheticTriageTracePayload(
+                            email=prepared.email,
+                            prompt_messages=prepared.prompt.messages,
+                            raw_output=completion.text,
+                            decision=None,
+                        )
+                    ),
                     outcome="failure",
                     failure_category="triage_output",
                 )
@@ -145,15 +180,27 @@ class EmailTriageService:
             TriageTraceRecord(
                 trace_id=trace_id,
                 operation_id=operation_id,
-                email=email,
-                prompt=prompt.identity,
-                prompt_messages=prompt.messages,
-                profile=self._profile,
+                prompt=prepared.prompt.identity,
+                profile=prepared.profile,
                 provider=completion.provider,
                 model_alias=completion.model_alias,
-                completion=completion,
-                raw_output=completion.text,
-                decision=decision,
+                usage=completion.usage,
+                timing=completion.timing,
+                payload=(
+                    replace(
+                        redacted_trace,
+                        decision_sha256=_decision_hash(decision.label.value, decision.reason),
+                        label=decision.label,
+                        reason_chars=len(decision.reason),
+                    )
+                    if redacted_trace is not None
+                    else SyntheticTriageTracePayload(
+                        email=prepared.email,
+                        prompt_messages=prepared.prompt.messages,
+                        raw_output=completion.text,
+                        decision=decision,
+                    )
+                ),
                 outcome="success",
             )
         )
@@ -163,8 +210,8 @@ class EmailTriageService:
                 operation_id=operation_id,
                 trace_id=recorded_trace_id,
                 trace_unavailable=recorded_trace_id is None,
-                prompt=prompt.identity,
-                profile=self._profile,
+                prompt=prepared.prompt.identity,
+                profile=prepared.profile,
                 completion=completion,
             ),
         )
@@ -178,3 +225,13 @@ class EmailTriageService:
 
 def _trace_id(operation_id: str) -> str:
     return hashlib.sha256(operation_id.encode("utf-8")).hexdigest()[:32]
+
+
+def _decision_hash(label: str, reason: str) -> str:
+    value = json.dumps(
+        {"label": label, "reason": reason},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()

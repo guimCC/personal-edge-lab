@@ -15,7 +15,11 @@ from personal_edge_lab.domain.ai import (
     ModelIdentity,
     ReasoningMode,
 )
-from personal_edge_lab.domain.email_triage import TriageEmail, TriageOutputError
+from personal_edge_lab.domain.email_triage import (
+    RedactedTriageTracePayload,
+    TriageEmail,
+    TriageOutputError,
+)
 from personal_edge_lab.infrastructure.ai.triage_decoder import (
     PydanticTriageDecisionDecoder,
 )
@@ -151,3 +155,38 @@ def test_trace_failure_never_invalidates_inference() -> None:
     )
     assert result.evidence.trace_unavailable is True
     assert result.evidence.trace_id is None
+
+
+def test_gmail_classification_trace_record_never_contains_content_or_reason() -> None:
+    content = "private-gmail-body-sentinel"
+    reason = "private-gmail-reason-sentinel"
+    sink = Sink()
+    triage_service = service(
+        Model(f'{{"label":"billing","reason":"{reason}"}}'),
+        sink,
+    )
+    prepared = triage_service.prepare(
+        TriageEmail("private-sender@example.test", "Private subject", content)
+    )
+
+    result = triage_service.classify_prepared(
+        prepared,
+        operation_id="gmail-redacted",
+        redacted_trace=RedactedTriageTracePayload(
+            content_sha256="a" * 64,
+            decision_sha256=None,
+            sender_chars=27,
+            subject_chars=15,
+            message_chars=len(content),
+            source="plain_text",
+            cleanup_flags=(),
+        ),
+    )
+
+    assert result.decision.reason == reason
+    serialized_record = repr(sink.records[0])
+    assert content not in serialized_record
+    assert reason not in serialized_record
+    assert "private-sender@example.test" not in serialized_record
+    assert "Private subject" not in serialized_record
+    assert isinstance(sink.records[0].payload, RedactedTriageTracePayload)

@@ -155,6 +155,15 @@ TELEGRAM_NOTIFICATIONS_ENABLED="${TELEGRAM_NOTIFICATION_DELIVERY_ENABLED:-false}
 LOCAL_LLM_ENABLED_VALUE="${LOCAL_LLM_ENABLED:-false}"
 LANGFUSE_ENABLED_VALUE="${LANGFUSE_ENABLED:-false}"
 GMAIL_READ_ENABLED_VALUE="${GMAIL_READ_ENABLED:-false}"
+GMAIL_TRIAGE_ENABLED_VALUE="${GMAIL_TRIAGE_ENABLED:-false}"
+if [[ "$GMAIL_TRIAGE_ENABLED_VALUE" == "true" ]]; then
+    [[ "$GMAIL_READ_ENABLED_VALUE" == "true" ]] || {
+        fail "Gmail triage requires GMAIL_READ_ENABLED=true"
+    }
+    [[ "$LOCAL_LLM_ENABLED_VALUE" == "true" ]] || {
+        fail "Gmail triage requires LOCAL_LLM_ENABLED=true"
+    }
+fi
 if [[ "$AUTH_ENABLED" == "true" ]]; then
     [[ "${PUBLIC_ORIGIN:-}" == "https://rubik-edge-01.local" ]] || {
         fail "authenticated deployment requires PUBLIC_ORIGIN=https://rubik-edge-01.local"
@@ -429,6 +438,19 @@ if [[ -f "$DATABASE_FILE" ]]; then
              UNION ALL SELECT "alert_states", COUNT(*) FROM alert_states
              UNION ALL SELECT "alert_transition_events", COUNT(*)
              FROM alert_transition_events;' \
+            >>"$DEPLOY_BACKUP/row-counts.txt"
+    fi
+    if sqlite_live \
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_triage_runs';" \
+        | grep -qx '1'; then
+        sqlite_live \
+            'SELECT "email_triage_runs", COUNT(*) FROM email_triage_runs
+             UNION ALL SELECT "email_triage_run_items", COUNT(*)
+             FROM email_triage_run_items
+             UNION ALL SELECT "email_triage_evaluations", COUNT(*)
+             FROM email_triage_evaluations
+             UNION ALL SELECT "email_triage_attempts", COUNT(*)
+             FROM email_triage_attempts;' \
             >>"$DEPLOY_BACKUP/row-counts.txt"
     fi
 fi

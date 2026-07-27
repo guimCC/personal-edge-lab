@@ -13,6 +13,8 @@ from personal_edge_lab.domain.ai import (
 )
 from personal_edge_lab.domain.email_triage import (
     PromptSourceKind,
+    RedactedTriageTracePayload,
+    SyntheticTriageTracePayload,
     TriageDecision,
     TriageEmail,
     TriageLabel,
@@ -208,9 +210,7 @@ def test_trace_has_exact_root_and_generation_shape_with_prompt_link() -> None:
         TriageTraceRecord(
             trace_id="1" * 32,
             operation_id="operation",
-            email=TriageEmail("billing@example.test", "Bill", "Invoice"),
             prompt=prompt.identity,
-            prompt_messages=prompt.messages,
             profile=TriageProfile(
                 name="email-triage",
                 version="1.0.0",
@@ -220,9 +220,14 @@ def test_trace_has_exact_root_and_generation_shape_with_prompt_link() -> None:
             ),
             provider="llama_cpp",
             model_alias="qwen3-1.7b-q4-k-m",
-            completion=completion,
-            raw_output=completion.text,
-            decision=TriageDecision(TriageLabel.BILLING, "Invoice"),
+            usage=completion.usage,
+            timing=completion.timing,
+            payload=SyntheticTriageTracePayload(
+                email=TriageEmail("billing@example.test", "Bill", "Invoice"),
+                prompt_messages=prompt.messages,
+                raw_output=completion.text,
+                decision=TriageDecision(TriageLabel.BILLING, "Invoice"),
+            ),
             outcome="success",
         )
     )
@@ -239,6 +244,50 @@ def test_trace_has_exact_root_and_generation_shape_with_prompt_link() -> None:
     assert generation["usage_details"] == {"input": 10, "output": 5, "total": 15}
     assert generation["prompt"] is FakeLangfuse.prompt
     assert client.propagated["tags"] == ["email-triage", "synthetic"]
+
+
+def test_gmail_trace_contains_only_redacted_evidence_and_prompt_link() -> None:
+    runtime_value = runtime()
+    prompt = runtime_value.resolve(variables())
+    sentinel = "real-email-content-sentinel"
+    runtime_value.record(
+        TriageTraceRecord(
+            trace_id="2" * 32,
+            operation_id="gmail-operation",
+            prompt=prompt.identity,
+            profile=TriageProfile(
+                name="email-triage",
+                version="1.0.0",
+                taxonomy_version="1.0.0",
+                schema_version="1.0.0",
+                generation_parameters_version="1.0.0",
+            ),
+            provider="llama_cpp",
+            model_alias="qwen3-1.7b-q4-k-m",
+            usage=None,
+            timing=None,
+            payload=RedactedTriageTracePayload(
+                content_sha256="a" * 64,
+                decision_sha256="b" * 64,
+                sender_chars=20,
+                subject_chars=7,
+                message_chars=len(sentinel),
+                source="plain_text",
+                cleanup_flags=("tracking_removed",),
+                label=TriageLabel.BILLING,
+                reason_chars=12,
+            ),
+            outcome="success",
+        )
+    )
+    client = FakeLangfuse.instances[0]
+    serialized = repr(client.observations)
+    assert sentinel not in serialized
+    assert "billing@example.test" not in serialized
+    assert client.propagated["tags"] == ["email-triage", "gmail"]
+    assert client.observations[1]["prompt"] is FakeLangfuse.prompt
+    assert client.observations[1]["input"]["content_sha256"] == "a" * 64
+    assert client.observations[1]["output"]["label"] == "billing"
 
 
 def test_close_flushes_and_shuts_down_short_lived_client() -> None:

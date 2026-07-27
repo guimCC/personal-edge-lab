@@ -1419,4 +1419,25 @@ Release `0.12.0` implements bounded read-only Gmail retrieval:
 
 The detailed implementation, security, deployment, rollback, and acceptance record is
 [`stage-6a-wp6-handoff.md`](stage-6a-wp6-handoff.md). WP6 was accepted on RUBIK and personal Gmail
-on 2026-07-28. WP7 is still blocked on explicit privacy and minimum-quality decisions.
+on 2026-07-28.
+
+## Work Package 7 implementation handoff
+
+Release `0.13.0` implements durable read-only triage runs:
+
+- an explicit, at-most-ten-message Gmail query enters the existing email-triage feature module;
+- prompt resolution is separated from inference so the exact versioned evaluation identity can be
+  transactionally reserved before contacting UNO Q;
+- migration `006_email_triage_runs` stores run, item, evaluation, attempt, decision-hash, label,
+  usage, timing, trace, and categorized failure evidence without copied email content;
+- identical successful evaluations are reused, while `--new-attempt` creates another separately
+  auditable inference;
+- real-Gmail Langfuse traces use a dedicated redacted payload and preserve the exact prompt link,
+  model, usage, timing, stable root span, and one child generation;
+- the manual CLI exposes live recommendations plus bounded evidence history and never mutates
+  Gmail.
+
+The detailed deployment, rollback, and acceptance record is
+[`stage-6a-wp7-handoff.md`](stage-6a-wp7-handoff.md). WP7 is implemented locally and awaits RUBIK
+acceptance. WP4 quality evaluation remains deferred, and WP8 owns any broader operator review
+surface.

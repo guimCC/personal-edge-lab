@@ -28,9 +28,11 @@ apps -> application/ports <- infrastructure
   exposes bounded alert queries without importing FastAPI, systemd, or SQLite.
 - `modules/notifications` owns durable delivery, retry, expiry, and owner pause semantics without
   importing Telegram or SQLite.
-- `modules/email_triage` is the first AI feature module. It renders one bounded email as canonical
-  JSON, resolves a versioned prompt through a narrow port, invokes `LanguageModel`, strictly
-  decodes `label` and `reason`, and returns versioned evidence without knowing llama.cpp,
+- `modules/email_triage` is the first AI feature module. It renders bounded email as canonical JSON,
+  resolves a versioned prompt through a narrow port, invokes `LanguageModel`, strictly decodes
+  `label` and `reason`, and returns versioned evidence. Its durable batch use case coordinates
+  `EmailSource`, prepared prompt identity, transactional evaluation reservation, sequential
+  inference, partial failures, reuse, and interruption without knowing Gmail, SQLite, llama.cpp,
   Pydantic, Langfuse, or OpenTelemetry.
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
 - `infrastructure/telegram` implements the narrow Bot API transport and never exposes the bot
@@ -42,7 +44,9 @@ apps -> application/ports <- infrastructure
   server's GGUF path as model identity. Pydantic is confined to the strict triage parsing boundary.
 - `infrastructure/observability` implements Langfuse managed-prompt and trace ports. Langfuse and
   OpenTelemetry imports are confined there; a prompt outage selects the packaged fallback and a
-  trace outage cannot invalidate inference.
+  trace outage cannot invalidate inference. Synthetic traces carry authorized fixture content;
+  Gmail traces accept a separate redacted payload containing only hashes, lengths, cleanup,
+  label, version, usage, and timing evidence.
 - `infrastructure/gmail` implements the bounded `EmailSource` port. It owns Google OAuth refresh,
   Gmail IDs and pagination, GET-only wire structures, nested MIME decoding, and conservative
   HTML/text normalization. Raw Gmail payloads and OAuth objects never cross that boundary.
@@ -51,9 +55,10 @@ apps -> application/ports <- infrastructure
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
   consecutive-failure counter.
 - `apps/ac_cli` owns parsing, output, configuration, composition, and exit codes.
-- `apps/email_triage_cli` owns explicit personal-Gmail authorization and metadata-only bounded
-  retrieval. It prints sender and subject on the trusted operator terminal but never prints,
-  logs, traces, or stores normalized bodies.
+- `apps/email_triage_cli` owns explicit personal-Gmail authorization, metadata-only retrieval,
+  durable dry-run composition, signal handling, and evidence presentation. Live triage may print
+  sender, subject, label, and reason on the trusted terminal; normalized bodies never appear and
+  durable history remains content-free.
 - `apps/api` has feature routers for authentication, operations, telemetry, AC, and the packaged
   dashboard. It protects typed HTTP queries, enforces origin/CSRF controls, and composes the
   existing command use case for authenticated writes.
@@ -240,6 +245,23 @@ in memory for a later approved consumer, but WP6 does not import the language-mo
 email-triage feature, or persistence paths. A batch may contain valid documents plus explicit
 per-message normalization failures; transport and authorization failures remain operation-level.
 
+WP7 composes the accepted boundaries without weakening them:
+
+```text
+explicit Gmail query -> EmailSource -> TriageMailboxBatch -> prepared prompt identity
+                                                        -> SQLite reservation
+                                                        -> one-slot LanguageModel
+                                                        -> strict decision
+                                                        -> evidence-only SQLite
+                                                        -> redacted Langfuse trace
+```
+
+Migration `006_email_triage_runs` separates runs, run items, unique evaluation identities, and
+actual inference attempts. `BEGIN IMMEDIATE` serializes identity reservation; one partial unique
+index prevents concurrent active attempts for the same identity. Reused successful attempts do not
+contact UNO Q or create a trace. SQLite stores IDs, hashes, lengths, versions, label and operational
+evidence but no raw query, sender, subject, body, compiled prompt, output, or reason.
+
 ## Adding capability
 
 ### Add a domain model
@@ -279,10 +301,9 @@ process lifecycle or presentation. Business rules should remain reusable outside
 
 ## Future architecture, not current packages
 
-Future slices may introduce a durable Gmail-to-local-AI dry-run pipeline, a persistent local-AI
-task worker, speech, multiple identities and permissions, and worker registration. Real
-Gmail-to-model execution and trace-content policy remain blocked on explicit privacy and
-minimum-quality decisions.
+Future slices may introduce a persistent local-AI task worker, a broader operator review surface,
+speech, multiple identities and permissions, and worker registration. Classification quality,
+feedback retention, and any automated mailbox action remain separate explicit decisions.
 Casadaqui is the first external operations adapter: it exposes concise status, AC control,
 notification policy, and operational alert delivery, but deliberately does not expose detailed
 histories.

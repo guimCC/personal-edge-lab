@@ -251,6 +251,34 @@ are never overwritten without `--replace-token`. `authorize` works while `GMAIL_
 so credentials can be bootstrapped before enabling retrieval. See the deployment runbook for the
 SSH loopback-tunnel workflow and Google Cloud setup.
 
+## Run durable read-only mailbox triage
+
+Release `0.13.0` connects the bounded Gmail source to the existing prompt, one-slot local model,
+strict decoder, redacted Langfuse tracing, and evidence-only SQLite repository:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli triage \
+  --query "in:inbox newer_than:7d" \
+  --limit 3
+python -m personal_edge_lab.apps.email_triage_cli runs --limit 20
+python -m personal_edge_lab.apps.email_triage_cli show --run-id <run-id>
+```
+
+The query and limit are mandatory, the limit is at most ten, and the command remains a dry run:
+it never sends, marks read, labels, archives, trashes, or otherwise changes Gmail. Sender, subject,
+label, and reason appear only on trusted stdout for a newly evaluated item. SQLite retains IDs,
+hashes, sizes, versions, timing, usage, label, and failure evidence—not the query, sender, subject,
+body, compiled prompt, raw output, or reason.
+
+An identical successful identity is reused without another model call or trace. Use
+`--new-attempt` only when intentionally creating another auditable inference attempt. Real-Gmail
+Langfuse traces contain only hashes, lengths, cleanup evidence, the proposed label, versions,
+timing, and usage; full content remains restricted to checked-in synthetic fixtures.
+
+`triage` requires `GMAIL_TRIAGE_ENABLED=true`, `GMAIL_READ_ENABLED=true`, and
+`LOCAL_LLM_ENABLED=true`. Langfuse remains optional. The `runs` and `show` history commands require
+only the local database.
+
 ## Data and migrations
 
 All applications run the same standard-library migration runner before opening a repository.
@@ -259,7 +287,8 @@ It creates `schema_migrations` and recognizes the existing telemetry/audit schem
 durable login throttling, audit attribution/idempotency, and a leased web-command lock.
 `004_operational_alerts` adds evaluator runtime, alert states, incidents, and transition events.
 `005_notification_outbox` adds atomic outbound delivery, owner pause policy, retry leases, and
-delivery runtime.
+delivery runtime. `006_email_triage_runs` adds durable dry-run lifecycles, unique evaluation
+identities, run items, and separately auditable inference attempts.
 Existing telemetry and audit rows stay in place. SQLite uses one `data/telemetry.db`; there is no
 ORM or second database process.
 

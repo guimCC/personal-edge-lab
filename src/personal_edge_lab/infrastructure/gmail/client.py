@@ -98,7 +98,12 @@ class GmailEmailSource:
             try:
                 documents.append(self._parse_message(response, expected_id=message_id))
             except GmailMessageNormalizationError as error:
-                failures.append(EmailItemFailure(_item_failure_category(error.category)))
+                failures.append(
+                    EmailItemFailure(
+                        _item_failure_category(error.category),
+                        message_id=message_id,
+                    )
+                )
         return EmailRetrievalBatch(
             documents=tuple(documents),
             failures=tuple(failures),

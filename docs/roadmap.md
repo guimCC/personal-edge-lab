@@ -484,16 +484,20 @@ foundation and were accepted on RUBIK and Langfuse Cloud on 2026-07-27. The firs
 resolves a production-labelled Langfuse prompt with a packaged fallback, requests strict `label`
 and `reason` JSON through the existing queued model, and emits one isolated
 root-plus-generation trace. This release does not connect Gmail or claim classification quality.
-WP4 remains deferred. WP6 adds read-only Gmail retrieval without connecting it to the model; real
-Gmail-to-model execution remains blocked on privacy and minimum-quality decisions.
+WP4 remains deferred. WP6 adds read-only Gmail retrieval without connecting it to the model.
 
 Work Package 6 was accepted on RUBIK and personal Gmail as release `0.12.0` on 2026-07-28. It adds
 a bounded GET-only `EmailSource`, secure Desktop OAuth bootstrap and refresh, conservative
 MIME/HTML normalization, and a metadata-only diagnostic CLI. The owner confirmed bounded
 retrieval, body-free output/logging, unchanged mailbox state, authorization failure/recovery,
 and existing-platform regression checks. It does not connect retrieved email to the model,
-Langfuse, persistence, scheduling, or mailbox actions. WP7 remains blocked until privacy and
-minimum-quality decisions are revisited.
+Langfuse, persistence, scheduling, or mailbox actions.
+
+Work Package 7 is implemented locally for release `0.13.0` and awaits RUBIK acceptance. The owner
+authorized ephemeral real-email processing on RUBIK, evidence-only SQLite persistence, and redacted
+real-Gmail Langfuse traces. The manual dry run connects the accepted Gmail source to the existing
+prompt/model/decoder, persists explicit run/item/attempt lifecycles, and reuses identical successful
+evaluations. It still performs no Gmail mutation and makes no classification-quality claim.
 
 ## Definition of done for every stage
 
@@ -910,5 +914,33 @@ changed, how it was verified, decisions made, and what remains.
 
 **Next**
 
-- Plan WP7 only after explicitly deciding how real Gmail content may enter local inference and
-  whether any real content may enter Langfuse traces.
+- Accept WP7 release `0.13.0` on RUBIK using a three-message dry run, duplicate reuse, one explicit
+  new attempt, redaction audit, interruption evidence, and the existing-platform regression suite.
+
+### 2026-07-28 — Durable read-only triage runs implemented
+
+**Stage:** 6A, Work Package 7
+**Status:** Implemented locally; RUBIK acceptance pending
+
+**Delivered**
+
+- Connected explicit bounded Gmail retrieval to the existing prompt, one-slot local model, strict
+  label/reason decoder, redacted Langfuse trace, and SQLite evidence repository.
+- Added migration `006_email_triage_runs` with run, item, evaluation, and separately auditable
+  attempt records plus transactional identity reservation.
+- Added exact-result reuse, explicit `--new-attempt`, partial failure continuation, stale-work
+  recovery, and graceful interruption states.
+- Added `triage`, `runs`, and `show` commands without adding a service, timer, API route, dashboard,
+  scheduler, retry, confidence score, or Gmail write operation.
+
+**Privacy**
+
+- Real sender, subject, normalized body, query, compiled prompt, raw output, and reason are not
+  persisted or logged. Sender, subject, and reason exist only on trusted stdout for a new result.
+- Real-Gmail traces contain hashes, lengths, cleanup evidence, label, versions, usage, and timing.
+  Full trace content remains restricted to checked-in synthetic fixtures.
+
+**Next**
+
+- Deploy disabled, enable the three explicit gates, execute the WP7 acceptance run, audit SQLite,
+  logs, Langfuse, and Gmail state, then record only owner-confirmed evidence in the WP7 handoff.

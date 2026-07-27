@@ -224,11 +224,8 @@ def test_gmail_wire_contract_is_confined_to_get_only_adapter() -> None:
     )
 
 
-def test_wp6_does_not_import_model_or_langfuse() -> None:
-    paths = [
-        *python_files("infrastructure/gmail"),
-        *python_files("apps/email_triage_cli"),
-    ]
+def test_gmail_infrastructure_does_not_import_model_or_langfuse() -> None:
+    paths = python_files("infrastructure/gmail")
     forbidden = (
         "personal_edge_lab.infrastructure.ai",
         "personal_edge_lab.infrastructure.observability",
@@ -244,3 +241,39 @@ def test_wp6_does_not_import_model_or_langfuse() -> None:
         for path in paths
     }
     assert not {path: names for path, names in violations.items() if names}
+
+
+def test_wp7_batch_depends_on_ports_not_sqlite_or_gmail_adapters() -> None:
+    paths = [
+        PACKAGE_ROOT / "modules/email_triage/batch.py",
+        PACKAGE_ROOT / "application/ports/email_triage_runs.py",
+        PACKAGE_ROOT / "domain/email_triage_runs.py",
+    ]
+    forbidden = (
+        "personal_edge_lab.infrastructure",
+        "personal_edge_lab.apps",
+        "httpx",
+        "langfuse",
+        "pydantic",
+        "sqlite3",
+    )
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(forbidden)
+        )
+        for path in paths
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
+def test_triage_sqlite_adapter_has_no_gmail_or_model_wire_dependency() -> None:
+    path = PACKAGE_ROOT / "infrastructure/persistence/sqlite/email_triage.py"
+    forbidden = (
+        "personal_edge_lab.infrastructure.gmail",
+        "personal_edge_lab.infrastructure.ai",
+        "personal_edge_lab.infrastructure.observability",
+        "httpx",
+        "langfuse",
+        "google",
+    )
+    assert not {name for name in imports_in(path) if name.startswith(forbidden)}

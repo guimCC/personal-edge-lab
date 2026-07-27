@@ -15,6 +15,7 @@ from personal_edge_lab.application.ports.email_triage import (
 from personal_edge_lab.domain.ai import ModelMessage, ModelRole
 from personal_edge_lab.domain.email_triage import (
     PromptSourceKind,
+    SyntheticTriageTracePayload,
     TriagePrompt,
     TriagePromptIdentity,
     TriagePromptManifest,
@@ -22,7 +23,6 @@ from personal_edge_lab.domain.email_triage import (
 )
 
 PROMPT_LABEL = "production"
-TRACE_TAGS = ["email-triage", "synthetic"]
 REQUIRED_VARIABLES = frozenset({"taxonomy", "email_json"})
 
 
@@ -129,14 +129,54 @@ class LangfuseTriageRuntime(TriagePromptSource, TriageTraceSink):
             raise PromptPublicationError("Langfuse prompt publication failed") from error
 
     def record(self, record: TriageTraceRecord) -> str | None:
-        usage = record.completion.usage if record.completion else None
-        timing = record.completion.timing if record.completion else None
-        decision_output = (
-            {"label": record.decision.label.value, "reason": record.decision.reason}
-            if record.decision
-            else None
-        )
-        generation_output = record.raw_output
+        usage = record.usage
+        timing = record.timing
+        if isinstance(record.payload, SyntheticTriageTracePayload):
+            decision_output = (
+                {
+                    "label": record.payload.decision.label.value,
+                    "reason": record.payload.decision.reason,
+                }
+                if record.payload.decision
+                else None
+            )
+            trace_input: dict[str, Any] = {
+                "sender": record.payload.email.sender,
+                "subject": record.payload.email.subject,
+                "message": record.payload.email.message,
+            }
+            generation_input: Any = [
+                {"role": message.role.value, "content": message.content}
+                for message in record.payload.prompt_messages
+            ]
+            generation_output: Any = record.payload.raw_output
+            trace_output: dict[str, Any] = decision_output or {
+                "outcome": "failure",
+                "category": record.failure_category,
+            }
+            tags = ["email-triage", "synthetic"]
+        else:
+            payload = record.payload
+            trace_input = {
+                "content_sha256": payload.content_sha256,
+                "sender_chars": payload.sender_chars,
+                "subject_chars": payload.subject_chars,
+                "message_chars": payload.message_chars,
+                "source": payload.source,
+                "cleanup_flags": list(payload.cleanup_flags),
+            }
+            generation_input = trace_input
+            generation_output = (
+                {
+                    "label": payload.label.value,
+                    "decision_sha256": payload.decision_sha256,
+                    "reason_chars": payload.reason_chars,
+                }
+                if payload.label is not None
+                else {"outcome": "failure", "category": record.failure_category}
+            )
+            trace_output = generation_output
+            tags = ["email-triage", "gmail"]
         native_prompt = self._native_prompts.get((record.prompt.name, record.prompt.version))
         metadata = {
             "operation_id": record.operation_id,
@@ -170,18 +210,9 @@ class LangfuseTriageRuntime(TriagePromptSource, TriageTraceSink):
             "retry_eligible": record.retry_eligible,
             "retry_after_seconds": record.retry_after_seconds,
         }
-        trace_input = {
-            "sender": record.email.sender,
-            "subject": record.email.subject,
-            "message": record.email.message,
-        }
-        trace_output = decision_output or {
-            "outcome": "failure",
-            "category": record.failure_category,
-        }
         with (
             propagate_attributes(  # pyright: ignore[reportCallIssue]
-                tags=TRACE_TAGS,
+                tags=tags,
                 trace_name="classify-email",
                 version=record.profile.version,
                 metadata={"operation_id": record.operation_id},
@@ -200,10 +231,7 @@ class LangfuseTriageRuntime(TriagePromptSource, TriageTraceSink):
             self._client.start_as_current_observation(
                 name="generate-triage-decision",
                 as_type="generation",
-                input=[
-                    {"role": message.role.value, "content": message.content}
-                    for message in record.prompt_messages
-                ],
+                input=generation_input,
                 output=generation_output,
                 metadata=metadata,
                 model=record.model_alias,

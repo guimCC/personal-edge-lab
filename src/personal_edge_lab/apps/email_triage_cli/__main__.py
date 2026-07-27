@@ -5,28 +5,57 @@ from __future__ import annotations
 import argparse
 import hashlib
 import logging
+import re
+import signal
+import sqlite3
 import sys
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from contextlib import suppress
+from datetime import UTC, datetime, timedelta
+from threading import Event
 from typing import Any, TextIO
 
+from personal_edge_lab import __version__
 from personal_edge_lab.application.ports.email import (
     EmailSourceError,
     EmailSourceFailureCategory,
 )
+from personal_edge_lab.application.ports.email_triage import NoOpTriageTraceSink
 from personal_edge_lab.apps.email_triage_cli.config import (
     ConfigurationError,
     GmailAuthorizationSettings,
     GmailFetchSettings,
+    MailboxTriageSettings,
+    TriageHistorySettings,
 )
 from personal_edge_lab.apps.logging_config import configure_logging
 from personal_edge_lab.domain.email import EmailRetrievalRequest, EmailValidationError
+from personal_edge_lab.domain.email_triage_runs import (
+    MailboxTriageResult,
+    TriageRunStatus,
+    TriageRunValidationError,
+    validate_recent_run_limit,
+)
+from personal_edge_lab.infrastructure.ai.concurrency import ConcurrencyLimitedLanguageModel
+from personal_edge_lab.infrastructure.ai.llama_cpp import LlamaCppLanguageModel
+from personal_edge_lab.infrastructure.ai.triage_decoder import PydanticTriageDecisionDecoder
 from personal_edge_lab.infrastructure.gmail.client import GmailEmailSource
 from personal_edge_lab.infrastructure.gmail.oauth import (
     GMAIL_READONLY_SCOPE,
     GoogleOAuthCredentialStore,
     authorize_google_oauth,
+)
+from personal_edge_lab.infrastructure.observability.langfuse import LangfuseTriageRuntime
+from personal_edge_lab.infrastructure.persistence.sqlite.email_triage import (
+    SqliteTriageRunRepository,
+)
+from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+from personal_edge_lab.modules.email_triage import EmailTriageService, TriageMailboxBatch
+from personal_edge_lab.modules.email_triage.prompt import (
+    LocalTriagePromptSource,
+    load_packaged_prompt,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -56,6 +85,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fetch_parser.add_argument("--query", required=True)
     fetch_parser.add_argument("--limit", type=int)
+    triage_parser = subparsers.add_parser(
+        "triage",
+        help="run one bounded read-only Gmail-to-model dry run",
+    )
+    triage_parser.add_argument("--query", required=True)
+    triage_parser.add_argument("--limit", required=True, type=int)
+    triage_parser.add_argument("--new-attempt", action="store_true")
+    runs_parser = subparsers.add_parser("runs", help="show recent durable triage runs")
+    runs_parser.add_argument("--limit", type=int, default=20)
+    show_parser = subparsers.add_parser("show", help="show one durable triage run")
+    show_parser.add_argument("--run-id", required=True)
     return parser
 
 
@@ -78,14 +118,28 @@ def main(
             stderr=stderr,
             authorization_runner=authorization_runner,
         )
-    return _run_fetch(
-        operation_id,
-        query=args.query,
-        requested_limit=args.limit,
-        stdout=stdout,
-        stderr=stderr,
-        transport=transport,
-    )
+    if args.command == "fetch":
+        return _run_fetch(
+            operation_id,
+            query=args.query,
+            requested_limit=args.limit,
+            stdout=stdout,
+            stderr=stderr,
+            transport=transport,
+        )
+    if args.command == "triage":
+        return _run_triage_mailbox(
+            operation_id,
+            query=args.query,
+            limit=args.limit,
+            force_new_attempt=args.new_attempt,
+            stdout=stdout,
+            stderr=stderr,
+            transport=transport,
+        )
+    if args.command == "runs":
+        return _run_history(operation_id, args.limit, stdout=stdout, stderr=stderr)
+    return _show_run(operation_id, args.run_id, stdout=stdout, stderr=stderr)
 
 
 def _run_authorize(
@@ -221,6 +275,349 @@ def _run_fetch(
     return 5 if batch.failures else 0
 
 
+def _run_triage_mailbox(
+    operation_id: str,
+    *,
+    query: str,
+    limit: int,
+    force_new_attempt: bool,
+    stdout: TextIO,
+    stderr: TextIO,
+    transport: Any | None,
+) -> int:
+    try:
+        settings = MailboxTriageSettings.from_env()
+        request = EmailRetrievalRequest(query=query, limit=limit)
+        if limit > 10:
+            raise EmailValidationError("mailbox triage limit must be from 1 through 10")
+    except ConfigurationError as error:
+        return _configuration_failure(operation_id, error, stderr=stderr)
+    except EmailValidationError as error:
+        return _input_failure(operation_id, error, stderr=stderr)
+    configure_logging(settings.log_level)
+    try:
+        run_migrations(settings.database_path)
+    except (OSError, sqlite3.Error):
+        return _persistence_failure(operation_id, "triage", stderr=stderr)
+
+    interrupted = Event()
+    prior_handlers: dict[int, Any] = {}
+
+    def request_interruption(_signum: int, _frame: object) -> None:
+        interrupted.set()
+
+    for signal_number in (signal.SIGINT, signal.SIGTERM):
+        prior_handlers[signal_number] = signal.getsignal(signal_number)
+        signal.signal(signal_number, request_interruption)
+
+    runtime: LangfuseTriageRuntime | None = None
+    manifest = load_packaged_prompt()
+    prompt_source: Any = LocalTriagePromptSource(manifest)
+    trace_sink: Any = NoOpTriageTraceSink()
+    if settings.langfuse.enabled:
+        assert settings.langfuse.public_key is not None
+        assert settings.langfuse.secret_key is not None
+        try:
+            runtime = LangfuseTriageRuntime(
+                public_key=settings.langfuse.public_key,
+                secret_key=settings.langfuse.secret_key,
+                base_url=settings.langfuse.base_url,
+                timeout_seconds=settings.langfuse.timeout_seconds,
+                release=__version__,
+                manifest=manifest,
+            )
+        except Exception:
+            LOGGER.warning(
+                "email_triage operation_id=%s command=triage trace_unavailable=true",
+                operation_id,
+            )
+        else:
+            prompt_source = runtime
+            trace_sink = runtime
+
+    started = time.perf_counter()
+    try:
+        credentials = GoogleOAuthCredentialStore(
+            token_file=settings.gmail.token_file,
+            timeout_seconds=settings.gmail.timeout_seconds,
+        )
+        with (
+            GmailEmailSource(
+                credentials=credentials,
+                timeout_seconds=settings.gmail.timeout_seconds,
+                max_message_bytes=settings.gmail.max_message_bytes,
+                max_normalized_chars=settings.gmail.max_normalized_chars,
+                transport=transport,
+            ) as source,
+            LlamaCppLanguageModel(
+                base_url=settings.completion.base_url,
+                api_key=settings.completion.api_key,
+                timeout_seconds=settings.completion.timeout_seconds,
+                transport=transport,
+            ) as adapter,
+            SqliteTriageRunRepository(settings.database_path) as repository,
+        ):
+            model = ConcurrencyLimitedLanguageModel(
+                adapter,
+                max_concurrency=settings.completion.max_concurrency,
+                wait_timeout_seconds=settings.completion.queue_timeout_seconds,
+            )
+            service = EmailTriageService(
+                model=model,
+                prompt_source=prompt_source,
+                decoder=PydanticTriageDecisionDecoder(),
+                trace_sink=trace_sink,
+                model_alias=settings.completion.model_alias,
+            )
+            result = TriageMailboxBatch(
+                email_source=source,
+                triage_service=service,
+                repository=repository,
+                interrupted=interrupted.is_set,
+            ).execute(
+                request,
+                run_id=operation_id,
+                operation_id=operation_id,
+                force_new_attempt=force_new_attempt,
+            )
+    except EmailSourceError as error:
+        return _source_failure(
+            operation_id,
+            "triage",
+            error,
+            elapsed_seconds=time.perf_counter() - started,
+            stderr=stderr,
+            query=query,
+        )
+    except (OSError, sqlite3.Error):
+        return _persistence_failure(operation_id, "triage", stderr=stderr)
+    except (TriageRunValidationError, ValueError):
+        return _triage_protocol_failure(operation_id, stderr=stderr)
+    finally:
+        for signal_number, handler in prior_handlers.items():
+            signal.signal(signal_number, handler)
+        if runtime is not None:
+            with suppress(Exception):
+                runtime.close()
+
+    _log_triage_result(operation_id, result)
+    _print_triage_result(result, stdout=stdout)
+    return 0 if result.status is TriageRunStatus.COMPLETED_WITH_RESULTS else 5
+
+
+def _run_history(
+    operation_id: str,
+    limit: int,
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    try:
+        settings = TriageHistorySettings.from_env()
+        validate_recent_run_limit(limit)
+    except (ConfigurationError, TriageRunValidationError) as error:
+        return _configuration_failure(
+            operation_id,
+            ConfigurationError(str(error)),
+            stderr=stderr,
+        )
+    configure_logging(settings.log_level)
+    try:
+        run_migrations(settings.database_path)
+        with SqliteTriageRunRepository(settings.database_path) as repository:
+            now = _utc_now()
+            repository.recover_stale(
+                stale_before=now - _stale_delta(),
+                recovered_at=now,
+            )
+            runs = repository.recent(limit=limit)
+    except (OSError, sqlite3.Error):
+        return _persistence_failure(operation_id, "runs", stderr=stderr)
+    print(f"Operation: {operation_id}", file=stdout)
+    print(f"Runs: {len(runs)}", file=stdout)
+    for run in runs:
+        print(
+            f"{run.run_id} {run.requested_at.isoformat()} {run.status.value} "
+            f"documents={run.document_count} succeeded={run.succeeded_count} "
+            f"reused={run.reused_count} failed={run.failed_count} "
+            f"interrupted={run.interrupted_count} query={run.query_sha256[:16]}",
+            file=stdout,
+        )
+    return 0
+
+
+def _show_run(
+    operation_id: str,
+    run_id: str,
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    if not _valid_run_id(run_id):
+        return _input_failure(
+            operation_id,
+            EmailValidationError("triage run ID is invalid"),
+            stderr=stderr,
+        )
+    try:
+        settings = TriageHistorySettings.from_env()
+    except ConfigurationError as error:
+        return _configuration_failure(operation_id, error, stderr=stderr)
+    configure_logging(settings.log_level)
+    try:
+        run_migrations(settings.database_path)
+        with SqliteTriageRunRepository(settings.database_path) as repository:
+            now = _utc_now()
+            repository.recover_stale(
+                stale_before=now - _stale_delta(),
+                recovered_at=now,
+            )
+            details = repository.get(run_id)
+    except (OSError, sqlite3.Error):
+        return _persistence_failure(operation_id, "show", stderr=stderr)
+    if details is None:
+        print(f"Operation: {operation_id}", file=stderr)
+        print("Triage run not found", file=stderr)
+        return 5
+    run = details.run
+    print(f"Operation: {operation_id}", file=stdout)
+    print(f"Run: {run.run_id}", file=stdout)
+    print(f"Status: {run.status.value}", file=stdout)
+    print(f"Query hash: {run.query_sha256[:16]}", file=stdout)
+    print(f"Requested: {run.requested_at.isoformat()}", file=stdout)
+    for item in details.items:
+        print(f"Item {item.ordinal}: {item.status.value}", file=stdout)
+        print(f"  Message fingerprint: {item.message_fingerprint[:16]}", file=stdout)
+        if item.received_at is not None:
+            print(f"  Received: {item.received_at.isoformat()}", file=stdout)
+        print(f"  Label: {item.label.value if item.label else 'unavailable'}", file=stdout)
+        if item.failure_category is not None:
+            print(f"  Failure: {item.failure_category}", file=stdout)
+        if item.prompt_source is not None and item.prompt_version is not None:
+            print(
+                f"  Prompt: {item.prompt_source.value}/{item.prompt_version}",
+                file=stdout,
+            )
+        if item.profile_version is not None:
+            print(f"  Profile: {item.profile_version}", file=stdout)
+        if item.model_alias is not None:
+            print(f"  Model: {item.model_alias}", file=stdout)
+        print(f"  Trace: {item.trace_id or 'unavailable'}", file=stdout)
+        if item.prompt_tokens is not None:
+            print(
+                f"  Tokens: prompt={item.prompt_tokens} "
+                f"completion={item.completion_tokens} total={item.total_tokens}",
+                file=stdout,
+            )
+        if item.queue_wait_seconds is not None:
+            print(f"  Queue wait: {item.queue_wait_seconds:.3f}s", file=stdout)
+        if item.provider_seconds is not None:
+            print(f"  Provider elapsed: {item.provider_seconds:.3f}s", file=stdout)
+        if item.total_seconds is not None:
+            print(f"  Elapsed: {item.total_seconds:.3f}s", file=stdout)
+    return 0
+
+
+def _print_triage_result(result: MailboxTriageResult, *, stdout: TextIO) -> None:
+    print(f"Operation: {result.run_id}", file=stdout)
+    print(f"Run: {result.run_id}", file=stdout)
+    print(f"Status: {result.status.value}", file=stdout)
+    print(f"Query hash: {result.query_sha256[:16]}", file=stdout)
+    print(f"Items: {len(result.items)}", file=stdout)
+    print(f"Failures: {result.failure_count}", file=stdout)
+    print("Gmail changes: none", file=stdout)
+    for item in result.items:
+        print(f"Item {item.ordinal}: {item.status.value}", file=stdout)
+        print(f"  Message fingerprint: {item.message_fingerprint[:16]}", file=stdout)
+        if item.received_at is not None:
+            print(f"  Received: {item.received_at.isoformat()}", file=stdout)
+        if item.sender is not None:
+            print(f"  Sender: {_sanitize_terminal_text(item.sender)}", file=stdout)
+        if item.subject is not None:
+            print(f"  Subject: {_sanitize_terminal_text(item.subject)}", file=stdout)
+        if item.label is not None:
+            print(f"  Proposed label: {item.label.value}", file=stdout)
+        if item.reason is not None:
+            print(f"  Reason: {_sanitize_terminal_text(item.reason)}", file=stdout)
+        elif item.status.value == "reused":
+            print("  Reason: intentionally not retained", file=stdout)
+        if item.failure_category is not None:
+            print(f"  Failure: {item.failure_category}", file=stdout)
+        if item.prompt is not None:
+            print(
+                f"  Prompt: {item.prompt.source.value}/{item.prompt.version}",
+                file=stdout,
+            )
+        if item.model_alias is not None:
+            print(f"  Model: {item.model_alias}", file=stdout)
+        print(f"  Trace: {item.trace_id or 'unavailable'}", file=stdout)
+        if item.prompt_tokens is not None:
+            print(
+                f"  Tokens: prompt={item.prompt_tokens} "
+                f"completion={item.completion_tokens} total={item.total_tokens}",
+                file=stdout,
+            )
+        if item.queue_wait_seconds is not None:
+            print(f"  Queue wait: {item.queue_wait_seconds:.3f}s", file=stdout)
+        if item.provider_seconds is not None:
+            print(f"  Provider elapsed: {item.provider_seconds:.3f}s", file=stdout)
+        if item.total_seconds is not None:
+            print(f"  Elapsed: {item.total_seconds:.3f}s", file=stdout)
+    print(f"Elapsed: {result.elapsed_seconds:.3f}s", file=stdout)
+
+
+def _log_triage_result(operation_id: str, result: MailboxTriageResult) -> None:
+    LOGGER.log(
+        (
+            logging.INFO
+            if result.status is TriageRunStatus.COMPLETED_WITH_RESULTS
+            else logging.WARNING
+        ),
+        "email_triage operation_id=%s run_id=%s command=triage outcome=%s "
+        "query_sha256=%s item_count=%s failure_count=%s elapsed_seconds=%.3f",
+        operation_id,
+        result.run_id,
+        result.status.value,
+        result.query_sha256[:16],
+        len(result.items),
+        result.failure_count,
+        result.elapsed_seconds,
+    )
+    for item in result.items:
+        LOGGER.log(
+            logging.INFO if item.status.value in {"succeeded", "reused"} else logging.WARNING,
+            "email_triage operation_id=%s run_id=%s command=triage "
+            "item_ordinal=%s outcome=%s category=%s provider=%s model=%s "
+            "prompt_source=%s prompt_version=%s queue_wait_seconds=%s "
+            "provider_seconds=%s total_seconds=%s prompt_tokens=%s "
+            "completion_tokens=%s total_tokens=%s trace_unavailable=%s",
+            operation_id,
+            result.run_id,
+            item.ordinal,
+            item.status.value,
+            item.failure_category or "none",
+            item.provider or "unavailable",
+            item.model_alias or "unavailable",
+            item.prompt.source.value if item.prompt else "unavailable",
+            item.prompt.version if item.prompt else "unavailable",
+            (
+                f"{item.queue_wait_seconds:.3f}"
+                if item.queue_wait_seconds is not None
+                else "unavailable"
+            ),
+            (
+                f"{item.provider_seconds:.3f}"
+                if item.provider_seconds is not None
+                else "unavailable"
+            ),
+            f"{item.total_seconds:.3f}" if item.total_seconds is not None else "unavailable",
+            item.prompt_tokens if item.prompt_tokens is not None else "unavailable",
+            (item.completion_tokens if item.completion_tokens is not None else "unavailable"),
+            item.total_tokens if item.total_tokens is not None else "unavailable",
+            item.trace_id is None,
+        )
+
+
 def _configuration_failure(
     operation_id: str,
     error: ConfigurationError,
@@ -230,6 +627,27 @@ def _configuration_failure(
     print(f"Operation: {operation_id}", file=stderr)
     print(f"Configuration error: {error}", file=stderr)
     return 2
+
+
+def _persistence_failure(operation_id: str, command: str, *, stderr: TextIO) -> int:
+    LOGGER.warning(
+        "email_triage operation_id=%s command=%s outcome=failure category=persistence",
+        operation_id,
+        command,
+    )
+    print(f"Operation: {operation_id}", file=stderr)
+    print("Triage persistence failed", file=stderr)
+    return 5
+
+
+def _triage_protocol_failure(operation_id: str, *, stderr: TextIO) -> int:
+    LOGGER.warning(
+        "email_triage operation_id=%s command=triage outcome=failure category=protocol",
+        operation_id,
+    )
+    print(f"Operation: {operation_id}", file=stderr)
+    print("Triage operation failed: protocol", file=stderr)
+    return 5
 
 
 def _input_failure(
@@ -285,6 +703,18 @@ def _sanitize_terminal_text(value: str) -> str:
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _stale_delta() -> timedelta:
+    return timedelta(seconds=300)
+
+
+def _valid_run_id(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,64}", value))
 
 
 if __name__ == "__main__":

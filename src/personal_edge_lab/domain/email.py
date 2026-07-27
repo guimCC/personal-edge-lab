@@ -154,10 +154,13 @@ class EmailDocument:
 @dataclass(frozen=True, slots=True)
 class EmailItemFailure:
     category: EmailItemFailureCategory
+    message_id: EmailMessageId | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.category, EmailItemFailureCategory):
             raise EmailValidationError("email item failure category is invalid")
+        if self.message_id is not None and not isinstance(self.message_id, EmailMessageId):
+            raise EmailValidationError("email item failure message ID is invalid")
 
 
 @dataclass(frozen=True, slots=True)

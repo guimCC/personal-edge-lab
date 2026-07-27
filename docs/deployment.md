@@ -1005,3 +1005,116 @@ Set `GMAIL_READ_ENABLED=false`, reinstall the retained `0.11.0` wheel, and resta
 processes that received the package. The client and token files are inert while disabled; revoke
 and remove them only as an explicit owner credential action. No database or mailbox rollback
 exists.
+
+## Stage 6A WP7 durable read-only triage rollout
+
+Release `0.13.0` adds one manual Gmail-to-UNO-Q dry run and additive migration
+`006_email_triage_runs`. It adds no service, timer, API route, dashboard, scheduler, retry,
+confidence score, or Gmail write capability.
+
+### 1. Deploy disabled
+
+Add the new gate while preserving the accepted WP6 and local-model settings:
+
+```dotenv
+GMAIL_TRIAGE_ENABLED=false
+```
+
+Deploy:
+
+```bash
+git pull --ff-only
+./scripts/deploy-rubik.sh
+```
+
+The deployment guard rejects `GMAIL_TRIAGE_ENABLED=true` unless both `GMAIL_READ_ENABLED=true` and
+`LOCAL_LLM_ENABLED=true`. Existing Gmail, UNO Q, and optional Langfuse private files retain their
+mode, ownership, validation, and private-backup requirements. The script backs up SQLite before
+applying migration 006 and records row counts for all four triage tables when present.
+
+Verify the disabled deployment:
+
+```bash
+sqlite3 data/telemetry.db \
+  "SELECT version FROM schema_migrations WHERE version='006_email_triage_runs';"
+sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
+python -m personal_edge_lab.apps.email_triage_cli triage \
+  --query "in:inbox newer_than:7d" --limit 1
+```
+
+The migration must be present, integrity must report `ok`, and the triage command must exit `2`
+without contacting Gmail or UNO Q.
+
+### 2. Enable and run a bounded dry run
+
+Set:
+
+```dotenv
+GMAIL_READ_ENABLED=true
+LOCAL_LLM_ENABLED=true
+GMAIL_TRIAGE_ENABLED=true
+```
+
+`LANGFUSE_ENABLED` remains independently optional. Deploy again, then run:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli triage \
+  --query "in:inbox newer_than:7d" \
+  --limit 3
+```
+
+The command prints a run ID, explicit dry-run status, message fingerprints, trusted sender/subject,
+proposed label/reason for new evaluations, prompt/model evidence, trace availability, and timing.
+It must also print `Gmail changes: none`.
+
+Inspect durable evidence:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli runs --limit 20
+python -m personal_edge_lab.apps.email_triage_cli show --run-id <run-id>
+```
+
+History intentionally omits raw queries, sender, subject, body, reason, compiled prompt, and raw
+model output.
+
+### 3. Verify reuse, forced attempts, and interruption
+
+Repeat the same query and limit. Previously successful exact identities must show `reused`, with
+the reason reported as intentionally not retained. The repeat must create no new UNO Q inference
+or Langfuse trace.
+
+Create one deliberate new evaluation:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli triage \
+  --query "in:inbox newer_than:7d" \
+  --limit 3 \
+  --new-attempt
+```
+
+This creates a new attempt for each matching successful identity and, when Langfuse is enabled, one
+new redacted trace per actual inference.
+
+For interruption acceptance, start a small bounded run and send `SIGINT` or `SIGTERM` only between
+items. Completed items must remain successful; remaining retrieved items and the run must show
+`interrupted`. Hard-crash leftovers remain non-successful and are recovered as interrupted after
+the fixed 300-second stale boundary.
+
+### 4. Privacy and platform acceptance
+
+Audit logs, the four SQLite tables, and the accepted Langfuse traces. Real Gmail traces must contain
+only hashes, lengths, source/cleanup flags, label, versions, model, usage, timing, and categorized
+failure evidence. They retain the exact managed-prompt link but never the compiled email variables.
+Normal logs and SQLite must contain none of the raw query, sender, subject, body, reason, compiled
+prompt, raw output, Gmail/UNO Q/Langfuse credentials, provider error body, or GGUF path.
+
+Confirm Gmail read state, labels, archive state, and mailbox contents are unchanged. Then rerun the
+WP6 fetch, local-model health/readiness/completion, synthetic triage, opt-in UNO Q test, SQLite
+integrity, API `0.13.0`, collector, alert evaluator, Telegram, Casadaqui/dashboard, AC, UNO Q, and
+WP0 firewall checks. Record only observed evidence in `docs/stage-6a-wp7-handoff.md`.
+
+### WP7 rollback
+
+Set `GMAIL_TRIAGE_ENABLED=false`, reinstall the retained `0.12.0` wheel, and restart only existing
+processes that received the package. Migration 006 remains as an inert additive schema; do not
+drop its tables. No mailbox, prompt, trace, or OAuth rollback exists.

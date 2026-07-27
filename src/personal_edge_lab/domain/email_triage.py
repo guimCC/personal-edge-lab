@@ -7,7 +7,14 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from personal_edge_lab.domain.ai import CompletionResult, ModelMessage, ModelRole
+from personal_edge_lab.domain.ai import (
+    CompletionRequest,
+    CompletionResult,
+    CompletionTiming,
+    ModelMessage,
+    ModelRole,
+    TokenUsage,
+)
 
 MAX_SENDER_CHARS = 160
 MAX_SUBJECT_CHARS = 256
@@ -37,6 +44,11 @@ class TriageLabel(StrEnum):
 class PromptSourceKind(StrEnum):
     LANGFUSE = "langfuse"
     LOCAL_FALLBACK = "local_fallback"
+
+
+class TriageTraceContentKind(StrEnum):
+    SYNTHETIC_FULL = "synthetic_full"
+    GMAIL_REDACTED = "gmail_redacted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,18 +163,73 @@ class TriagePromptManifest:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedTriage:
+    email: TriageEmail
+    prompt: TriagePrompt
+    profile: TriageProfile
+    request: CompletionRequest
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticTriageTracePayload:
+    email: TriageEmail
+    prompt_messages: tuple[ModelMessage, ...]
+    raw_output: str | None
+    decision: TriageDecision | None
+
+
+@dataclass(frozen=True, slots=True)
+class RedactedTriageTracePayload:
+    content_sha256: str
+    decision_sha256: str | None
+    sender_chars: int
+    subject_chars: int
+    message_chars: int
+    source: str
+    cleanup_flags: tuple[str, ...]
+    label: TriageLabel | None = None
+    reason_chars: int | None = None
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"[0-9a-f]{64}", self.content_sha256):
+            raise TriageValidationError("redacted content hash is invalid")
+        if (
+            self.decision_sha256 is not None
+            and re.fullmatch(r"[0-9a-f]{64}", self.decision_sha256) is None
+        ):
+            raise TriageValidationError("redacted decision hash is invalid")
+        counts = (self.sender_chars, self.subject_chars, self.message_chars)
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counts
+        ):
+            raise TriageValidationError("redacted content lengths are invalid")
+        if not isinstance(self.source, str) or not self.source:
+            raise TriageValidationError("redacted source is invalid")
+        if not isinstance(self.cleanup_flags, tuple) or not all(
+            isinstance(value, str) and value for value in self.cleanup_flags
+        ):
+            raise TriageValidationError("redacted cleanup flags are invalid")
+        if self.label is not None and not isinstance(self.label, TriageLabel):
+            raise TriageValidationError("redacted label is invalid")
+        if self.reason_chars is not None and (
+            isinstance(self.reason_chars, bool)
+            or not isinstance(self.reason_chars, int)
+            or not 0 <= self.reason_chars <= MAX_REASON_CHARS
+        ):
+            raise TriageValidationError("redacted reason length is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class TriageTraceRecord:
     trace_id: str
     operation_id: str
-    email: TriageEmail
     prompt: TriagePromptIdentity
-    prompt_messages: tuple[ModelMessage, ...]
     profile: TriageProfile
     provider: str
     model_alias: str
-    completion: CompletionResult | None
-    raw_output: str | None
-    decision: TriageDecision | None
+    usage: TokenUsage | None
+    timing: CompletionTiming | None
+    payload: SyntheticTriageTracePayload | RedactedTriageTracePayload
     outcome: str
     failure_category: str | None = None
     failure_queue_wait_seconds: float = 0

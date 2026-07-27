@@ -44,6 +44,14 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         "idx_notification_outbox_due",
         "idx_notification_outbox_alert_flapping",
         "notification_delivery_runtime",
+        "email_triage_runs",
+        "idx_email_triage_runs_recent",
+        "email_triage_evaluations",
+        "email_triage_run_items",
+        "idx_email_triage_items_evaluation",
+        "email_triage_attempts",
+        "idx_email_triage_one_active_attempt",
+        "idx_email_triage_attempts_run",
     } <= object_names(database)
     with sqlite3.connect(database) as connection:
         versions = list(connection.execute("SELECT version FROM schema_migrations"))
@@ -53,6 +61,7 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         ("003_authenticated_control",),
         ("004_operational_alerts",),
         ("005_notification_outbox",),
+        ("006_email_triage_runs",),
     ]
 
 
@@ -129,4 +138,5 @@ def test_concurrent_app_startup_applies_migration_once(tmp_path) -> None:
         ("003_authenticated_control", 1),
         ("004_operational_alerts", 1),
         ("005_notification_outbox", 1),
+        ("006_email_triage_runs", 1),
     ]
