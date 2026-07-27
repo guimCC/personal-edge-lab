@@ -167,3 +167,80 @@ def test_llama_cpp_completion_wire_shape_is_confined_to_adapter() -> None:
         if path != PACKAGE_ROOT / "infrastructure/ai/llama_cpp.py"
     }
     assert not {path: names for path, names in violations.items() if names}
+
+
+def test_email_source_domain_and_port_are_standard_library_only() -> None:
+    paths = [
+        PACKAGE_ROOT / "domain/email.py",
+        PACKAGE_ROOT / "application/ports/email.py",
+    ]
+    forbidden = (
+        "fastapi",
+        "google",
+        "google_auth_oauthlib",
+        "httpx",
+        "langfuse",
+        "opentelemetry",
+        "pydantic",
+        "sqlite3",
+        "personal_edge_lab.apps",
+        "personal_edge_lab.infrastructure",
+        "personal_edge_lab.modules",
+    )
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(forbidden)
+        )
+        for path in paths
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
+def test_google_sdk_imports_are_confined_to_gmail_infrastructure() -> None:
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(("google", "google_auth_oauthlib"))
+        )
+        for path in PACKAGE_ROOT.rglob("*.py")
+        if not path.is_relative_to(PACKAGE_ROOT / "infrastructure/gmail")
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
+def test_gmail_wire_contract_is_confined_to_get_only_adapter() -> None:
+    adapter = PACKAGE_ROOT / "infrastructure/gmail/client.py"
+    marker = '"/gmail/v1/users/me/messages"'
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): marker
+        for path in PACKAGE_ROOT.rglob("*.py")
+        if path != adapter and marker in path.read_text(encoding="utf-8")
+    }
+    assert not violations
+    adapter_source = adapter.read_text(encoding="utf-8")
+    assert '"GET"' in adapter_source
+    assert not any(
+        marker in adapter_source
+        for marker in ('"POST"', '"PUT"', '"PATCH"', '"DELETE"', "gmail.modify", "gmail.send")
+    )
+
+
+def test_wp6_does_not_import_model_or_langfuse() -> None:
+    paths = [
+        *python_files("infrastructure/gmail"),
+        *python_files("apps/email_triage_cli"),
+    ]
+    forbidden = (
+        "personal_edge_lab.infrastructure.ai",
+        "personal_edge_lab.infrastructure.observability",
+        "personal_edge_lab.application.ports.ai",
+        "personal_edge_lab.modules.email_triage",
+        "langfuse",
+        "opentelemetry",
+    )
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(forbidden)
+        )
+        for path in paths
+    }
+    assert not {path: names for path, names in violations.items() if names}

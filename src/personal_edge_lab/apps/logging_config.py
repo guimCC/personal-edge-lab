@@ -7,5 +7,12 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 def configure_logging(level: int) -> None:
     logging.basicConfig(level=level, format=LOG_FORMAT)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    for logger_name in (
+        "google.auth",
+        "google_auth_oauthlib",
+        "httpcore",
+        "httpx",
+        "requests",
+        "urllib3",
+    ):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)

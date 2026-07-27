@@ -184,6 +184,7 @@ def test_changed_prompt_creates_and_promotes_one_version() -> None:
     assert (outcome, version) == ("published", "8")
     assert FakeLangfuse.created["labels"] == ["production"]
     assert FakeLangfuse.created["type"] == "chat"
+    assert FakeLangfuse.created["commit_message"].endswith("release 0.11.0")
 
 
 def test_publication_error_is_sanitized() -> None:

@@ -61,6 +61,7 @@ class LangfuseTriageRuntime(TriagePromptSource, TriageTraceSink):
             mask=mask,
         )
         self._timeout_seconds = max(1, int(timeout_seconds))
+        self._release = release
 
     def resolve(self, variables: Mapping[str, str]) -> TriagePrompt:
         if set(variables) != REQUIRED_VARIABLES:
@@ -119,7 +120,9 @@ class LangfuseTriageRuntime(TriagePromptSource, TriageTraceSink):
                 labels=[PROMPT_LABEL],
                 type="chat",
                 config=_prompt_config(),
-                commit_message="Publish packaged email-triage prompt for release 0.11.0",
+                commit_message=(
+                    f"Publish packaged email-triage prompt for release {self._release}"
+                ),
             )
             return "published", str(published.version)
         except Exception as error:
