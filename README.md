@@ -173,7 +173,12 @@ worker or storing model content. Public node liveness works even when inference 
 
 ```bash
 python -m personal_edge_lab.apps.ai_cli health
+python -m personal_edge_lab.apps.ai_cli ready
 ```
+
+`health` proves that the llama.cpp HTTP process is responding, including while the model reports
+its documented loading state. `ready` succeeds only after the model is loaded. Neither command
+reads the API key or feature gate.
 
 Authenticated completion is deliberately feature-gated:
 
@@ -185,12 +190,14 @@ python -m personal_edge_lab.apps.ai_cli complete --text "Return exactly ready"
 The completion key remains in the mode-`0600` file configured by
 `LOCAL_LLM_API_KEY_FILE`; never place its value in `.env` or a command line. The CLI makes one
 bounded request with no retry. It prints operation evidence, provider `llama_cpp`, logical model
-`qwen3-1.7b-q4-k-m`, token usage when supplied, and elapsed time. Prompt and completion content
-are excluded from logs; successful completion text appears only on standard output after terminal
-control characters are removed.
+`qwen3-1.7b-q4-k-m`, token usage when supplied, queue wait, provider time, and total elapsed time.
+One process permits only one active completion; a second caller waits for at most
+`LOCAL_LLM_QUEUE_TIMEOUT_SECONDS`. Prompt and completion content are excluded from logs; successful
+completion text appears only on standard output after terminal control characters are removed.
 
 Exit codes are `0` for success, `2` for disabled/configuration/input rejection, `3` for connection,
-`4` for timeout, and `5` for authenticated HTTP, provider, or protocol failure.
+`4` for timeout, and `5` for readiness, concurrency, authenticated HTTP, provider, or protocol
+failure.
 
 ## Data and migrations
 

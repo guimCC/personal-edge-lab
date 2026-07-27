@@ -475,6 +475,10 @@ proves public health and feature-gated authenticated completion with one bounded
 failures, no content logging, and no email, prompt, persistence, retry, scheduler, or dashboard
 scope.
 
+Work Package 2 is implemented locally as release `0.10.0`; RUBIK acceptance is pending. It
+separates liveness from readiness, adds bounded one-slot process-local coordination, preserves one
+HTTP attempt, and finalizes logical identity plus queue/provider timing evidence.
+
 ## Definition of done for every stage
 
 A stage is `Done` only when:
@@ -790,3 +794,38 @@ changed, how it was verified, decisions made, and what remains.
 
 - Define WP2 concurrency, readiness, retry-policy, and operational evidence boundaries before
   implementation.
+
+### 2026-07-26 — Provider operational contract implemented locally
+
+**Stage:** 6A Work Package 2
+**Status:** Implemented locally; RUBIK acceptance pending
+
+**Delivered**
+
+- Finalized validated logical identity and queue/provider timing on completion results.
+- Added a one-permit process-local limiter with bounded waiting and a sanitized local-capacity
+  failure that performs no provider call.
+- Split public process liveness (`health`) from loaded-model readiness (`ready`).
+- Added explicit one-slot and queue-timeout configuration and retained one HTTP attempt with no
+  automatic retry.
+- Prepared package, API, frontend, and wheel metadata for release `0.10.0`.
+
+**Verification**
+
+- The full local Python suite passed 370 tests with one opt-in live test skipped.
+- Threaded concurrency tests prove bounded waiting, one active delegate, zero provider calls after
+  queue expiry, and permit release across failure paths.
+- Ruff, formatting, Pyright, ShellCheck, Git diff checks, frontend lint, 10 frontend tests, and the
+  production frontend build passed.
+- Isolated source/wheel builds and inspection passed for `0.10.0`.
+
+**Known limitations**
+
+- The limiter is process-local; server-side `--parallel 1` remains the cross-process boundary.
+- Queue and HTTP transport are separate timeout budgets.
+- RUBIK live commands and platform service verification remain pending.
+
+**Next**
+
+- Commit and push locally, then pull and deploy through the documented RUBIK workflow and record
+  acceptance before WP3.

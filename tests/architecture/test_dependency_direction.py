@@ -117,11 +117,24 @@ def test_ai_httpx_import_is_confined_to_infrastructure() -> None:
         PACKAGE_ROOT / "application/ports/ai.py",
         PACKAGE_ROOT / "apps/ai_cli/__main__.py",
         PACKAGE_ROOT / "apps/ai_cli/config.py",
+        PACKAGE_ROOT / "infrastructure/ai/concurrency.py",
     ]
     violations = {
         str(path.relative_to(PACKAGE_ROOT)): sorted(
             name for name in imports_in(path) if name == "httpx"
         )
         for path in paths
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
+def test_llama_cpp_completion_wire_shape_is_confined_to_adapter() -> None:
+    markers = ('"/v1/chat/completions"', '"choices"')
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            marker for marker in markers if marker in path.read_text(encoding="utf-8")
+        )
+        for path in PACKAGE_ROOT.rglob("*.py")
+        if path != PACKAGE_ROOT / "infrastructure/ai/llama_cpp.py"
     }
     assert not {path: names for path, names in violations.items() if names}

@@ -17,6 +17,8 @@ from personal_edge_lab.domain.ai import (
     AiValidationError,
     CompletionRequest,
     CompletionResult,
+    CompletionTiming,
+    ModelIdentity,
     TokenUsage,
 )
 
@@ -25,6 +27,13 @@ PROVIDER_ID = "llama_cpp"
 
 @dataclass(frozen=True, slots=True)
 class LlamaCppHealthResult:
+    status: str
+    provider: str
+    elapsed_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class LlamaCppReadinessResult:
     status: str
     provider: str
     elapsed_seconds: float
@@ -55,24 +64,52 @@ class LlamaCppHealthProbe:
         self._client.close()
 
     def check(self) -> LlamaCppHealthResult:
-        started = time.perf_counter()
-        try:
-            response = self._client.get("/health")
-        except httpx.TimeoutException as error:
-            raise _timeout_error() from error
-        except httpx.RequestError as error:
-            raise _connection_error() from error
-        elapsed = time.perf_counter() - started
+        response, elapsed = _get_health(self._client)
+        if response.status_code not in {200, 503}:
+            raise _http_error(response, elapsed)
+        return LlamaCppHealthResult(
+            status="live",
+            provider=PROVIDER_ID,
+            elapsed_seconds=elapsed,
+        )
+
+
+class LlamaCppReadinessProbe:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        timeout_seconds: float,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        no_retry_transport = transport or httpx.HTTPTransport(retries=0)
+        self._client = httpx.Client(
+            base_url=base_url,
+            timeout=timeout_seconds,
+            transport=no_retry_transport,
+        )
+
+    def __enter__(self) -> LlamaCppReadinessProbe:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self._client.close()
+
+    def check(self) -> LlamaCppReadinessResult:
+        response, elapsed = _get_health(self._client)
         if response.status_code != 200:
-            raise _http_error(response)
+            raise _http_error(response, elapsed)
         try:
             payload = response.json()
         except ValueError as error:
-            raise _invalid_response_error() from error
+            raise _invalid_response_error(elapsed) from error
         if not isinstance(payload, dict) or payload.get("status") != "ok":
-            raise _invalid_response_error()
-        return LlamaCppHealthResult(
-            status="ok",
+            raise _invalid_response_error(elapsed)
+        return LlamaCppReadinessResult(
+            status="ready",
             provider=PROVIDER_ID,
             elapsed_seconds=elapsed,
         )
@@ -120,24 +157,43 @@ class LlamaCppLanguageModel:
         try:
             response = self._client.post("/v1/chat/completions", json=payload)
         except httpx.TimeoutException as error:
-            raise _timeout_error() from error
+            raise _timeout_error(time.perf_counter() - started) from error
         except httpx.RequestError as error:
-            raise _connection_error() from error
+            raise _connection_error(time.perf_counter() - started) from error
         elapsed = time.perf_counter() - started
         if response.status_code != 200:
-            raise _http_error(response)
+            raise _http_error(response, elapsed)
         try:
             envelope = response.json()
         except ValueError as error:
-            raise _invalid_response_error() from error
-        text, usage = _parse_completion(envelope)
+            raise _invalid_response_error(elapsed) from error
+        try:
+            text, usage = _parse_completion(envelope)
+        except LanguageModelError as error:
+            raise error.with_provider_elapsed(elapsed) from error
         return CompletionResult(
             text=text,
-            provider=PROVIDER_ID,
-            model_alias=request.model_alias,
+            identity=ModelIdentity(
+                provider=PROVIDER_ID,
+                model_alias=request.model_alias,
+            ),
             usage=usage,
-            elapsed_seconds=elapsed,
+            timing=CompletionTiming(
+                queue_wait_seconds=0,
+                provider_seconds=elapsed,
+            ),
         )
+
+
+def _get_health(client: httpx.Client) -> tuple[httpx.Response, float]:
+    started = time.perf_counter()
+    try:
+        response = client.get("/health")
+    except httpx.TimeoutException as error:
+        raise _timeout_error(time.perf_counter() - started) from error
+    except httpx.RequestError as error:
+        raise _connection_error(time.perf_counter() - started) from error
+    return response, time.perf_counter() - started
 
 
 def _parse_completion(envelope: object) -> tuple[str, TokenUsage | None]:
@@ -185,7 +241,7 @@ def _retry_after(response: httpx.Response) -> float | None:
     return value if math.isfinite(value) and value >= 0 else None
 
 
-def _http_error(response: httpx.Response) -> LanguageModelError:
+def _http_error(response: httpx.Response, elapsed_seconds: float) -> LanguageModelError:
     status = response.status_code
     if status in {401, 403}:
         return LanguageModelError(
@@ -193,6 +249,7 @@ def _http_error(response: httpx.Response) -> LanguageModelError:
             category=CompletionFailureCategory.AUTHENTICATION,
             retry_eligible=False,
             http_status=status,
+            provider_elapsed_seconds=elapsed_seconds,
         )
     if status == 429:
         return LanguageModelError(
@@ -201,6 +258,7 @@ def _http_error(response: httpx.Response) -> LanguageModelError:
             retry_eligible=True,
             http_status=status,
             retry_after_seconds=_retry_after(response),
+            provider_elapsed_seconds=elapsed_seconds,
         )
     if status == 503:
         return LanguageModelError(
@@ -208,6 +266,7 @@ def _http_error(response: httpx.Response) -> LanguageModelError:
             category=CompletionFailureCategory.NOT_READY,
             retry_eligible=True,
             http_status=status,
+            provider_elapsed_seconds=elapsed_seconds,
         )
     if 400 <= status < 500:
         return LanguageModelError(
@@ -215,34 +274,39 @@ def _http_error(response: httpx.Response) -> LanguageModelError:
             category=CompletionFailureCategory.REQUEST_REJECTED,
             retry_eligible=False,
             http_status=status,
+            provider_elapsed_seconds=elapsed_seconds,
         )
     return LanguageModelError(
         "local language model provider failed",
         category=CompletionFailureCategory.PROVIDER_FAILURE,
         retry_eligible=True,
         http_status=status,
+        provider_elapsed_seconds=elapsed_seconds,
     )
 
 
-def _connection_error() -> LanguageModelError:
+def _connection_error(elapsed_seconds: float) -> LanguageModelError:
     return LanguageModelError(
         "local language model connection failed",
         category=CompletionFailureCategory.CONNECTION,
         retry_eligible=True,
+        provider_elapsed_seconds=elapsed_seconds,
     )
 
 
-def _timeout_error() -> LanguageModelError:
+def _timeout_error(elapsed_seconds: float) -> LanguageModelError:
     return LanguageModelError(
         "local language model request timed out",
         category=CompletionFailureCategory.TIMEOUT,
         retry_eligible=True,
+        provider_elapsed_seconds=elapsed_seconds,
     )
 
 
-def _invalid_response_error() -> LanguageModelError:
+def _invalid_response_error(elapsed_seconds: float | None = None) -> LanguageModelError:
     return LanguageModelError(
         "local language model returned an invalid response",
         category=CompletionFailureCategory.INVALID_PROVIDER_RESPONSE,
         retry_eligible=False,
+        provider_elapsed_seconds=elapsed_seconds,
     )

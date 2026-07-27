@@ -13,6 +13,7 @@ from personal_edge_lab.domain.ai import CompletionRequest, ModelMessage, ModelRo
 from personal_edge_lab.infrastructure.ai.llama_cpp import (
     LlamaCppHealthProbe,
     LlamaCppLanguageModel,
+    LlamaCppReadinessProbe,
 )
 
 API_KEY = "never-log-this-api-key-value-123456"
@@ -88,6 +89,9 @@ def test_success_sends_exact_bounded_request_and_translates_identity() -> None:
     assert result.text == "ready"
     assert result.provider == "llama_cpp"
     assert result.model_alias == "qwen3-1.7b-q4-k-m"
+    assert result.identity.provider == "llama_cpp"
+    assert result.timing.queue_wait_seconds == 0
+    assert result.timing.provider_seconds >= 0
     assert result.usage is not None
     assert result.usage.total_tokens == 6
     assert SERVER_MODEL_PATH not in repr(result)
@@ -132,6 +136,8 @@ def test_http_failures_are_sanitized_and_categorized(
     assert API_KEY not in str(captured.value)
     assert provider_secret not in str(captured.value)
     assert captured.value.retry_after_seconds == (17 if status == 429 else None)
+    assert captured.value.provider_elapsed_seconds is not None
+    assert captured.value.attempt_count == 1
 
 
 @pytest.mark.parametrize(
@@ -154,6 +160,7 @@ def test_transport_failures_are_categorized(
     assert captured.value.category is category
     assert captured.value.retry_eligible is True
     assert "uno.local" not in str(captured.value)
+    assert captured.value.provider_elapsed_seconds is not None
 
 
 @pytest.mark.parametrize(
@@ -185,7 +192,7 @@ def test_invalid_success_envelopes_are_rejected(payload: bytes) -> None:
     assert captured.value.category is CompletionFailureCategory.INVALID_PROVIDER_RESPONSE
 
 
-def test_client_closes_its_transport() -> None:
+def test_client_reuses_and_closes_its_transport_deterministically() -> None:
     class ClosingTransport(httpx.BaseTransport):
         closed = False
 
@@ -203,14 +210,19 @@ def test_client_closes_its_transport() -> None:
         transport=transport,
     ) as client:
         client.complete(request())
+        client.complete(request())
+        assert not transport.closed
+    assert transport.closed
+    client.close()
     assert transport.closed
 
 
-def test_health_is_public_and_validates_minimal_response() -> None:
+@pytest.mark.parametrize("status", [200, 503])
+def test_health_is_public_liveness_for_ready_or_loading_server(status: int) -> None:
     def handler(observed: httpx.Request) -> httpx.Response:
         assert observed.url == "http://uno.local:8080/health"
         assert "authorization" not in observed.headers
-        return httpx.Response(200, json={"status": "ok"})
+        return httpx.Response(status, content=b"provider body is ignored for liveness")
 
     with LlamaCppHealthProbe(
         base_url="http://uno.local:8080",
@@ -218,21 +230,59 @@ def test_health_is_public_and_validates_minimal_response() -> None:
         transport=httpx.MockTransport(handler),
     ) as probe:
         result = probe.check()
-    assert result.status == "ok"
+    assert result.status == "live"
     assert result.provider == "llama_cpp"
 
 
 @pytest.mark.parametrize(
     "response",
     [
-        httpx.Response(503, json={"error": f"loading {API_KEY}"}),
-        httpx.Response(200, content=b"not-json"),
-        httpx.Response(200, json={"status": "loading", "model": SERVER_MODEL_PATH}),
+        httpx.Response(200, json={"status": "ok"}),
     ],
 )
-def test_health_failures_are_sanitized(response: httpx.Response) -> None:
+def test_readiness_is_public_and_requires_loaded_model(response: httpx.Response) -> None:
+    def handler(observed: httpx.Request) -> httpx.Response:
+        assert observed.url == "http://uno.local:8080/health"
+        assert "authorization" not in observed.headers
+        return response
+
+    with LlamaCppReadinessProbe(
+        base_url="http://uno.local:8080",
+        timeout_seconds=5,
+        transport=httpx.MockTransport(handler),
+    ) as probe:
+        result = probe.check()
+    assert result.status == "ready"
+    assert result.provider == "llama_cpp"
+
+
+@pytest.mark.parametrize(
+    ("response", "category"),
+    [
+        (
+            httpx.Response(503, json={"error": f"loading {API_KEY}"}),
+            CompletionFailureCategory.NOT_READY,
+        ),
+        (
+            httpx.Response(200, content=b"not-json"),
+            CompletionFailureCategory.INVALID_PROVIDER_RESPONSE,
+        ),
+        (
+            httpx.Response(200, json={"status": "loading", "model": SERVER_MODEL_PATH}),
+            CompletionFailureCategory.INVALID_PROVIDER_RESPONSE,
+        ),
+        (
+            httpx.Response(500, json={"error": f"failed {API_KEY}"}),
+            CompletionFailureCategory.PROVIDER_FAILURE,
+        ),
+    ],
+)
+def test_readiness_failures_are_sanitized(
+    response: httpx.Response,
+    category: CompletionFailureCategory,
+) -> None:
     with (
-        LlamaCppHealthProbe(
+        LlamaCppReadinessProbe(
             base_url="http://uno.local:8080",
             timeout_seconds=5,
             transport=httpx.MockTransport(lambda _: response),
@@ -240,5 +290,21 @@ def test_health_failures_are_sanitized(response: httpx.Response) -> None:
         pytest.raises(LanguageModelError) as captured,
     ):
         probe.check()
+    assert captured.value.category is category
     assert API_KEY not in str(captured.value)
     assert SERVER_MODEL_PATH not in str(captured.value)
+
+
+def test_health_rejects_unexpected_http_status_without_body_leak() -> None:
+    provider_body = f"failed {API_KEY} at {SERVER_MODEL_PATH}"
+    with (
+        LlamaCppHealthProbe(
+            base_url="http://uno.local:8080",
+            timeout_seconds=5,
+            transport=httpx.MockTransport(lambda _: httpx.Response(500, content=provider_body)),
+        ) as probe,
+        pytest.raises(LanguageModelError) as captured,
+    ):
+        probe.check()
+    assert captured.value.category is CompletionFailureCategory.PROVIDER_FAILURE
+    assert provider_body not in str(captured.value)

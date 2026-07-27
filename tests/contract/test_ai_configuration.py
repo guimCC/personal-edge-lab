@@ -21,6 +21,8 @@ AI_VARIABLES = (
     "LOCAL_LLM_TIMEOUT_SECONDS",
     "LOCAL_LLM_MAX_INPUT_CHARS",
     "LOCAL_LLM_MAX_OUTPUT_TOKENS",
+    "LOCAL_LLM_MAX_CONCURRENCY",
+    "LOCAL_LLM_QUEUE_TIMEOUT_SECONDS",
     "LOG_LEVEL",
 )
 
@@ -63,6 +65,8 @@ def test_completion_defaults_with_private_key(monkeypatch, tmp_path) -> None:
     assert settings.timeout_seconds == 60
     assert settings.max_input_chars == 512
     assert settings.max_output_tokens == 32
+    assert settings.max_concurrency == 1
+    assert settings.queue_timeout_seconds == 60
 
 
 def test_completion_requires_explicit_enablement(monkeypatch) -> None:
@@ -101,6 +105,10 @@ def test_invalid_health_configuration(
         ("LOCAL_LLM_TIMEOUT_SECONDS", "301", "must not exceed 300"),
         ("LOCAL_LLM_MAX_INPUT_CHARS", "4097", "must not exceed 4096"),
         ("LOCAL_LLM_MAX_OUTPUT_TOKENS", "257", "must not exceed 256"),
+        ("LOCAL_LLM_MAX_CONCURRENCY", "2", "must be exactly 1"),
+        ("LOCAL_LLM_QUEUE_TIMEOUT_SECONDS", "301", "must not exceed 300"),
+        ("LOCAL_LLM_QUEUE_TIMEOUT_SECONDS", "nan", "must be greater than zero"),
+        ("LOCAL_LLM_QUEUE_TIMEOUT_SECONDS", "inf", "must be greater than zero"),
     ],
 )
 def test_invalid_completion_bounds(

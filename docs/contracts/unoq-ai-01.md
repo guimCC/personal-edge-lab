@@ -66,6 +66,11 @@ verifying the service referenced only the 1.7B model. The production model is no
 `GET /health` is intentionally unauthenticated and must return only minimal readiness information.
 It must not disclose model paths, API keys, prompts, input, or email data.
 
+From release `0.10.0`, the RUBIK client interprets the endpoint at two explicit operational levels:
+a documented `200` or loading `503` proves that the HTTP process is live, while only
+`200 {"status":"ok"}` proves that the model is ready. These concrete deployment probes remain
+separate from the generic `LanguageModel` completion port.
+
 `POST /v1/chat/completions` requires bearer authentication. Missing and invalid keys return `401`.
 The Stage 6A production caller sends bounded requests and permits at most one in-flight inference.
 The UNO Q never receives Gmail credentials and never initiates work.

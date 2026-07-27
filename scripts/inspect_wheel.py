@@ -12,6 +12,7 @@ REQUIRED_FILES = (
     "personal_edge_lab/apps/alert_evaluator/__main__.py",
     "personal_edge_lab/apps/ai_cli/__main__.py",
     "personal_edge_lab/apps/ai_cli/config.py",
+    "personal_edge_lab/infrastructure/ai/concurrency.py",
     "personal_edge_lab/apps/telegram_bot/__main__.py",
     "personal_edge_lab/apps/telegram_bot/owner_bot.py",
     "personal_edge_lab/apps/telegram_bot/capabilities/ac.py",

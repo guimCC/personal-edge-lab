@@ -704,3 +704,52 @@ collector, alert evaluator, Telegram, dashboard, AC behavior, and WP0 firewall r
 Rollback requires only setting `LOCAL_LLM_ENABLED=false`, reinstalling the retained `0.8.1` wheel,
 and restarting whichever existing processes received the package. No schema or mailbox rollback
 exists, and the WP0 UNO Q firewall remains installed.
+
+## Stage 6A WP2 provider-semantics rollout
+
+Release `0.10.0` adds no service, timer, migration, mailbox access, or dashboard surface. Make all
+changes in the trusted development checkout, commit and push them, and only then pull the reviewed
+commit on RUBIK. Do not copy an uncommitted worktree directly onto the node.
+
+Before deployment, add the two new values to RUBIK's `.env`:
+
+```dotenv
+LOCAL_LLM_MAX_CONCURRENCY=1
+LOCAL_LLM_QUEUE_TIMEOUT_SECONDS=60
+```
+
+The deployment guard requires exactly one process-local permit and a queue timeout greater than
+zero and no more than 300 seconds when inference is enabled. The queue timeout covers only local
+permit acquisition. `LOCAL_LLM_TIMEOUT_SECONDS` remains the separate HTTP connect/write/pool/read
+phase timeout. A queued request can therefore wait and then use its own HTTP timeout budget.
+
+Deploy through the normal reviewed workflow:
+
+```bash
+git pull --ff-only
+./scripts/deploy-rubik.sh
+set -a
+source .env
+set +a
+RUN_UNOQ_LIVE_TESTS=true python -m pytest -m unoq_live
+python -m personal_edge_lab.apps.ai_cli health
+python -m personal_edge_lab.apps.ai_cli ready
+python -m personal_edge_lab.apps.ai_cli complete --text "Return exactly ready"
+```
+
+`health` must succeed for either the documented ready `200` or loading `503` response. `ready`
+must succeed only for `200 {"status":"ok"}`. Contract tests cover loading behavior; do not restart
+or disrupt UNO Q solely to force it. Completion must make one authenticated HTTP attempt, with no
+automatic retry.
+
+Inspect the operation evidence and confirm it contains only the operation ID, command,
+outcome/category, logical identity, queue/provider/total timing, attempt count, retry metadata, and
+normalized usage. The real key/header, prompts, completion text, provider error bodies, and GGUF
+path must remain absent from errors and logs.
+
+Confirm the API reports `0.10.0`, SQLite integrity is `ok`, and the collector, alert evaluator,
+Casadaqui, dashboard, Nginx, UNO Q service, and WP0 firewall remain healthy.
+
+To roll back, set `LOCAL_LLM_ENABLED=false`, reinstall the retained `0.9.0` wheel, and restart only
+the existing processes that received the package. The new environment values may remain unused.
+There is no schema or mailbox rollback.

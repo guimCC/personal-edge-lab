@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from pathlib import Path
 from urllib.parse import urlparse
@@ -25,7 +26,7 @@ def read_positive_float(name: str, default: str) -> float:
         value = float(raw_value)
     except ValueError as error:
         raise ConfigurationError(f"{name} must be a number") from error
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         raise ConfigurationError(f"{name} must be greater than zero")
     return value
 

@@ -49,6 +49,8 @@ class CompletionSettings:
     timeout_seconds: float
     max_input_chars: int
     max_output_tokens: int
+    max_concurrency: int
+    queue_timeout_seconds: float
     log_level: int
 
     @classmethod
@@ -73,6 +75,12 @@ class CompletionSettings:
         max_output_tokens = read_positive_int("LOCAL_LLM_MAX_OUTPUT_TOKENS", "32")
         if max_output_tokens > 256:
             raise ConfigurationError("LOCAL_LLM_MAX_OUTPUT_TOKENS must not exceed 256")
+        max_concurrency = read_positive_int("LOCAL_LLM_MAX_CONCURRENCY", "1")
+        if max_concurrency != 1:
+            raise ConfigurationError("LOCAL_LLM_MAX_CONCURRENCY must be exactly 1")
+        queue_timeout = read_positive_float("LOCAL_LLM_QUEUE_TIMEOUT_SECONDS", "60")
+        if queue_timeout > 300:
+            raise ConfigurationError("LOCAL_LLM_QUEUE_TIMEOUT_SECONDS must not exceed 300")
         level, _level_name = read_log_level()
         return cls(
             base_url=base_url,
@@ -82,6 +90,8 @@ class CompletionSettings:
             timeout_seconds=timeout,
             max_input_chars=max_input_chars,
             max_output_tokens=max_output_tokens,
+            max_concurrency=max_concurrency,
+            queue_timeout_seconds=queue_timeout,
             log_level=level,
         )
 

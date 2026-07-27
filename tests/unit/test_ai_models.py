@@ -5,6 +5,9 @@ import pytest
 from personal_edge_lab.domain.ai import (
     AiValidationError,
     CompletionRequest,
+    CompletionResult,
+    CompletionTiming,
+    ModelIdentity,
     ModelMessage,
     ModelRole,
     TokenUsage,
@@ -31,6 +34,19 @@ def test_valid_completion_request_and_usage() -> None:
     usage = TokenUsage(prompt_tokens=4, completion_tokens=2, total_tokens=6)
     assert completion.messages[0].role is ModelRole.USER
     assert usage.total_tokens == 6
+
+
+def test_completion_result_exposes_stable_identity_and_timing_properties() -> None:
+    result = CompletionResult(
+        text="",
+        identity=ModelIdentity(provider="llama_cpp", model_alias="qwen3-1.7b-q4-k-m"),
+        usage=None,
+        timing=CompletionTiming(queue_wait_seconds=1.25, provider_seconds=2.75),
+    )
+    assert result.text == ""
+    assert result.provider == "llama_cpp"
+    assert result.model_alias == "qwen3-1.7b-q4-k-m"
+    assert result.elapsed_seconds == 4
 
 
 @pytest.mark.parametrize(
@@ -80,3 +96,48 @@ def test_invalid_completion_requests_are_rejected(
 def test_invalid_token_usage_is_rejected(values: tuple[object, object, object]) -> None:
     with pytest.raises(AiValidationError):
         TokenUsage(*values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("provider", "model_alias"),
+    [
+        ("Llama CPP", "qwen3"),
+        ("llama_cpp", "GGUF path"),
+        ("x" * 65, "qwen3"),
+        ("llama_cpp", "x" * 129),
+    ],
+)
+def test_invalid_model_identity_is_rejected(provider: str, model_alias: str) -> None:
+    with pytest.raises(AiValidationError):
+        ModelIdentity(provider=provider, model_alias=model_alias)
+
+
+@pytest.mark.parametrize(
+    ("queue_wait", "provider"),
+    [
+        (-1, 0),
+        (0, -1),
+        (float("nan"), 0),
+        (0, float("inf")),
+        (True, 0),
+    ],
+)
+def test_invalid_completion_timing_is_rejected(queue_wait: object, provider: object) -> None:
+    with pytest.raises(AiValidationError):
+        CompletionTiming(  # type: ignore[arg-type]
+            queue_wait_seconds=queue_wait,
+            provider_seconds=provider,
+        )
+
+
+def test_completion_result_requires_typed_values() -> None:
+    identity = ModelIdentity(provider="llama_cpp", model_alias="qwen3")
+    timing = CompletionTiming(queue_wait_seconds=0, provider_seconds=1)
+    with pytest.raises(AiValidationError, match="text"):
+        CompletionResult(text=None, identity=identity, usage=None, timing=timing)  # type: ignore[arg-type]
+    with pytest.raises(AiValidationError, match="identity"):
+        CompletionResult(text="", identity=None, usage=None, timing=timing)  # type: ignore[arg-type]
+    with pytest.raises(AiValidationError, match="usage"):
+        CompletionResult(text="", identity=identity, usage="bad", timing=timing)  # type: ignore[arg-type]
+    with pytest.raises(AiValidationError, match="timing"):
+        CompletionResult(text="", identity=identity, usage=None, timing=None)  # type: ignore[arg-type]

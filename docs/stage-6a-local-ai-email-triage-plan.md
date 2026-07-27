@@ -307,6 +307,7 @@ LOCAL_LLM_API_KEY_FILE=/absolute/private/path/unoq-ai-01.key
 LOCAL_LLM_MODEL=qwen3-1.7b-q4-k-m
 LOCAL_LLM_TIMEOUT_SECONDS=60
 LOCAL_LLM_MAX_CONCURRENCY=1
+LOCAL_LLM_QUEUE_TIMEOUT_SECONDS=60
 LOCAL_LLM_ENABLED=false
 ```
 
@@ -1178,7 +1179,7 @@ Agents working from this document must:
 | --- | --- | --- |
 | WP0. UNO Q contract and hardening | Accepted on RUBIK | Stable, rebooted, source-restricted node |
 | WP1. RUBIK connectivity slice | Accepted on RUBIK | Packaged `ai_cli` real-node success |
-| WP2. Provider operational semantics | Not started | Stable `LanguageModel` contract |
+| WP2. Provider operational semantics | Implemented locally | Stable `LanguageModel` contract |
 | WP3. Triage prompt and schema | Not started | Versioned validated triage profile |
 | WP4. Fixture evaluation | Not started | Reproducible quality/latency report |
 | WP5. Langfuse observability | Not started | Non-blocking redacted traces or explicit defer |
@@ -1316,3 +1317,68 @@ after explicit owner approval.
 **Owner action required**
 
 - None.
+
+## Work Package 2 handoff
+
+**Status:** Implemented locally; RUBIK acceptance pending
+
+**Delivered**
+
+- Added validated logical model identity and separate queue/provider timing while retaining the
+  existing result compatibility properties.
+- Added a standard-library process-local concurrency limiter with one permit, bounded waiting,
+  guaranteed release, and sanitized `concurrency_limited` failures before any HTTP attempt.
+- Corrected public `health` to process liveness and added public `ready` for loaded-model readiness.
+- Added `LOCAL_LLM_MAX_CONCURRENCY=1` and `LOCAL_LLM_QUEUE_TIMEOUT_SECONDS=60`, including
+  configuration and deployment-guard validation.
+- Kept completion to one authenticated HTTP attempt with no automatic retry or provider framework.
+- Bumped package, frontend, runtime, API contract, and wheel metadata to `0.10.0`.
+
+**Decisions**
+
+- A second in-process caller waits for at most 60 seconds instead of failing immediately.
+- Queue waiting and HTTP transport use separate budgets; queue time is excluded from provider time
+  and included in total operation time.
+- The generic `LanguageModel` port remains completion-only. Liveness and readiness remain concrete
+  llama.cpp deployment probes.
+- Empty visible completion text remains valid provider output because the accepted Qwen envelope
+  can contain it.
+- Retry eligibility and `Retry-After` are metadata only; WP2 performs no retry.
+
+**Verification**
+
+- The full local suite passed 370 tests with the one opt-in real-node test skipped.
+- Deterministic threaded tests prove one active delegate call, bounded queueing, zero provider calls
+  on queue expiry, and permit release after expected and unexpected failures.
+- Ruff lint/format, Pyright with Python 3.12, ShellCheck, Git diff checks, frontend lint/10 tests,
+  and the production frontend build passed.
+- Isolated source/wheel builds and inspection of the packaged AI CLI, limiter, port, and domain
+  files passed for `0.10.0`.
+- RUBIK live acceptance and existing-service checks remain pending until the reviewed commit is
+  pushed and pulled through the operator workflow.
+
+**Security/privacy**
+
+- Liveness accepts the documented loading `503` without reading or logging its body.
+- Readiness and completion preserve sanitized failures; tests exclude sentinel keys, prompts,
+  provider bodies, authorization values, and GGUF paths.
+- No Gmail, prompt, persistence, Langfuse, scheduler, service, migration, or dashboard behavior was
+  added.
+
+**Known limitations**
+
+- The limiter coordinates only callers sharing one model instance inside one process. UNO Q's
+  server-side `--parallel 1` remains the cross-process limit.
+- HTTPX applies the completion timeout to its HTTP phases; it is not combined with queue waiting
+  into one wall-clock deadline.
+- Real-node `health`, `ready`, completion, and platform-regression acceptance are still pending.
+
+**Next**
+
+- Commit and push the reviewed local changes, then perform the documented RUBIK `0.10.0`
+  acceptance before beginning WP3.
+
+**Owner action required**
+
+- Add the two new environment values on RUBIK, pull the reviewed commit, run the guarded deployment,
+  and execute the WP2 acceptance commands in `docs/deployment.md`.

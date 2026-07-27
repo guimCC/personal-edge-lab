@@ -11,6 +11,7 @@ MAX_MESSAGE_COUNT = 16
 MAX_TOTAL_INPUT_CHARS = 4096
 MAX_OUTPUT_TOKENS = 256
 MAX_MODEL_ALIAS_CHARS = 128
+MAX_PROVIDER_ID_CHARS = 64
 MODEL_ALIAS_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 
@@ -96,9 +97,71 @@ class TokenUsage:
 
 
 @dataclass(frozen=True, slots=True)
-class CompletionResult:
-    text: str
+class ModelIdentity:
     provider: str
     model_alias: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.provider, str)
+            or len(self.provider) > MAX_PROVIDER_ID_CHARS
+            or MODEL_ALIAS_PATTERN.fullmatch(self.provider) is None
+        ):
+            raise AiValidationError("provider identity is invalid")
+        if (
+            not isinstance(self.model_alias, str)
+            or len(self.model_alias) > MAX_MODEL_ALIAS_CHARS
+            or MODEL_ALIAS_PATTERN.fullmatch(self.model_alias) is None
+        ):
+            raise AiValidationError("model alias is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionTiming:
+    queue_wait_seconds: float
+    provider_seconds: float
+
+    def __post_init__(self) -> None:
+        values = (self.queue_wait_seconds, self.provider_seconds)
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or value < 0
+            for value in values
+        ):
+            raise AiValidationError("completion timing values must be finite and non-negative")
+
+    @property
+    def total_seconds(self) -> float:
+        return float(self.queue_wait_seconds) + float(self.provider_seconds)
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionResult:
+    text: str
+    identity: ModelIdentity
     usage: TokenUsage | None
-    elapsed_seconds: float
+    timing: CompletionTiming
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.text, str):
+            raise AiValidationError("completion text must be a string")
+        if not isinstance(self.identity, ModelIdentity):
+            raise AiValidationError("completion identity is invalid")
+        if self.usage is not None and not isinstance(self.usage, TokenUsage):
+            raise AiValidationError("completion usage is invalid")
+        if not isinstance(self.timing, CompletionTiming):
+            raise AiValidationError("completion timing is invalid")
+
+    @property
+    def provider(self) -> str:
+        return self.identity.provider
+
+    @property
+    def model_alias(self) -> str:
+        return self.identity.model_alias
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return self.timing.total_seconds

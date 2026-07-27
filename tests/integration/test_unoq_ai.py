@@ -9,6 +9,7 @@ from personal_edge_lab.domain.ai import CompletionRequest, ModelMessage, ModelRo
 from personal_edge_lab.infrastructure.ai.llama_cpp import (
     LlamaCppHealthProbe,
     LlamaCppLanguageModel,
+    LlamaCppReadinessProbe,
 )
 
 pytestmark = [
@@ -27,7 +28,12 @@ def test_real_unoq_health_and_bounded_completion() -> None:
         base_url=health_settings.base_url,
         timeout_seconds=health_settings.timeout_seconds,
     ) as probe:
-        assert probe.check().status == "ok"
+        assert probe.check().status == "live"
+    with LlamaCppReadinessProbe(
+        base_url=health_settings.base_url,
+        timeout_seconds=health_settings.timeout_seconds,
+    ) as probe:
+        assert probe.check().status == "ready"
     request = CompletionRequest(
         messages=(ModelMessage(ModelRole.USER, "Return one word"),),
         model_alias=completion_settings.model_alias,

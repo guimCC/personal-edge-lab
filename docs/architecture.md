@@ -31,9 +31,10 @@ apps -> application/ports <- infrastructure
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
 - `infrastructure/telegram` implements the narrow Bot API transport and never exposes the bot
   token through its public errors.
-- `infrastructure/ai` implements llama.cpp health and completion HTTP contracts. It translates
-  failures into sanitized categories, performs one attempt, and does not expose the server's GGUF
-  path as model identity.
+- `infrastructure/ai` implements concrete llama.cpp liveness/readiness and completion HTTP
+  contracts. A standard-library decorator queues callers behind one process-local permit. The
+  adapter translates failures into sanitized categories, performs one attempt, and does not expose
+  the server's GGUF path as model identity.
 - `infrastructure/persistence/sqlite` owns migrations, applies one shared connection policy
   (`foreign_keys`, busy timeout, row mapping), and maps SQLite rows to domain objects.
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
@@ -50,8 +51,9 @@ apps -> application/ports <- infrastructure
   capabilities. The same process drains proactive deliveries before each long poll.
 - `apps/telegram_cli` validates and stores the bot token and discovers the numeric owner identity
   without placing either operation in the dashboard.
-- `apps/ai_cli` is a packaged RUBIK diagnostic composition root. Public `health` proves liveness
-  while authenticated, feature-gated `complete` proves bounded inference connectivity.
+- `apps/ai_cli` is a packaged RUBIK diagnostic composition root. Public `health` proves process
+  liveness, public `ready` proves the model is loaded, and authenticated, feature-gated `complete`
+  proves bounded inference connectivity.
 
 Architecture tests parse imports to keep domain isolated, application ports inward-facing,
 feature modules independent from adapters, and infrastructure independent from apps and feature
@@ -60,13 +62,17 @@ modules.
 Local-AI connectivity remains a diagnostic slice:
 
 ```text
-RUBIK operator -> ai_cli -> public llama.cpp health
-                         \-> LanguageModel -> authenticated llama.cpp completion
+RUBIK operator -> ai_cli -> public llama.cpp liveness/readiness
+                         \-> concurrency limiter -> LanguageModel
+                                                   \-> authenticated llama.cpp completion
 ```
 
-The generic language-model port deliberately has no health method. Health is provider deployment
-evidence, while completion is the capability contract. There is no AI feature module yet because
-WP1 adds no prompt, triage, persistence, scheduling, retry, or mailbox behavior.
+The generic language-model port deliberately has no liveness or readiness method. Those states are
+provider deployment evidence, while completion is the reusable capability contract. The limiter
+is process-local; UNO Q's `--parallel 1` remains the final cross-process limit. Queue waiting and
+the HTTP request use separate timeout budgets, and each completion still performs one HTTP attempt.
+There is no AI feature module yet because WP2 adds no prompt, triage, persistence, scheduling,
+retry, or mailbox behavior.
 
 ## Runtime behavior
 

@@ -199,6 +199,16 @@ if [[ "$TELEGRAM_NOTIFICATIONS_ENABLED" == "true" ]]; then
     }
 fi
 if [[ "$LOCAL_LLM_ENABLED_VALUE" == "true" ]]; then
+    [[ "${LOCAL_LLM_MAX_CONCURRENCY:-}" == "1" ]] || {
+        fail "LOCAL_LLM_MAX_CONCURRENCY must be exactly 1"
+    }
+    [[ "${LOCAL_LLM_QUEUE_TIMEOUT_SECONDS:-}" =~ ^([0-9]+)(\.[0-9]+)?$ ]] || {
+        fail "LOCAL_LLM_QUEUE_TIMEOUT_SECONDS must be a positive number"
+    }
+    awk -v value="$LOCAL_LLM_QUEUE_TIMEOUT_SECONDS" \
+        'BEGIN { exit !(value > 0 && value <= 300) }' || {
+        fail "LOCAL_LLM_QUEUE_TIMEOUT_SECONDS must be from greater than 0 through 300"
+    }
     [[ -n "${LOCAL_LLM_API_KEY_FILE:-}" ]] || {
         fail "LOCAL_LLM_API_KEY_FILE is required when local inference is enabled"
     }

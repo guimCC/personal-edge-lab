@@ -5,6 +5,11 @@ import logging
 
 import httpx
 
+from personal_edge_lab.application.ports.ai import (
+    CompletionFailureCategory,
+    LanguageModelError,
+)
+from personal_edge_lab.apps.ai_cli import __main__ as ai_cli
 from personal_edge_lab.apps.ai_cli.__main__ import main
 
 API_KEY = "a" * 64
@@ -51,10 +56,47 @@ def test_health_works_while_disabled_and_without_key(monkeypatch) -> None:
         lambda _: httpx.Response(200, json={"status": "ok"}),
     )
     assert exit_code == 0
-    assert "Health: ok" in stdout
+    assert "Health: live" in stdout
     assert "Provider: llama_cpp" in stdout
     assert OPERATION_ID in stdout
     assert stderr == ""
+
+
+def test_health_treats_documented_loading_response_as_live(monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_LLM_ENABLED", "false")
+    exit_code, stdout, stderr = run_cli(
+        ["health"],
+        lambda _: httpx.Response(503, json={"error": {"message": "Loading model"}}),
+    )
+    assert exit_code == 0
+    assert "Health: live" in stdout
+    assert stderr == ""
+
+
+def test_ready_works_while_disabled_and_without_key(monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_LLM_ENABLED", "false")
+    monkeypatch.setenv("LOCAL_LLM_API_KEY_FILE", "/missing/key")
+    exit_code, stdout, stderr = run_cli(
+        ["ready"],
+        lambda _: httpx.Response(200, json={"status": "ok"}),
+    )
+    assert exit_code == 0
+    assert "Readiness: ready" in stdout
+    assert "Provider: llama_cpp" in stdout
+    assert stderr == ""
+
+
+def test_ready_reports_loading_as_not_ready(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("LOCAL_LLM_ENABLED", "false")
+    caplog.set_level(logging.WARNING)
+    exit_code, stdout, stderr = run_cli(
+        ["ready"],
+        lambda _: httpx.Response(503, json={"error": {"message": "Loading model"}}),
+    )
+    assert exit_code == 5
+    assert stdout == ""
+    assert "not_ready" in stderr
+    assert "attempt_count=1" in caplog.text
 
 
 def test_complete_is_blocked_before_network_when_disabled(monkeypatch) -> None:
@@ -88,6 +130,8 @@ def test_success_prints_sanitized_human_output_without_provider_path(
     assert "Completion:\nready�[31m\nnext" in stdout
     assert "Model: qwen3-1.7b-q4-k-m" in stdout
     assert "Tokens: prompt=5 completion=1 total=6" in stdout
+    assert "Queue wait:" in stdout
+    assert "Provider elapsed:" in stdout
     assert OPERATION_ID in stdout
     assert SERVER_MODEL_PATH not in stdout
     assert stderr == ""
@@ -95,6 +139,9 @@ def test_success_prints_sanitized_human_output_without_provider_path(
     assert API_KEY not in caplog.text
     assert SERVER_MODEL_PATH not in caplog.text
     assert "outcome=success" in caplog.text
+    assert "queue_wait_seconds=" in caplog.text
+    assert "provider_seconds=" in caplog.text
+    assert "attempt_count=1" in caplog.text
 
 
 def test_oversized_input_is_rejected_before_network(monkeypatch, tmp_path) -> None:
@@ -133,6 +180,45 @@ def test_blank_input_is_rejected_before_network(monkeypatch, tmp_path, caplog) -
     assert "must not be blank" in stderr
     assert "elapsed_seconds=" in caplog.text
     assert "total_tokens=unavailable" in caplog.text
+
+
+def test_concurrency_limit_is_sanitized_and_makes_no_http_call(
+    monkeypatch,
+    tmp_path,
+    caplog,
+) -> None:
+    configure_completion(monkeypatch, tmp_path)
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=success_payload())
+
+    class Limited:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def complete(self, _request):
+            raise LanguageModelError(
+                "sanitized",
+                category=CompletionFailureCategory.CONCURRENCY_LIMITED,
+                retry_eligible=True,
+                queue_wait_seconds=60,
+                provider_elapsed_seconds=0,
+                attempt_count=0,
+            )
+
+    monkeypatch.setattr(ai_cli, "ConcurrencyLimitedLanguageModel", Limited)
+    caplog.set_level(logging.WARNING)
+    exit_code, stdout, stderr = run_cli(["complete", "--text", "hello"], handler)
+    assert exit_code == 5
+    assert stdout == ""
+    assert "concurrency_limited" in stderr
+    assert calls == 0
+    assert "queue_wait_seconds=60.000" in caplog.text
+    assert "provider_seconds=0.000" in caplog.text
+    assert "attempt_count=0" in caplog.text
 
 
 def test_missing_usage_prints_unavailable(monkeypatch, tmp_path) -> None:
