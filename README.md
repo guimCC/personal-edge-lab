@@ -224,6 +224,33 @@ The command is idempotent when the packaged prompt already matches production. L
 in the owner-only mode-`0600` files configured by `LANGFUSE_PUBLIC_KEY_FILE` and
 `LANGFUSE_SECRET_KEY_FILE`. Only synthetic fixture content is authorized for trace capture.
 
+## Retrieve a bounded Gmail batch
+
+Release `0.12.0` adds a separate read-only Gmail diagnostic path. It retrieves and normalizes a
+small owner-selected batch without invoking the model, Langfuse, SQLite, or any mailbox mutation:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli fetch \
+  --query "in:inbox newer_than:7d" \
+  --limit 10
+```
+
+The query is always explicit and the batch is limited to at most 25 messages. Output contains
+receipt time, Gmail message/thread IDs, sender, subject, content source, sizes, and cleanup flags.
+Normalized message bodies remain process-local and are never printed, logged, traced, or stored.
+
+Initial personal-account authorization is an explicit operator action:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli authorize
+```
+
+It requests only `gmail.readonly`, listens on the configured loopback port, and writes the OAuth
+token directly to the owner-only mode-`0600` file configured by `GMAIL_TOKEN_FILE`. Existing tokens
+are never overwritten without `--replace-token`. `authorize` works while `GMAIL_READ_ENABLED=false`
+so credentials can be bootstrapped before enabling retrieval. See the deployment runbook for the
+SSH loopback-tunnel workflow and Google Cloud setup.
+
 ## Data and migrations
 
 All applications run the same standard-library migration runner before opening a repository.

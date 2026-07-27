@@ -154,6 +154,7 @@ TELEGRAM_ENABLED="${TELEGRAM_BOT_ENABLED:-false}"
 TELEGRAM_NOTIFICATIONS_ENABLED="${TELEGRAM_NOTIFICATION_DELIVERY_ENABLED:-false}"
 LOCAL_LLM_ENABLED_VALUE="${LOCAL_LLM_ENABLED:-false}"
 LANGFUSE_ENABLED_VALUE="${LANGFUSE_ENABLED:-false}"
+GMAIL_READ_ENABLED_VALUE="${GMAIL_READ_ENABLED:-false}"
 if [[ "$AUTH_ENABLED" == "true" ]]; then
     [[ "${PUBLIC_ORIGIN:-}" == "https://rubik-edge-01.local" ]] || {
         fail "authenticated deployment requires PUBLIC_ORIGIN=https://rubik-edge-01.local"
@@ -284,6 +285,102 @@ if [[ "$LANGFUSE_ENABLED_VALUE" == "true" ]]; then
     done
     unset LANGFUSE_KEY_SETTING
 fi
+if [[ "$GMAIL_READ_ENABLED_VALUE" == "true" ]]; then
+    [[ "${GMAIL_TIMEOUT_SECONDS:-}" =~ ^([0-9]+)(\.[0-9]+)?$ ]] || {
+        fail "GMAIL_TIMEOUT_SECONDS must be a positive number"
+    }
+    awk -v value="$GMAIL_TIMEOUT_SECONDS" \
+        'BEGIN { exit !(value > 0 && value <= 60) }' || {
+        fail "GMAIL_TIMEOUT_SECONDS must be from greater than 0 through 60"
+    }
+    [[ "${GMAIL_DEFAULT_BATCH_SIZE:-}" =~ ^[0-9]+$ ]] || {
+        fail "GMAIL_DEFAULT_BATCH_SIZE must be from 1 through 25"
+    }
+    ((GMAIL_DEFAULT_BATCH_SIZE >= 1 && GMAIL_DEFAULT_BATCH_SIZE <= 25)) || {
+        fail "GMAIL_DEFAULT_BATCH_SIZE must be from 1 through 25"
+    }
+    [[ "${GMAIL_MAX_MESSAGE_BYTES:-}" =~ ^[0-9]+$ ]] || {
+        fail "GMAIL_MAX_MESSAGE_BYTES must be from 1 through 1048576"
+    }
+    ((GMAIL_MAX_MESSAGE_BYTES >= 1 && GMAIL_MAX_MESSAGE_BYTES <= 1048576)) || {
+        fail "GMAIL_MAX_MESSAGE_BYTES must be from 1 through 1048576"
+    }
+    [[ "${GMAIL_MAX_NORMALIZED_CHARS:-}" =~ ^[0-9]+$ ]] || {
+        fail "GMAIL_MAX_NORMALIZED_CHARS must be from 1 through 8000"
+    }
+    ((GMAIL_MAX_NORMALIZED_CHARS >= 1 && GMAIL_MAX_NORMALIZED_CHARS <= 8000)) || {
+        fail "GMAIL_MAX_NORMALIZED_CHARS must be from 1 through 8000"
+    }
+    [[ "${GMAIL_OAUTH_CALLBACK_PORT:-}" =~ ^[0-9]+$ ]] || {
+        fail "GMAIL_OAUTH_CALLBACK_PORT must be from 1 through 65535"
+    }
+    ((GMAIL_OAUTH_CALLBACK_PORT >= 1 && GMAIL_OAUTH_CALLBACK_PORT <= 65535)) || {
+        fail "GMAIL_OAUTH_CALLBACK_PORT must be from 1 through 65535"
+    }
+    for GMAIL_FILE_SETTING in GMAIL_CLIENT_SECRET_FILE GMAIL_TOKEN_FILE; do
+        GMAIL_FILE_PATH="${!GMAIL_FILE_SETTING:-}"
+        [[ -n "$GMAIL_FILE_PATH" ]] || {
+            fail "$GMAIL_FILE_SETTING is required when Gmail retrieval is enabled"
+        }
+        [[ "$GMAIL_FILE_PATH" = /* ]] || fail "$GMAIL_FILE_SETTING must be absolute"
+        [[ ! -L "$GMAIL_FILE_PATH" ]] || {
+            fail "$GMAIL_FILE_SETTING must not be a symbolic link"
+        }
+        [[ -f "$GMAIL_FILE_PATH" && -r "$GMAIL_FILE_PATH" ]] || {
+            fail "$GMAIL_FILE_SETTING must be a readable regular file"
+        }
+        [[ "$(stat -c '%a' "$GMAIL_FILE_PATH")" == "600" ]] || {
+            fail "$GMAIL_FILE_SETTING must have mode 600"
+        }
+        [[ "$(stat -c '%U' "$GMAIL_FILE_PATH")" == "$(id -un)" ]] || {
+            fail "$GMAIL_FILE_SETTING must be owned by the deployment user"
+        }
+        [[ "$(stat -c '%s' "$GMAIL_FILE_PATH")" -le 65536 ]] || {
+            fail "$GMAIL_FILE_SETTING must not exceed 65536 bytes"
+        }
+    done
+    python3 - "$GMAIL_CLIENT_SECRET_FILE" "$GMAIL_TOKEN_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+scope = "https://www.googleapis.com/auth/gmail.readonly"
+try:
+    client = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    token = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+    assert set(client) == {"installed"}
+    installed = client["installed"]
+    assert isinstance(installed, dict)
+    required_client = {
+        "client_id",
+        "client_secret",
+        "auth_uri",
+        "token_uri",
+        "redirect_uris",
+    }
+    assert required_client <= set(installed)
+    assert all(
+        isinstance(installed.get(key), str) and installed[key]
+        for key in required_client - {"redirect_uris"}
+    )
+    redirects = installed["redirect_uris"]
+    assert isinstance(redirects, list)
+    assert any(
+        isinstance(uri, str)
+        and (uri.startswith("http://localhost") or uri.startswith("http://127.0.0.1"))
+        for uri in redirects
+    )
+    assert isinstance(token, dict)
+    assert token.get("scopes") == [scope]
+    assert all(
+        isinstance(token.get(key), str) and token[key]
+        for key in ("token", "refresh_token", "token_uri", "client_id", "client_secret")
+    )
+except (AssertionError, KeyError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit("Gmail credential files contain invalid private JSON") from None
+PY
+    unset GMAIL_FILE_SETTING GMAIL_FILE_PATH
+fi
 
 if [[ "$DATABASE_PATH" = /* ]]; then
     DATABASE_FILE="$DATABASE_PATH"
@@ -353,6 +450,12 @@ if [[ "$LANGFUSE_ENABLED_VALUE" == "true" ]]; then
         "$DEPLOY_BACKUP/langfuse-public.key"
     cp --preserve=all "$LANGFUSE_SECRET_KEY_FILE" \
         "$DEPLOY_BACKUP/langfuse-secret.key"
+fi
+if [[ "$GMAIL_READ_ENABLED_VALUE" == "true" ]]; then
+    cp --preserve=all "$GMAIL_CLIENT_SECRET_FILE" \
+        "$DEPLOY_BACKUP/gmail-client.json"
+    cp --preserve=all "$GMAIL_TOKEN_FILE" \
+        "$DEPLOY_BACKUP/gmail-token.json"
 fi
 sudo cp -a "$TLS_DIRECTORY" "$DEPLOY_BACKUP/tls"
 

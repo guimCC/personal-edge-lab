@@ -845,3 +845,163 @@ this release accepted from an unrecorded run.
 Rollback sets `LANGFUSE_ENABLED=false`, reinstalls the retained `0.10.0` wheel, and restarts only
 existing processes that received the package. The remote prompt may remain because it is inert
 while disabled. No schema or mailbox rollback exists.
+
+## Stage 6A WP6 read-only Gmail rollout
+
+Release `0.12.0` adds no service, timer, migration, API route, dashboard surface, model call,
+Langfuse trace, persistence, or mailbox mutation. It adds explicit personal-Gmail authorization
+and a bounded metadata-only retrieval command.
+
+### 1. Deploy disabled and prepare Google Cloud
+
+Add the frozen values to `.env` before the first deployment:
+
+```dotenv
+GMAIL_READ_ENABLED=false
+GMAIL_CLIENT_SECRET_FILE=/home/ubuntu/personal-edge-lab/secrets/gmail-client.json
+GMAIL_TOKEN_FILE=/home/ubuntu/personal-edge-lab/secrets/gmail-token.json
+GMAIL_TIMEOUT_SECONDS=10
+GMAIL_DEFAULT_BATCH_SIZE=10
+GMAIL_MAX_MESSAGE_BYTES=262144
+GMAIL_MAX_NORMALIZED_CHARS=8000
+GMAIL_OAUTH_CALLBACK_PORT=8765
+```
+
+In Google Cloud, enable the Gmail API, configure an External OAuth consent screen, add the personal
+Gmail owner as a test user, and create Desktop app credentials. Download the client JSON on the
+trusted workstation. The integration requests exactly:
+
+```text
+https://www.googleapis.com/auth/gmail.readonly
+```
+
+Do not add modify, compose, send, insert, label, or full-mail authority. External apps left in
+Testing may receive refresh tokens that expire after seven days; reauthorization is expected in
+WP6.
+
+Deploy the package while retrieval remains disabled:
+
+```bash
+git pull --ff-only
+./scripts/deploy-rubik.sh
+```
+
+### 2. Install the Desktop client privately
+
+Copy the downloaded Desktop client JSON from the trusted workstation, then lock it down on RUBIK:
+
+```bash
+scp gmail-client.json \
+  ubuntu@rubik-edge-01.local:/home/ubuntu/personal-edge-lab/secrets/gmail-client.json
+ssh ubuntu@rubik-edge-01.local \
+  'chmod 0600 /home/ubuntu/personal-edge-lab/secrets/gmail-client.json'
+```
+
+On RUBIK, verify metadata without printing the file:
+
+```bash
+stat -c '%a %U %G %n' "$GMAIL_CLIENT_SECRET_FILE"
+```
+
+The result must show mode `600` and owner `ubuntu`. Never display or paste the JSON into logs,
+issues, commits, or chat.
+
+### 3. Authorize through the SSH loopback tunnel
+
+From the trusted workstation, open an interactive SSH connection that forwards the OAuth callback
+port to RUBIK:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 ubuntu@rubik-edge-01.local
+```
+
+In that same remote shell:
+
+```bash
+cd /home/ubuntu/personal-edge-lab
+set -a
+source .env
+set +a
+python -m personal_edge_lab.apps.email_triage_cli authorize
+```
+
+Open the printed Google authorization URL in a browser on the trusted workstation and approve only
+read-only Gmail access. The browser callback to local port `8765` travels through the SSH tunnel to
+the loopback-only listener on RUBIK.
+
+Verify the token without printing it:
+
+```bash
+stat -c '%a %U %G %n' "$GMAIL_TOKEN_FILE"
+python - "$GMAIL_TOKEN_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert value["scopes"] == ["https://www.googleapis.com/auth/gmail.readonly"]
+print("Gmail token scope and JSON shape: valid")
+PY
+```
+
+The token must be owned by `ubuntu` with mode `600`. If it already exists, authorization refuses
+to overwrite it; use `authorize --replace-token` only after intentionally revoking or rotating the
+credential.
+
+### 4. Enable and accept bounded retrieval
+
+Set `GMAIL_READ_ENABLED=true` and deploy again. The deployment guard now validates both credential
+files, their exact ownership/mode, private JSON shape, and read-only token scope, then copies them
+into the timestamped private deployment backup.
+
+Run the smallest acceptance batch first:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli fetch \
+  --query "in:inbox newer_than:7d" \
+  --limit 3
+python -m personal_edge_lab.apps.email_triage_cli fetch \
+  --query "in:inbox newer_than:7d" \
+  --limit 10
+```
+
+Compare receipt time, message/thread IDs, sender, subject, content source, and normalized lengths
+with Gmail. The command must not print the normalized body. Normal logs must not contain the raw
+query, IDs, sender, subject, body, client secret, access/refresh token, authorization header, or
+Gmail provider body.
+
+Before and after both reads, confirm the same messages retain their read/unread state, labels,
+archive state, and mailbox contents. The adapter exposes only list/get requests, so any mailbox
+change fails acceptance.
+
+### 5. Revocation and platform regression
+
+Revoke the app from the Google Account connection/security settings and rerun the bounded fetch. It
+must return sanitized category `authentication`, exit `5`, make no automatic Gmail API retry, and
+show no provider response body. Restore access with:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli authorize --replace-token
+```
+
+Then rerun:
+
+```bash
+RUN_UNOQ_LIVE_TESTS=true python -m pytest -m unoq_live
+python -m personal_edge_lab.apps.ai_cli health
+python -m personal_edge_lab.apps.ai_cli ready
+python -m personal_edge_lab.apps.ai_cli complete --text "Return exactly ready"
+python -m personal_edge_lab.apps.ai_cli triage --fixture synthetic-invoice
+sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
+```
+
+Confirm API version `0.12.0`, collector, alert evaluator, Casadaqui, dashboard, AC behavior, SQLite,
+Langfuse synthetic tracing, UNO Q, and the WP0 firewall remain healthy. Record owner-confirmed
+evidence in `docs/stage-6a-wp6-handoff.md`; do not mark WP6 accepted from an unrecorded run.
+
+### WP6 rollback
+
+Set `GMAIL_READ_ENABLED=false`, reinstall the retained `0.11.0` wheel, and restart only existing
+processes that received the package. The client and token files are inert while disabled; revoke
+and remove them only as an explicit owner credential action. No database or mailbox rollback
+exists.

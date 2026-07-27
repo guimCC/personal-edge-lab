@@ -10,6 +10,9 @@ The API is LAN-only, has no CORS policy, and requires the owner session for all 
 control endpoints. All timestamps are RFC 3339 UTC. Invalid request shapes and query parameters
 return HTTP 422. SQLite failures return a sanitized HTTP 503.
 
+Release `0.12.0` does not change this HTTP contract. Gmail retrieval remains an operator CLI and is
+not exposed through the API or dashboard.
+
 ## Authentication
 
 `GET /api/v1/auth/session` is public and reports `authenticated`, feature flags, and—only for a

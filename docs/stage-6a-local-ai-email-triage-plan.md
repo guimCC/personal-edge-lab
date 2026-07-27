@@ -1183,7 +1183,7 @@ Agents working from this document must:
 | WP3. Triage prompt and schema | Accepted on RUBIK | Versioned validated triage profile |
 | WP4. Fixture evaluation | Not started | Reproducible quality/latency report |
 | WP5. Langfuse observability | Accepted on RUBIK | Non-blocking synthetic trace contract |
-| WP6. Gmail read-only source | Not started | Bounded normalized Gmail retrieval |
+| WP6. Gmail read-only source | Implemented locally | Bounded normalized Gmail retrieval |
 | WP7. Durable dry-run pipeline | Not started | Audited Gmail-to-UNO-Q recommendations |
 | WP8. Shadow-mode presentation | Not started | Human-inspectable dry-run results |
 | WP9. Scheduled shadow operation | Optional | Bounded independent worker/timer |
@@ -1399,3 +1399,24 @@ The detailed implementation and acceptance record is
 deferred. WP6 may add read-only Gmail retrieval, but real Gmail-to-model execution remains blocked
 until privacy and minimum-quality decisions are explicitly revisited. WP2 and the combined WP3/WP5
 slice were accepted on RUBIK on 2026-07-27.
+
+## Work Package 6 implementation handoff
+
+Release `0.12.0` implements bounded read-only Gmail retrieval:
+
+- pure `EmailSource` request, document, cursor, batch, and failure contracts;
+- a GET-only Gmail adapter with owner-supplied queries, three-page and 25-message bounds, full MIME
+  retrieval, response/message/text caps, and one attempt per API call;
+- conservative plain-text/HTML normalization that ignores attachments and removes standard quoted
+  history, signatures, tracking markup, duplicate lines, and excess whitespace;
+- Desktop OAuth authorization through a fixed SSH-loopback-compatible listener, exact
+  `gmail.readonly` authority, atomic mode-`0600` token refresh, and sanitized invalid-grant
+  behavior;
+- a separate `email_triage_cli` that presents trusted sender/subject metadata and normalization
+  evidence without printing bodies or exposing raw queries in logs;
+- no model call, Langfuse trace, persistence, service, timer, migration, dashboard surface, or
+  mailbox mutation.
+
+The detailed implementation, security, deployment, rollback, and acceptance record is
+[`stage-6a-wp6-handoff.md`](stage-6a-wp6-handoff.md). WP6 remains pending live acceptance. WP7 is
+still blocked on explicit privacy and minimum-quality decisions.

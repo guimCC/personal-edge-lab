@@ -54,7 +54,7 @@ automation.
 | 4.6. Modular lab console | Done | Extensible frontend shell with Climate as its first module |
 | 5A. Casadaqui operations | Done | Modular owner-only status and deliberate AC control |
 | 5B. Proactive Telegram alerts | Implemented | Durable failure/recovery delivery with owner pause policy |
-| 6A. Local-AI email triage | Next | Read-only, evaluated categorization before mailbox actions |
+| 6A. Local-AI email triage | In progress | Read-only, evaluated categorization before mailbox actions |
 
 `Planned` does not mean committed scope. Before each stage starts, its open decisions are resolved
 and its acceptance criteria become the implementation checklist.
@@ -487,6 +487,12 @@ root-plus-generation trace. This release does not connect Gmail or claim classif
 WP4 remains deferred; WP6 may add read-only Gmail retrieval, but real Gmail-to-model execution
 remains blocked on privacy and minimum-quality decisions.
 
+Work Package 6 is implemented locally in release `0.12.0` and awaits RUBIK/personal-Gmail
+acceptance. It adds a bounded GET-only `EmailSource`, secure Desktop OAuth bootstrap and refresh,
+conservative MIME/HTML normalization, and a metadata-only diagnostic CLI. It does not connect
+retrieved email to the model, Langfuse, persistence, scheduling, or mailbox actions. WP7 remains
+blocked until privacy and minimum-quality decisions are revisited.
+
 ## Definition of done for every stage
 
 A stage is `Done` only when:
@@ -881,5 +887,6 @@ changed, how it was verified, decisions made, and what remains.
 
 **Next**
 
-- Plan WP6 as bounded read-only Gmail retrieval. Keep WP4 quality work deferred and revisit privacy
-  before any real Gmail-to-model execution or trace-content capture.
+- Deploy and accept WP6 as release `0.12.0` using a tiny explicit personal-Gmail query. Keep WP4
+  quality work deferred and revisit privacy before any real Gmail-to-model execution or
+  trace-content capture.

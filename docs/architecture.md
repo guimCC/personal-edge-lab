@@ -43,11 +43,17 @@ apps -> application/ports <- infrastructure
 - `infrastructure/observability` implements Langfuse managed-prompt and trace ports. Langfuse and
   OpenTelemetry imports are confined there; a prompt outage selects the packaged fallback and a
   trace outage cannot invalidate inference.
+- `infrastructure/gmail` implements the bounded `EmailSource` port. It owns Google OAuth refresh,
+  Gmail IDs and pagination, GET-only wire structures, nested MIME decoding, and conservative
+  HTML/text normalization. Raw Gmail payloads and OAuth objects never cross that boundary.
 - `infrastructure/persistence/sqlite` owns migrations, applies one shared connection policy
   (`foreign_keys`, busy timeout, row mapping), and maps SQLite rows to domain objects.
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
   consecutive-failure counter.
 - `apps/ac_cli` owns parsing, output, configuration, composition, and exit codes.
+- `apps/email_triage_cli` owns explicit personal-Gmail authorization and metadata-only bounded
+  retrieval. It prints sender and subject on the trusted operator terminal but never prints,
+  logs, traces, or stores normalized bodies.
 - `apps/api` has feature routers for authentication, operations, telemetry, AC, and the packaged
   dashboard. It protects typed HTTP queries, enforces origin/CSRF controls, and composes the
   existing command use case for authenticated writes.
@@ -222,6 +228,18 @@ transaction serializes evaluation, and a partial unique index permits only one a
 device and alert type. Evaluator failure cannot stop telemetry collection, and stale evaluator
 runtime is visible as unknown alert health.
 
+WP6 adds an independent operator-only retrieval path:
+
+```text
+explicit Gmail query -> read-only Gmail adapter -> bounded EmailDocument batch
+                                                -> metadata-only CLI
+```
+
+The adapter requests only `gmail.readonly` and exposes no mutation operation. Bodies are normalized
+in memory for a later approved consumer, but WP6 does not import the language-model, Langfuse,
+email-triage feature, or persistence paths. A batch may contain valid documents plus explicit
+per-message normalization failures; transport and authorization failures remain operation-level.
+
 ## Adding capability
 
 ### Add a domain model
@@ -261,9 +279,10 @@ process lifecycle or presentation. Business rules should remain reusable outside
 
 ## Future architecture, not current packages
 
-Future slices may introduce read-only Gmail retrieval, a persistent local-AI task worker, speech,
-multiple identities and permissions, and worker registration. Real Gmail-to-model execution and
-trace-content policy remain blocked on explicit privacy and minimum-quality decisions.
+Future slices may introduce a durable Gmail-to-local-AI dry-run pipeline, a persistent local-AI
+task worker, speech, multiple identities and permissions, and worker registration. Real
+Gmail-to-model execution and trace-content policy remain blocked on explicit privacy and
+minimum-quality decisions.
 Casadaqui is the first external operations adapter: it exposes concise status, AC control,
 notification policy, and operational alert delivery, but deliberately does not expose detailed
 histories.
