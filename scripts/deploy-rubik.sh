@@ -153,6 +153,7 @@ CONTROL_ENABLED="${API_AC_CONTROL_ENABLED:-false}"
 TELEGRAM_ENABLED="${TELEGRAM_BOT_ENABLED:-false}"
 TELEGRAM_NOTIFICATIONS_ENABLED="${TELEGRAM_NOTIFICATION_DELIVERY_ENABLED:-false}"
 LOCAL_LLM_ENABLED_VALUE="${LOCAL_LLM_ENABLED:-false}"
+LANGFUSE_ENABLED_VALUE="${LANGFUSE_ENABLED:-false}"
 if [[ "$AUTH_ENABLED" == "true" ]]; then
     [[ "${PUBLIC_ORIGIN:-}" == "https://rubik-edge-01.local" ]] || {
         fail "authenticated deployment requires PUBLIC_ORIGIN=https://rubik-edge-01.local"
@@ -239,6 +240,50 @@ if [[ "$LOCAL_LLM_ENABLED_VALUE" == "true" ]]; then
     }
     unset LOCAL_LLM_KEY_LINES
 fi
+if [[ "$LANGFUSE_ENABLED_VALUE" == "true" ]]; then
+    [[ "${LANGFUSE_BASE_URL:-}" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]] || {
+        fail "LANGFUSE_BASE_URL must be an origin-only HTTPS URL"
+    }
+    [[ "${LANGFUSE_TIMEOUT_SECONDS:-}" =~ ^([0-9]+)(\.[0-9]+)?$ ]] || {
+        fail "LANGFUSE_TIMEOUT_SECONDS must be a positive number"
+    }
+    awk -v value="$LANGFUSE_TIMEOUT_SECONDS" \
+        'BEGIN { exit !(value > 0 && value <= 30) }' || {
+        fail "LANGFUSE_TIMEOUT_SECONDS must be from greater than 0 through 30"
+    }
+    for LANGFUSE_KEY_SETTING in LANGFUSE_PUBLIC_KEY_FILE LANGFUSE_SECRET_KEY_FILE; do
+        LANGFUSE_KEY_PATH="${!LANGFUSE_KEY_SETTING:-}"
+        [[ -n "$LANGFUSE_KEY_PATH" ]] || {
+            fail "$LANGFUSE_KEY_SETTING is required when Langfuse is enabled"
+        }
+        [[ "$LANGFUSE_KEY_PATH" = /* ]] || fail "$LANGFUSE_KEY_SETTING must be absolute"
+        [[ ! -L "$LANGFUSE_KEY_PATH" ]] || {
+            fail "$LANGFUSE_KEY_SETTING must not be a symbolic link"
+        }
+        [[ -f "$LANGFUSE_KEY_PATH" && -r "$LANGFUSE_KEY_PATH" ]] || {
+            fail "$LANGFUSE_KEY_SETTING must be a readable regular file"
+        }
+        [[ "$(stat -c '%a' "$LANGFUSE_KEY_PATH")" == "600" ]] || {
+            fail "$LANGFUSE_KEY_SETTING must have mode 600"
+        }
+        [[ "$(stat -c '%U' "$LANGFUSE_KEY_PATH")" == "$(id -un)" ]] || {
+            fail "$LANGFUSE_KEY_SETTING must be owned by the deployment user"
+        }
+        mapfile -t LANGFUSE_KEY_LINES <"$LANGFUSE_KEY_PATH"
+        [[ "${#LANGFUSE_KEY_LINES[@]}" -eq 1 ]] || {
+            fail "$LANGFUSE_KEY_SETTING must contain exactly one line"
+        }
+        [[ "${#LANGFUSE_KEY_LINES[0]}" -ge 32 \
+            && "${#LANGFUSE_KEY_LINES[0]}" -le 256 ]] || {
+            fail "$LANGFUSE_KEY_SETTING must contain between 32 and 256 characters"
+        }
+        [[ ! "${LANGFUSE_KEY_LINES[0]}" =~ [[:space:]] ]] || {
+            fail "$LANGFUSE_KEY_SETTING must not contain whitespace"
+        }
+        unset LANGFUSE_KEY_LINES LANGFUSE_KEY_PATH
+    done
+    unset LANGFUSE_KEY_SETTING
+fi
 
 if [[ "$DATABASE_PATH" = /* ]]; then
     DATABASE_FILE="$DATABASE_PATH"
@@ -302,6 +347,12 @@ fi
 if [[ "$LOCAL_LLM_ENABLED_VALUE" == "true" ]]; then
     cp --preserve=all "$LOCAL_LLM_API_KEY_FILE" \
         "$DEPLOY_BACKUP/unoq-ai-01.key"
+fi
+if [[ "$LANGFUSE_ENABLED_VALUE" == "true" ]]; then
+    cp --preserve=all "$LANGFUSE_PUBLIC_KEY_FILE" \
+        "$DEPLOY_BACKUP/langfuse-public.key"
+    cp --preserve=all "$LANGFUSE_SECRET_KEY_FILE" \
+        "$DEPLOY_BACKUP/langfuse-secret.key"
 fi
 sudo cp -a "$TLS_DIRECTORY" "$DEPLOY_BACKUP/tls"
 

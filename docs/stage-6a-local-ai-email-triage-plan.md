@@ -1382,3 +1382,23 @@ after explicit owner approval.
 
 - Add the two new environment values on RUBIK, pull the reviewed commit, run the guarded deployment,
   and execute the WP2 acceptance commands in `docs/deployment.md`.
+
+## Combined WP3/WP5 implementation handoff
+
+Release `0.11.0` implements the minimum observable email-triage foundation above WP2:
+
+- one synthetic fixture enters the first real `modules/email_triage` use case;
+- a production-labelled Langfuse chat prompt is resolved through a narrow port with the packaged
+  `1.0.0` manifest as a permanent fallback;
+- the existing one-slot llama.cpp path receives a strict provider-neutral JSON schema and disabled
+  reasoning request;
+- exact `label` and `reason` JSON is decoded without repair;
+- one deterministic Langfuse trace contains root `classify-email` and child generation
+  `generate-triage-decision`;
+- only `prompt-publish` may create and promote a remote prompt version.
+
+The detailed implementation and acceptance record is
+[`stage-6a-wp3-wp5-handoff.md`](stage-6a-wp3-wp5-handoff.md). WP4 quality evaluation remains
+deferred. WP6 may add read-only Gmail retrieval, but real Gmail-to-model execution remains blocked
+until privacy and minimum-quality decisions are explicitly revisited. WP2 remains pending in this
+roadmap until rerun or recorded RUBIK evidence is available.

@@ -753,3 +753,95 @@ Casadaqui, dashboard, Nginx, UNO Q service, and WP0 firewall remain healthy.
 To roll back, set `LOCAL_LLM_ENABLED=false`, reinstall the retained `0.9.0` wheel, and restart only
 the existing processes that received the package. The new environment values may remain unused.
 There is no schema or mailbox rollback.
+
+## Stage 6A combined WP3/WP5 observable-triage rollout
+
+Release `0.11.0` adds no service, timer, migration, Gmail access, scheduler, persistence, or
+dashboard surface. It adds an operator-invoked synthetic triage command, a packaged prompt
+fallback, explicit prompt publication, and isolated Langfuse tracing.
+
+First deploy with Langfuse disabled:
+
+```dotenv
+LANGFUSE_ENABLED=false
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_PUBLIC_KEY_FILE=/home/ubuntu/personal-edge-lab/secrets/langfuse-public.key
+LANGFUSE_SECRET_KEY_FILE=/home/ubuntu/personal-edge-lab/secrets/langfuse-secret.key
+LANGFUSE_TIMEOUT_SECONDS=2
+```
+
+```bash
+git pull --ff-only
+./scripts/deploy-rubik.sh
+set -a
+source .env
+set +a
+python -m personal_edge_lab.apps.ai_cli triage --fixture synthetic-invoice
+```
+
+The first run must report `local_fallback`, `Trace: unavailable`, and a strict label/reason result.
+No trace is created while disabled.
+
+Create one Langfuse Cloud project, keep its environment name `personal-edge-lab`, and install its
+public and secret keys without printing them:
+
+```bash
+install -d -m 0700 /home/ubuntu/personal-edge-lab/secrets
+install -m 0600 /dev/stdin \
+  /home/ubuntu/personal-edge-lab/secrets/langfuse-public.key
+install -m 0600 /dev/stdin \
+  /home/ubuntu/personal-edge-lab/secrets/langfuse-secret.key
+```
+
+Enter each value interactively into its command, then set `LANGFUSE_ENABLED=true` and deploy again.
+The deployment guard requires both paths to be absolute, regular, non-symlinked, owned by `ubuntu`,
+mode `0600`, and one whitespace-free line of 32–256 characters. It copies both files into the
+private timestamped deployment backup.
+
+Publish and verify the prompt, then create one synthetic trace:
+
+```bash
+export LANGFUSE_PUBLIC_KEY="$(<"$LANGFUSE_PUBLIC_KEY_FILE")"
+export LANGFUSE_SECRET_KEY="$(<"$LANGFUSE_SECRET_KEY_FILE")"
+export LANGFUSE_BASE_URL
+python -m personal_edge_lab.apps.ai_cli prompt-publish
+npx langfuse-cli api prompts get personal-edge-lab/email-triage \
+  --label production --json
+python -m personal_edge_lab.apps.ai_cli triage --fixture synthetic-invoice
+npx langfuse-cli api traces get TRACE_ID --fields core,io,observations --json
+npx langfuse-cli api observations list --trace-id TRACE_ID \
+  --fields basic,io,metadata,model,usage,prompt,metrics,trace_context --json
+unset LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY
+```
+
+The shell history records only the file-reading expressions, not either key value. Do not use the
+CLI's `--public-key` or `--secret-key` arguments.
+
+Use the trace ID printed by `triage` with the official Langfuse CLI. Confirm one root span named
+`classify-email` and exactly one child generation named `generate-triage-decision`; tags
+`email-triage` and `synthetic`; the exact linked prompt version; logical model, usage, queue/provider
+timing, profile/taxonomy/schema versions; and meaningful synthetic input/output. Confirm the
+synthetic `example.test` content is present and the Langfuse keys, UNO Q key/header, provider error
+bodies, and GGUF path are absent.
+
+Temporarily set `LANGFUSE_BASE_URL` to an unavailable HTTPS origin and rerun synthetic triage. It
+must retain successful local inference with prompt source `local_fallback`; tracing may report only
+sanitized unavailability. Restore the Cloud origin afterward.
+
+Finally rerun:
+
+```bash
+RUN_UNOQ_LIVE_TESTS=true python -m pytest -m unoq_live
+python -m personal_edge_lab.apps.ai_cli health
+python -m personal_edge_lab.apps.ai_cli ready
+python -m personal_edge_lab.apps.ai_cli complete --text "Return exactly ready"
+sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
+```
+
+Confirm API version `0.11.0`, collector, alert evaluator, Casadaqui, dashboard, AC behavior, SQLite,
+UNO Q, and the WP0 firewall remain healthy. Record actual output in the handoff; do not mark WP2 or
+this release accepted from an unrecorded run.
+
+Rollback sets `LANGFUSE_ENABLED=false`, reinstalls the retained `0.10.0` wheel, and restarts only
+existing processes that received the package. The remote prompt may remain because it is inert
+while disabled. No schema or mailbox rollback exists.

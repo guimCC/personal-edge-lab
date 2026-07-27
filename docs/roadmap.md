@@ -479,6 +479,13 @@ Work Package 2 is implemented locally as release `0.10.0`; RUBIK acceptance is p
 separates liveness from readiness, adds bounded one-slot process-local coordination, preserves one
 HTTP attempt, and finalizes logical identity plus queue/provider timing evidence.
 
+Work Packages 3 and 5 are combined in release `0.11.0` as an observable synthetic email-triage
+foundation. The first AI feature module resolves a production-labelled Langfuse prompt with a
+packaged fallback, requests strict `label` and `reason` JSON through the existing queued model,
+and emits one isolated root-plus-generation trace. This release does not connect Gmail or claim
+classification quality. WP4 remains deferred; WP6 may add read-only Gmail retrieval, but real
+Gmail-to-model execution remains blocked on privacy and minimum-quality decisions.
+
 ## Definition of done for every stage
 
 A stage is `Done` only when:
@@ -829,3 +836,44 @@ changed, how it was verified, decisions made, and what remains.
 
 - Commit and push locally, then pull and deploy through the documented RUBIK workflow and record
   acceptance before WP3.
+
+### 2026-07-27 — Observable synthetic email triage implemented locally
+
+**Stage:** 6A combined Work Packages 3 and 5
+**Status:** Implemented locally; RUBIK and Langfuse acceptance pending
+
+**Delivered**
+
+- Added the first AI feature module with bounded email input, a closed provisional label taxonomy,
+  strict label/reason decoding, and versioned evidence.
+- Added provider-neutral JSON-schema output and disabled reasoning to the existing queued llama.cpp
+  path.
+- Added a production-labelled Langfuse prompt with a permanent packaged fallback and explicit,
+  idempotent publication.
+- Added one deterministic synthetic trace with one root span and one child generation. Trace and
+  prompt failures cannot invalidate inference.
+- Prepared package, API, frontend, wheel, configuration, deployment, rollback, and handoff material
+  for release `0.11.0`.
+
+**Verification**
+
+- The full local Python suite passed 441 tests with one opt-in UNO Q live test skipped.
+- Ruff lint/format, Pyright, ShellCheck, frontend lint, 10 frontend tests, and the production build
+  passed.
+- Isolated source/wheel builds, expanded wheel inspection, exact dependency metadata, and clean
+  acceptance-wheel installation passed.
+
+**Known limitations**
+
+- No live Langfuse prompt or trace is claimed until Cloud credentials are installed and the
+  resulting trace is fetched and audited.
+- The slice uses synthetic data only. Gmail, persistence, scheduling, mailbox actions, and
+  classification-quality claims remain absent.
+- WP2 acceptance remains pending because no rerun or recorded RUBIK evidence was added to the
+  repository.
+
+**Next**
+
+- Commit and push `0.11.0`, then perform the documented owner-controlled RUBIK and Langfuse
+  acceptance. Keep WP4 quality work deferred and revisit privacy before any real Gmail-to-model
+  execution.

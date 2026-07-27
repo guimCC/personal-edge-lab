@@ -28,13 +28,21 @@ apps -> application/ports <- infrastructure
   exposes bounded alert queries without importing FastAPI, systemd, or SQLite.
 - `modules/notifications` owns durable delivery, retry, expiry, and owner pause semantics without
   importing Telegram or SQLite.
+- `modules/email_triage` is the first AI feature module. It renders one bounded email as canonical
+  JSON, resolves a versioned prompt through a narrow port, invokes `LanguageModel`, strictly
+  decodes `label` and `reason`, and returns versioned evidence without knowing llama.cpp,
+  Pydantic, Langfuse, or OpenTelemetry.
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
 - `infrastructure/telegram` implements the narrow Bot API transport and never exposes the bot
   token through its public errors.
 - `infrastructure/ai` implements concrete llama.cpp liveness/readiness and completion HTTP
   contracts. A standard-library decorator queues callers behind one process-local permit. The
-  adapter translates failures into sanitized categories, performs one attempt, and does not expose
-  the server's GGUF path as model identity.
+  adapter translates failures into sanitized categories, performs one attempt, maps the
+  provider-neutral structured-output contract to llama.cpp JSON schema, and does not expose the
+  server's GGUF path as model identity. Pydantic is confined to the strict triage parsing boundary.
+- `infrastructure/observability` implements Langfuse managed-prompt and trace ports. Langfuse and
+  OpenTelemetry imports are confined there; a prompt outage selects the packaged fallback and a
+  trace outage cannot invalidate inference.
 - `infrastructure/persistence/sqlite` owns migrations, applies one shared connection policy
   (`foreign_keys`, busy timeout, row mapping), and maps SQLite rows to domain objects.
 - `apps/telemetry_collector` owns configuration, composition, signals, polling interval, and the
@@ -53,26 +61,29 @@ apps -> application/ports <- infrastructure
   without placing either operation in the dashboard.
 - `apps/ai_cli` is a packaged RUBIK diagnostic composition root. Public `health` proves process
   liveness, public `ready` proves the model is loaded, and authenticated, feature-gated `complete`
-  proves bounded inference connectivity.
+  proves bounded inference connectivity. `triage --fixture synthetic-invoice` composes the first
+  feature use case, while `prompt-publish` is the only prompt-writing path.
 
 Architecture tests parse imports to keep domain isolated, application ports inward-facing,
 feature modules independent from adapters, and infrastructure independent from apps and feature
 modules.
 
-Local-AI connectivity remains a diagnostic slice:
+The local-AI path now has one observable feature slice:
 
 ```text
-RUBIK operator -> ai_cli -> public llama.cpp liveness/readiness
-                         \-> concurrency limiter -> LanguageModel
-                                                   \-> authenticated llama.cpp completion
+synthetic fixture -> email_triage -> prompt source -> packaged fallback
+                                  \-> one-slot LanguageModel -> llama.cpp
+                                  \-> strict decoder
+                                  \-> trace sink -> classify-email
+                                                  \-> generate-triage-decision
 ```
 
 The generic language-model port deliberately has no liveness or readiness method. Those states are
 provider deployment evidence, while completion is the reusable capability contract. The limiter
 is process-local; UNO Q's `--parallel 1` remains the final cross-process limit. Queue waiting and
 the HTTP request use separate timeout budgets, and each completion still performs one HTTP attempt.
-There is no AI feature module yet because WP2 adds no prompt, triage, persistence, scheduling,
-retry, or mailbox behavior.
+The trace is deliberately one root span plus one child generation, has no user or session identity,
+and captures content only for checked-in synthetic fixtures.
 
 ## Runtime behavior
 
@@ -250,9 +261,9 @@ process lifecycle or presentation. Business rules should remain reusable outside
 
 ## Future architecture, not current packages
 
-Future slices may introduce email, a local-AI task worker, speech, multiple identities and
-permissions, and worker registration. The current local-AI connectivity types and adapter should
-be reused through the port rather than expanded into a provider framework.
+Future slices may introduce read-only Gmail retrieval, a persistent local-AI task worker, speech,
+multiple identities and permissions, and worker registration. Real Gmail-to-model execution and
+trace-content policy remain blocked on explicit privacy and minimum-quality decisions.
 Casadaqui is the first external operations adapter: it exposes concise status, AC control,
 notification policy, and operational alert delivery, but deliberately does not expose detailed
 histories.

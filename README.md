@@ -199,6 +199,31 @@ Exit codes are `0` for success, `2` for disabled/configuration/input rejection, 
 `4` for timeout, and `5` for readiness, concurrency, authenticated HTTP, provider, or protocol
 failure.
 
+## Exercise observable email triage
+
+Release `0.11.0` adds one synthetic, read-only triage path above the existing local-model
+foundation. It does not access Gmail, persist messages, schedule work, or mutate a mailbox:
+
+```bash
+python -m personal_edge_lab.apps.ai_cli triage --fixture synthetic-invoice
+```
+
+With `LANGFUSE_ENABLED=false`, the command uses the packaged versioned prompt and creates no trace.
+With Langfuse enabled, it fetches the production-labelled
+`personal-edge-lab/email-triage` chat prompt, falls back locally after any prompt-service failure,
+and attempts one trace containing the checked-in synthetic message. Tracing failure never changes a
+successful triage result.
+
+Prompt changes are an explicit operator action and never happen during inference:
+
+```bash
+python -m personal_edge_lab.apps.ai_cli prompt-publish
+```
+
+The command is idempotent when the packaged prompt already matches production. Langfuse keys stay
+in the owner-only mode-`0600` files configured by `LANGFUSE_PUBLIC_KEY_FILE` and
+`LANGFUSE_SECRET_KEY_FILE`. Only synthetic fixture content is authorized for trace capture.
+
 ## Data and migrations
 
 All applications run the same standard-library migration runner before opening a repository.
