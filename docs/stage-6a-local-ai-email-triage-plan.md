@@ -1179,10 +1179,10 @@ Agents working from this document must:
 | --- | --- | --- |
 | WP0. UNO Q contract and hardening | Accepted on RUBIK | Stable, rebooted, source-restricted node |
 | WP1. RUBIK connectivity slice | Accepted on RUBIK | Packaged `ai_cli` real-node success |
-| WP2. Provider operational semantics | Implemented locally | Stable `LanguageModel` contract |
-| WP3. Triage prompt and schema | Not started | Versioned validated triage profile |
+| WP2. Provider operational semantics | Accepted on RUBIK | Stable `LanguageModel` contract |
+| WP3. Triage prompt and schema | Accepted on RUBIK | Versioned validated triage profile |
 | WP4. Fixture evaluation | Not started | Reproducible quality/latency report |
-| WP5. Langfuse observability | Not started | Non-blocking redacted traces or explicit defer |
+| WP5. Langfuse observability | Accepted on RUBIK | Non-blocking synthetic trace contract |
 | WP6. Gmail read-only source | Not started | Bounded normalized Gmail retrieval |
 | WP7. Durable dry-run pipeline | Not started | Audited Gmail-to-UNO-Q recommendations |
 | WP8. Shadow-mode presentation | Not started | Human-inspectable dry-run results |
@@ -1320,7 +1320,7 @@ after explicit owner approval.
 
 ## Work Package 2 handoff
 
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Accepted on RUBIK on 2026-07-27
 
 **Delivered**
 
@@ -1354,8 +1354,8 @@ after explicit owner approval.
   and the production frontend build passed.
 - Isolated source/wheel builds and inspection of the packaged AI CLI, limiter, port, and domain
   files passed for `0.10.0`.
-- RUBIK live acceptance and existing-service checks remain pending until the reviewed commit is
-  pushed and pulled through the operator workflow.
+- On 2026-07-27 the owner reran the packaged liveness, readiness, completion, opt-in UNO Q, and
+  platform checks on RUBIK and confirmed they passed.
 
 **Security/privacy**
 
@@ -1371,17 +1371,14 @@ after explicit owner approval.
   server-side `--parallel 1` remains the cross-process limit.
 - HTTPX applies the completion timeout to its HTTP phases; it is not combined with queue waiting
   into one wall-clock deadline.
-- Real-node `health`, `ready`, completion, and platform-regression acceptance are still pending.
 
 **Next**
 
-- Commit and push the reviewed local changes, then perform the documented RUBIK `0.10.0`
-  acceptance before beginning WP3.
+- Preserve the accepted one-slot, one-attempt provider contract in later feature work.
 
 **Owner action required**
 
-- Add the two new environment values on RUBIK, pull the reviewed commit, run the guarded deployment,
-  and execute the WP2 acceptance commands in `docs/deployment.md`.
+- None.
 
 ## Combined WP3/WP5 implementation handoff
 
@@ -1400,5 +1397,5 @@ Release `0.11.0` implements the minimum observable email-triage foundation above
 The detailed implementation and acceptance record is
 [`stage-6a-wp3-wp5-handoff.md`](stage-6a-wp3-wp5-handoff.md). WP4 quality evaluation remains
 deferred. WP6 may add read-only Gmail retrieval, but real Gmail-to-model execution remains blocked
-until privacy and minimum-quality decisions are explicitly revisited. WP2 remains pending in this
-roadmap until rerun or recorded RUBIK evidence is available.
+until privacy and minimum-quality decisions are explicitly revisited. WP2 and the combined WP3/WP5
+slice were accepted on RUBIK on 2026-07-27.

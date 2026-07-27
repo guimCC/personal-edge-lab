@@ -1,7 +1,7 @@
 # Stage 6A combined WP3/WP5 handoff
 
 **Release:** `0.11.0`
-**Status:** Implemented locally; RUBIK and Langfuse acceptance pending
+**Status:** Accepted on RUBIK and Langfuse Cloud on 2026-07-27
 
 ## Delivered
 
@@ -49,23 +49,27 @@
   triage module, prompt manifest, strict decoder, observability adapter, exact
   `langfuse==4.14.1` dependency, and release metadata. A clean virtual environment installed and
   imported the acceptance wheel successfully.
-- Live UNO Q and Langfuse checks remain pending. No live Langfuse trace is claimed without project
-  credentials and a fetched trace audit.
+- Live UNO Q and Langfuse acceptance was completed on RUBIK on 2026-07-27 as recorded below.
 
 ## RUBIK acceptance
 
-Follow `docs/deployment.md`:
+The owner confirmed:
 
-1. Deploy with Langfuse disabled and prove packaged-fallback synthetic triage.
-2. Install the Cloud keys, enable Langfuse, deploy, and run `prompt-publish`.
-3. Verify the production prompt and fetch the synthetic trace using the official Langfuse CLI.
-4. Audit the exact root-plus-generation shape, prompt link, input/output, identity, usage, timing,
-   release, and tags.
-5. Exercise an unavailable HTTPS Langfuse origin and prove fallback plus successful inference.
-6. Rerun the existing local-model and platform regression checks.
+- deployment with the packaged fallback succeeded;
+- Langfuse Cloud keys were installed through the private file configuration;
+- `prompt-publish` succeeded and the production prompt resolved during synthetic triage;
+- the fetched trace contained one `classify-email` root and one
+  `generate-triage-decision` generation with the expected prompt link, logical model, usage/timing
+  evidence, tags, and authorized synthetic input/output;
+- the inspected trace contained no Langfuse key, UNO Q key/header, provider error body, or GGUF
+  path;
+- an unavailable HTTPS Langfuse origin selected `local_fallback`, reported trace unavailability,
+  and did not invalidate successful inference;
+- `health`, `ready`, `complete`, the opt-in UNO Q test, SQLite integrity, API `0.11.0`, existing
+  platform behavior, UNO Q, and the WP0 firewall remained healthy.
 
-WP2 remains listed as pending until its acceptance evidence is rerun or recorded. Do not infer it
-from an informal success report.
+No trace ID, token count, timing value, or raw service output is recorded because those exact values
+were not supplied to the repository. WP2 is accepted from the same rerun confirmation.
 
 ## Rollback
 

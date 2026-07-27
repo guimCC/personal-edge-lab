@@ -475,16 +475,17 @@ proves public health and feature-gated authenticated completion with one bounded
 failures, no content logging, and no email, prompt, persistence, retry, scheduler, or dashboard
 scope.
 
-Work Package 2 is implemented locally as release `0.10.0`; RUBIK acceptance is pending. It
-separates liveness from readiness, adds bounded one-slot process-local coordination, preserves one
-HTTP attempt, and finalizes logical identity plus queue/provider timing evidence.
+Work Package 2 was accepted on RUBIK on 2026-07-27. Release `0.10.0` separates liveness from
+readiness, adds bounded one-slot process-local coordination, preserves one HTTP attempt, and
+finalizes logical identity plus queue/provider timing evidence.
 
 Work Packages 3 and 5 are combined in release `0.11.0` as an observable synthetic email-triage
-foundation. The first AI feature module resolves a production-labelled Langfuse prompt with a
-packaged fallback, requests strict `label` and `reason` JSON through the existing queued model,
-and emits one isolated root-plus-generation trace. This release does not connect Gmail or claim
-classification quality. WP4 remains deferred; WP6 may add read-only Gmail retrieval, but real
-Gmail-to-model execution remains blocked on privacy and minimum-quality decisions.
+foundation and were accepted on RUBIK and Langfuse Cloud on 2026-07-27. The first AI feature module
+resolves a production-labelled Langfuse prompt with a packaged fallback, requests strict `label`
+and `reason` JSON through the existing queued model, and emits one isolated
+root-plus-generation trace. This release does not connect Gmail or claim classification quality.
+WP4 remains deferred; WP6 may add read-only Gmail retrieval, but real Gmail-to-model execution
+remains blocked on privacy and minimum-quality decisions.
 
 ## Definition of done for every stage
 
@@ -802,10 +803,10 @@ changed, how it was verified, decisions made, and what remains.
 - Define WP2 concurrency, readiness, retry-policy, and operational evidence boundaries before
   implementation.
 
-### 2026-07-26 — Provider operational contract implemented locally
+### 2026-07-26 — Provider operational contract
 
 **Stage:** 6A Work Package 2
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Done; accepted on RUBIK on 2026-07-27
 
 **Delivered**
 
@@ -825,22 +826,23 @@ changed, how it was verified, decisions made, and what remains.
 - Ruff, formatting, Pyright, ShellCheck, Git diff checks, frontend lint, 10 frontend tests, and the
   production frontend build passed.
 - Isolated source/wheel builds and inspection passed for `0.10.0`.
+- On 2026-07-27 the owner reran the packaged liveness, readiness, completion, opt-in UNO Q, and
+  existing platform checks on RUBIK and confirmed they passed.
 
 **Known limitations**
 
 - The limiter is process-local; server-side `--parallel 1` remains the cross-process boundary.
 - Queue and HTTP transport are separate timeout budgets.
-- RUBIK live commands and platform service verification remain pending.
 
 **Next**
 
-- Commit and push locally, then pull and deploy through the documented RUBIK workflow and record
-  acceptance before WP3.
+- Continue through the observable triage feature slice without changing WP2's one-attempt,
+  process-local coordination contract.
 
-### 2026-07-27 — Observable synthetic email triage implemented locally
+### 2026-07-27 — Observable synthetic email triage accepted
 
 **Stage:** 6A combined Work Packages 3 and 5
-**Status:** Implemented locally; RUBIK and Langfuse acceptance pending
+**Status:** Done; accepted on RUBIK and Langfuse Cloud
 
 **Delivered**
 
@@ -862,18 +864,22 @@ changed, how it was verified, decisions made, and what remains.
   passed.
 - Isolated source/wheel builds, expanded wheel inspection, exact dependency metadata, and clean
   acceptance-wheel installation passed.
+- The packaged prompt was published successfully and the production prompt resolved during
+  synthetic triage.
+- The owner fetched and audited the resulting trace and confirmed one `classify-email` root, one
+  `generate-triage-decision` child, the expected prompt link, model and timing evidence, authorized
+  synthetic content, and no inspected secret/provider-path leakage.
+- An unavailable HTTPS Langfuse origin selected `local_fallback`, reported trace unavailability,
+  and retained successful inference.
+- The owner confirmed the packaged AI commands, opt-in UNO Q test, SQLite integrity, API `0.11.0`,
+  and existing platform, UNO Q, and firewall checks remained healthy.
 
 **Known limitations**
 
-- No live Langfuse prompt or trace is claimed until Cloud credentials are installed and the
-  resulting trace is fetched and audited.
 - The slice uses synthetic data only. Gmail, persistence, scheduling, mailbox actions, and
   classification-quality claims remain absent.
-- WP2 acceptance remains pending because no rerun or recorded RUBIK evidence was added to the
-  repository.
 
 **Next**
 
-- Commit and push `0.11.0`, then perform the documented owner-controlled RUBIK and Langfuse
-  acceptance. Keep WP4 quality work deferred and revisit privacy before any real Gmail-to-model
-  execution.
+- Plan WP6 as bounded read-only Gmail retrieval. Keep WP4 quality work deferred and revisit privacy
+  before any real Gmail-to-model execution or trace-content capture.
