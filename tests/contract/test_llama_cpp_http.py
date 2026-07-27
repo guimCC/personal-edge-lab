@@ -9,7 +9,13 @@ from personal_edge_lab.application.ports.ai import (
     CompletionFailureCategory,
     LanguageModelError,
 )
-from personal_edge_lab.domain.ai import CompletionRequest, ModelMessage, ModelRole
+from personal_edge_lab.domain.ai import (
+    CompletionRequest,
+    ModelMessage,
+    ModelRole,
+    ReasoningMode,
+    StructuredOutputContract,
+)
 from personal_edge_lab.infrastructure.ai.llama_cpp import (
     LlamaCppHealthProbe,
     LlamaCppLanguageModel,
@@ -100,6 +106,42 @@ def test_success_sends_exact_bounded_request_and_translates_identity() -> None:
 def test_missing_usage_is_allowed() -> None:
     with model(lambda _: httpx.Response(200, json=success_response(usage=None))) as client:
         assert client.complete(request()).usage is None
+
+
+def test_structured_output_and_disabled_reasoning_map_to_llama_cpp_wire_contract() -> None:
+    schema = {
+        "type": "object",
+        "properties": {"label": {"type": "string"}},
+        "required": ["label"],
+        "additionalProperties": False,
+    }
+
+    def handler(observed: httpx.Request) -> httpx.Response:
+        payload = json.loads(observed.content)
+        assert payload["response_format"] == {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "triage_decision",
+                "strict": True,
+                "schema": schema,
+            },
+        }
+        assert payload["reasoning_effort"] == "none"
+        return httpx.Response(200, json=success_response())
+
+    structured_request = CompletionRequest(
+        messages=request().messages,
+        model_alias=request().model_alias,
+        max_output_tokens=64,
+        temperature=0,
+        structured_output=StructuredOutputContract(
+            name="triage_decision",
+            schema=schema,
+        ),
+        reasoning_mode=ReasoningMode.DISABLED,
+    )
+    with model(handler) as client:
+        client.complete(structured_request)
 
 
 @pytest.mark.parametrize(

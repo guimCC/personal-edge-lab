@@ -153,6 +153,17 @@ class LlamaCppLanguageModel:
             "seed": 0,
             "stream": False,
         }
+        if request.structured_output is not None:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": request.structured_output.name,
+                    "strict": request.structured_output.strict,
+                    "schema": dict(request.structured_output.schema),
+                },
+            }
+        if request.reasoning_mode.value == "disabled":
+            payload["reasoning_effort"] = "none"
         started = time.perf_counter()
         try:
             response = self._client.post("/v1/chat/completions", json=payload)

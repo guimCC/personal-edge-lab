@@ -90,6 +90,7 @@ def test_only_expected_real_modules_exist() -> None:
         "ac_control",
         "alerting",
         "authentication",
+        "email_triage",
         "notifications",
         "platform_status",
         "telemetry",
@@ -100,6 +101,8 @@ def test_ai_domain_and_port_do_not_import_http_or_framework_packages() -> None:
     paths = [
         PACKAGE_ROOT / "domain/ai.py",
         PACKAGE_ROOT / "application/ports/ai.py",
+        PACKAGE_ROOT / "domain/email_triage.py",
+        PACKAGE_ROOT / "application/ports/email_triage.py",
     ]
     forbidden = ("httpx", "pydantic", "fastapi", "personal_edge_lab.infrastructure")
     violations = {
@@ -107,6 +110,32 @@ def test_ai_domain_and_port_do_not_import_http_or_framework_packages() -> None:
             name for name in imports_in(path) if name.startswith(forbidden)
         )
         for path in paths
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
+def test_langfuse_and_opentelemetry_imports_are_confined_to_infrastructure() -> None:
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(("langfuse", "opentelemetry"))
+        )
+        for path in PACKAGE_ROOT.rglob("*.py")
+        if "infrastructure" not in path.parts
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
+def test_pydantic_triage_boundary_is_confined_to_decoder() -> None:
+    relevant = [
+        PACKAGE_ROOT / "domain/email_triage.py",
+        PACKAGE_ROOT / "application/ports/email_triage.py",
+        *python_files("modules/email_triage"),
+    ]
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith("pydantic")
+        )
+        for path in relevant
     }
     assert not {path: names for path, names in violations.items() if names}
 

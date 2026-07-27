@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
+from typing import Any
 
 MAX_MESSAGE_COUNT = 16
 MAX_TOTAL_INPUT_CHARS = 4096
@@ -23,6 +26,31 @@ class ModelRole(StrEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
+
+
+class ReasoningMode(StrEnum):
+    DEFAULT = "default"
+    DISABLED = "disabled"
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredOutputContract:
+    name: str
+    schema: Mapping[str, Any]
+    strict: bool = True
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.name, str)
+            or len(self.name) > MAX_MODEL_ALIAS_CHARS
+            or MODEL_ALIAS_PATTERN.fullmatch(self.name) is None
+        ):
+            raise AiValidationError("structured output name is invalid")
+        if not isinstance(self.schema, Mapping) or not self.schema:
+            raise AiValidationError("structured output schema must not be empty")
+        if not isinstance(self.strict, bool):
+            raise AiValidationError("structured output strict flag is invalid")
+        object.__setattr__(self, "schema", MappingProxyType(dict(self.schema)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +75,8 @@ class CompletionRequest:
     model_alias: str
     max_output_tokens: int
     temperature: float
+    structured_output: StructuredOutputContract | None = None
+    reasoning_mode: ReasoningMode = ReasoningMode.DEFAULT
 
     def __post_init__(self) -> None:
         if not isinstance(self.messages, tuple) or not self.messages:
@@ -78,6 +108,12 @@ class CompletionRequest:
             or not 0 <= float(self.temperature) <= 2
         ):
             raise AiValidationError("temperature must be from 0 through 2")
+        if self.structured_output is not None and not isinstance(
+            self.structured_output, StructuredOutputContract
+        ):
+            raise AiValidationError("structured output contract is invalid")
+        if not isinstance(self.reasoning_mode, ReasoningMode):
+            raise AiValidationError("reasoning mode is invalid")
 
 
 @dataclass(frozen=True, slots=True)
