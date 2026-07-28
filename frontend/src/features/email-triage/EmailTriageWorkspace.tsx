@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -41,6 +41,14 @@ export function EmailTriageWorkspace() {
   const [statusFilter, setStatusFilter] = useState<TriageMessageStatusFilter>("all");
   const [labelFilter, setLabelFilter] = useState<TriageLabel | "all">("all");
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [pendingDetailHeight, setPendingDetailHeight] = useState<number | null>(null);
+  const messageListRef = useRef<HTMLElement | null>(null);
+  const messageDetailRef = useRef<HTMLElement | null>(null);
+  const pendingScrollRef = useRef<{
+    listScrollTop: number;
+    windowScrollX: number;
+    windowScrollY: number;
+  } | null>(null);
 
   const messages = useInfiniteQuery({
     queryKey: ["email-triage-messages", statusFilter, labelFilter],
@@ -66,9 +74,28 @@ export function EmailTriageWorkspace() {
   });
 
   const clearPrivateDetail = () => {
+    setPendingDetailHeight(null);
+    pendingScrollRef.current = null;
     setSelectedRecordId(null);
     queryClient.removeQueries({ queryKey: ["email-triage-message"] });
   };
+
+  useLayoutEffect(() => {
+    const pendingScroll = pendingScrollRef.current;
+    if (!pendingScroll) {
+      return;
+    }
+    if (messageListRef.current) {
+      messageListRef.current.scrollTop = pendingScroll.listScrollTop;
+    }
+    if (
+      window.scrollX !== pendingScroll.windowScrollX ||
+      window.scrollY !== pendingScroll.windowScrollY
+    ) {
+      window.scrollTo(pendingScroll.windowScrollX, pendingScroll.windowScrollY);
+    }
+    pendingScrollRef.current = null;
+  }, [selectedRecordId]);
 
   useEffect(
     () => () => {
@@ -80,6 +107,24 @@ export function EmailTriageWorkspace() {
   const changeView = (nextView: WorkspaceView) => {
     clearPrivateDetail();
     setView(nextView);
+  };
+
+  const selectMessage = (recordId: string) => {
+    if (recordId === selectedRecordId) {
+      return;
+    }
+    pendingScrollRef.current = {
+      listScrollTop: messageListRef.current?.scrollTop ?? 0,
+      windowScrollX: window.scrollX,
+      windowScrollY: window.scrollY,
+    };
+    setPendingDetailHeight(
+      messageDetailRef.current
+        ? Math.ceil(messageDetailRef.current.getBoundingClientRect().height)
+        : null,
+    );
+    queryClient.removeQueries({ queryKey: ["email-triage-message"] });
+    setSelectedRecordId(recordId);
   };
 
   return (
@@ -151,7 +196,11 @@ export function EmailTriageWorkspace() {
           </div>
 
           <div className="triage-message-layout">
-            <section className="triage-message-list" aria-label="Triaged emails">
+            <section
+              className="triage-message-list"
+              aria-label="Triaged emails"
+              ref={messageListRef}
+            >
               <div className="triage-section-title">
                 <h2>Recent emails</h2>
                 <span>{messageItems.length} shown</span>
@@ -165,10 +214,7 @@ export function EmailTriageWorkspace() {
                 <button
                   className={selectedId === message.record_id ? "is-selected" : undefined}
                   key={message.record_id}
-                  onClick={() => {
-                    queryClient.removeQueries({ queryKey: ["email-triage-message"] });
-                    setSelectedRecordId(message.record_id);
-                  }}
+                  onClick={() => selectMessage(message.record_id)}
                   type="button"
                 >
                   <span className="triage-message-meta">
@@ -209,7 +255,16 @@ export function EmailTriageWorkspace() {
               )}
             </section>
 
-            <section className="triage-message-detail" aria-label="Selected email">
+            <section
+              className="triage-message-detail"
+              aria-label="Selected email"
+              ref={messageDetailRef}
+              style={
+                detail.isPending && pendingDetailHeight
+                  ? { minHeight: pendingDetailHeight }
+                  : undefined
+              }
+            >
               {!selectedId && <p className="triage-muted">Select an email to inspect it.</p>}
               {detail.isPending && selectedId && <p className="triage-muted">Loading email…</p>}
               {detail.isError && <p role="alert">This email is unavailable.</p>}

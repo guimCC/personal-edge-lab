@@ -203,6 +203,28 @@ describe("message-centric email-triage workspace", () => {
     expect(window.sessionStorage.length).toBe(0);
   });
 
+  it("preserves the recent-email scroll position when an email is opened", async () => {
+    window.history.replaceState(null, "", "#email-triage");
+    vi.stubGlobal("fetch", installWorkspaceApi());
+    renderApp();
+
+    const emailButton = await screen.findByRole("button", {
+      name: /subject stays text/,
+    });
+    const messageList = screen.getByRole("region", { name: "Triaged emails" });
+    const restoreScroll = vi.fn();
+    Object.defineProperty(messageList, "scrollTop", {
+      configurable: true,
+      get: () => 240,
+      set: restoreScroll,
+    });
+
+    await userEvent.click(emailButton);
+
+    expect(restoreScroll).toHaveBeenCalledWith(240);
+    expect(await screen.findByText("private-body-sentinel")).toBeVisible();
+  });
+
   it("keeps run evidence behind the diagnostics view and clears content on navigation", async () => {
     window.history.replaceState(null, "", "#email-triage");
     vi.stubGlobal("fetch", installWorkspaceApi());
