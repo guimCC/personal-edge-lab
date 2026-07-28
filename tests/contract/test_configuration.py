@@ -255,6 +255,7 @@ def test_gmail_review_requires_read_gate_and_private_refresh_directory(
 
 
 def test_api_environment_overrides(monkeypatch, tmp_path) -> None:
+    clear(monkeypatch, API_VARIABLES)
     monkeypatch.setenv("API_HOST", "127.0.0.1")
     monkeypatch.setenv("API_PORT", "8080")
     monkeypatch.setenv("API_TELEMETRY_STALE_AFTER_SECONDS", "60.5")

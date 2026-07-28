@@ -21,6 +21,7 @@ def test_entrypoint_starts_single_worker_without_reload(monkeypatch, tmp_path) -
     monkeypatch.setenv("API_PORT", "8080")
     monkeypatch.setenv("API_AUTH_ENABLED", "false")
     monkeypatch.setenv("API_AC_CONTROL_ENABLED", "false")
+    monkeypatch.setenv("GMAIL_TRIAGE_REVIEW_ENABLED", "false")
     monkeypatch.setenv("API_DOCS_ENABLED", "true")
     captured: dict[str, object] = {}
 
@@ -79,6 +80,7 @@ def test_api_process_starts_migrates_and_stops_cleanly(tmp_path) -> None:
         "API_PORT": str(port),
         "API_AUTH_ENABLED": "false",
         "API_AC_CONTROL_ENABLED": "false",
+        "GMAIL_TRIAGE_REVIEW_ENABLED": "false",
         "API_DOCS_ENABLED": "true",
         "LOG_LEVEL": "INFO",
     }
