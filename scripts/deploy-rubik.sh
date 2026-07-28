@@ -156,7 +156,7 @@ LOCAL_LLM_ENABLED_VALUE="${LOCAL_LLM_ENABLED:-false}"
 LANGFUSE_ENABLED_VALUE="${LANGFUSE_ENABLED:-false}"
 GMAIL_READ_ENABLED_VALUE="${GMAIL_READ_ENABLED:-false}"
 GMAIL_TRIAGE_ENABLED_VALUE="${GMAIL_TRIAGE_ENABLED:-false}"
-GMAIL_TRIAGE_REVIEW_ENABLED_VALUE="${GMAIL_TRIAGE_REVIEW_ENABLED:-false}"
+EMAIL_TRIAGE_WORKSPACE_ENABLED_VALUE="${EMAIL_TRIAGE_WORKSPACE_ENABLED:-${GMAIL_TRIAGE_REVIEW_ENABLED:-false}}"
 if [[ "$GMAIL_TRIAGE_ENABLED_VALUE" == "true" ]]; then
     [[ "$GMAIL_READ_ENABLED_VALUE" == "true" ]] || {
         fail "Gmail triage requires GMAIL_READ_ENABLED=true"
@@ -165,12 +165,9 @@ if [[ "$GMAIL_TRIAGE_ENABLED_VALUE" == "true" ]]; then
         fail "Gmail triage requires LOCAL_LLM_ENABLED=true"
     }
 fi
-if [[ "$GMAIL_TRIAGE_REVIEW_ENABLED_VALUE" == "true" ]]; then
+if [[ "$EMAIL_TRIAGE_WORKSPACE_ENABLED_VALUE" == "true" ]]; then
     [[ "$AUTH_ENABLED" == "true" ]] || {
-        fail "Gmail triage review requires API_AUTH_ENABLED=true"
-    }
-    [[ "$GMAIL_READ_ENABLED_VALUE" == "true" ]] || {
-        fail "Gmail triage review requires GMAIL_READ_ENABLED=true"
+        fail "email triage workspace requires API_AUTH_ENABLED=true"
     }
 fi
 if [[ "$AUTH_ENABLED" == "true" ]]; then
@@ -397,19 +394,6 @@ try:
 except (AssertionError, KeyError, OSError, UnicodeDecodeError, json.JSONDecodeError):
     raise SystemExit("Gmail credential files contain invalid private JSON") from None
 PY
-    if [[ "$GMAIL_TRIAGE_REVIEW_ENABLED_VALUE" == "true" ]]; then
-        GMAIL_TOKEN_DIRECTORY="$(dirname -- "$GMAIL_TOKEN_FILE")"
-        [[ ! -L "$GMAIL_TOKEN_DIRECTORY" && -d "$GMAIL_TOKEN_DIRECTORY" ]] || {
-            fail "GMAIL_TOKEN_FILE parent must be a real directory"
-        }
-        [[ "$(stat -c '%a' "$GMAIL_TOKEN_DIRECTORY")" == "700" ]] || {
-            fail "GMAIL_TOKEN_FILE parent must have mode 700"
-        }
-        [[ "$(stat -c '%U' "$GMAIL_TOKEN_DIRECTORY")" == "$(id -un)" ]] || {
-            fail "GMAIL_TOKEN_FILE parent must be owned by the deployment user"
-        }
-        unset GMAIL_TOKEN_DIRECTORY
-    fi
     unset GMAIL_FILE_SETTING GMAIL_FILE_PATH
 fi
 
@@ -447,6 +431,7 @@ git status --short >"$DEPLOY_BACKUP/working-tree.txt"
 
 if [[ -f "$DATABASE_FILE" ]]; then
     sqlite_live ".backup '$DEPLOY_BACKUP/telemetry.db'"
+    chmod 0600 "$DEPLOY_BACKUP/telemetry.db"
     sqlite_live 'PRAGMA integrity_check;' | grep -qx 'ok'
     sqlite_live \
         'SELECT "temperature_readings", COUNT(*) FROM temperature_readings
@@ -473,6 +458,17 @@ if [[ -f "$DATABASE_FILE" ]]; then
              FROM email_triage_evaluations
              UNION ALL SELECT "email_triage_attempts", COUNT(*)
              FROM email_triage_attempts;' \
+            >>"$DEPLOY_BACKUP/row-counts.txt"
+    fi
+    if sqlite_live \
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_triage_messages';" \
+        | grep -qx '1'; then
+        sqlite_live \
+            'SELECT "email_triage_messages", COUNT(*) FROM email_triage_messages
+             UNION ALL SELECT "email_triage_content_snapshots", COUNT(*)
+             FROM email_triage_content_snapshots
+             UNION ALL SELECT "email_triage_evaluation_content", COUNT(*)
+             FROM email_triage_evaluation_content;' \
             >>"$DEPLOY_BACKUP/row-counts.txt"
     fi
 fi

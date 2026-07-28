@@ -1216,3 +1216,83 @@ rm /home/ubuntu/personal-edge-lab/secrets/gmail-token.json
 Set `GMAIL_TRIAGE_REVIEW_ENABLED=false`, reinstall the retained `0.13.0` wheel, restore the previous
 API unit, and restart the API. The canonical token remains compatible with the CLI. No database,
 Gmail, trace, or prompt rollback is required.
+
+## WP8.1 message-centric workspace deployment (`0.15.0`)
+
+Release `0.15.0` adds migration `007_email_triage_messages`. The migration is additive and never
+deletes existing evidence. New triage runs retain query text, sender, subject, bounded normalized
+content, exact model input, and recommendation reason in owner-only SQLite and deployment backups.
+
+### 1. Deploy with the workspace disabled
+
+Set:
+
+```dotenv
+EMAIL_TRIAGE_WORKSPACE_ENABLED=false
+```
+
+`GMAIL_TRIAGE_REVIEW_ENABLED` is a deprecated `0.15.0` fallback and should also be false while
+validating the disabled surface.
+
+```bash
+git pull --ff-only
+./scripts/deploy-rubik.sh
+sqlite3 data/telemetry.db \
+  "SELECT version FROM schema_migrations WHERE version='007_email_triage_messages';"
+sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
+curl -k -i https://rubik-edge-01.local/api/v1/email-triage/messages
+```
+
+The migration must be present, integrity must return `ok`, navigation must be absent, and the
+endpoint must return 404 with no-store headers. The deployment backup directory and database copy
+must be owner-only.
+
+### 2. Explicitly reset disposable development triage data
+
+This is an owner action, not a deployment or migration step. Ensure no triage command is running,
+then execute:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli reset-development-data \
+  --confirm DELETE-ALL-EMAIL-TRIAGE-DATA
+```
+
+The command creates `data/backups/telemetry-triage-reset-<UTC>.db` with mode `0600`, deletes only
+email-triage rows, and preserves telemetry, alerts, authentication, command audit, notifications,
+and `schema_migrations`. It refuses unfinished triage runs and an inexact confirmation.
+
+### 3. Enable and populate the workspace
+
+Set:
+
+```dotenv
+API_AUTH_ENABLED=true
+EMAIL_TRIAGE_WORKSPACE_ENABLED=true
+```
+
+Viewing does not require Gmail, UNO Q, triage, or Langfuse. Creating new records still uses the
+accepted manual command and its three gates:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli triage \
+  --query "in:inbox newer_than:7d" \
+  --limit 3
+```
+
+Deploy, log in, and open `#email-triage`. Confirm the default **Emails** view presents one row per
+message with sender, subject, timestamp, recommendation, and reason. Opening one row must return
+stored content without a Gmail API request. **Diagnostics** retains runs, reuse, failures,
+interruptions, prompt/model evidence, timing, and traces.
+
+Repeat the command to prove reuse creates no duplicate message, provider call, or trace. Run once
+with `--new-attempt` to prove a newer success updates the one message projection while both
+attempts remain in Diagnostics.
+
+Content is intentionally present in SQLite and protected backups. Confirm it remains absent from
+normal logs, real-Gmail Langfuse payloads, browser storage, URLs, and provider errors. Gmail state
+must remain unchanged.
+
+### WP8.1 rollback
+
+Set `EMAIL_TRIAGE_WORKSPACE_ENABLED=false`, reinstall `0.14.0`, and restore its API unit.
+Migration 007 and its content remain inert. Do not delete or downgrade the new tables.

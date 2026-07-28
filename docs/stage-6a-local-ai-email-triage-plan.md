@@ -1459,3 +1459,21 @@ Release `0.14.0` implements the protected shadow-review workspace:
 
 The detailed implementation, privacy controls, deployment, rollback, and pending acceptance record
 is [`stage-6a-wp8-handoff.md`](stage-6a-wp8-handoff.md).
+
+## Work Package 8.1 implementation handoff
+
+Release `0.15.0` refactors the protected surface around individual triaged emails:
+
+- migration `007_email_triage_messages` stores deduplicated messages, immutable normalized-content
+  snapshots, exact model input, query text, and complete recommendation reasons;
+- the current message projection keeps latest-processing state separate from the latest successful
+  recommendation while runs and attempts remain auditable;
+- authenticated message list/detail APIs read only SQLite and never expose Gmail identifiers;
+- `#email-triage` defaults to an email list/detail experience and moves run evidence to Diagnostics;
+- a backed-up, explicitly confirmed development-data reset is never invoked by deployment or
+  migration;
+- no review action, taxonomy change, historical import, scheduler, Telegram notification, model
+  quality claim, or Gmail mutation is introduced.
+
+The implementation and pending RUBIK acceptance record is
+[`stage-6a-wp8-1-handoff.md`](stage-6a-wp8-1-handoff.md).

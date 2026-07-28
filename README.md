@@ -265,10 +265,10 @@ python -m personal_edge_lab.apps.email_triage_cli show --run-id <run-id>
 ```
 
 The query and limit are mandatory, the limit is at most ten, and the command remains a dry run:
-it never sends, marks read, labels, archives, trashes, or otherwise changes Gmail. Sender, subject,
-label, and reason appear only on trusted stdout for a newly evaluated item. SQLite retains IDs,
-hashes, sizes, versions, timing, usage, label, and failure evidence—not the query, sender, subject,
-body, compiled prompt, raw output, or reason.
+it never sends, marks read, labels, archives, trashes, or otherwise changes Gmail. Release `0.15.0`
+stores the query, sender, subject, bounded normalized body, exact model input, label, and reason in
+owner-only SQLite so the dashboard can present useful email records. Raw MIME, attachments,
+credentials, provider bodies, and GGUF paths remain excluded.
 
 An identical successful identity is reused without another model call or trace. Use
 `--new-attempt` only when intentionally creating another auditable inference attempt. Real-Gmail
@@ -279,24 +279,28 @@ timing, and usage; full content remains restricted to checked-in synthetic fixtu
 `LOCAL_LLM_ENABLED=true`. Langfuse remains optional. The `runs` and `show` history commands require
 only the local database.
 
-## Review triage recommendations in the dashboard
+## Use the message-centric triage workspace
 
-Release `0.14.0` adds a protected `#email-triage` workspace for existing WP7 runs. The navigation
-entry appears only to an authenticated owner when `GMAIL_TRIAGE_REVIEW_ENABLED=true`. It lists
-bounded run and item evidence, labels every result as a recommendation, and states
-`Gmail labels applied: none`.
+Release `0.15.0` makes `#email-triage` email-first. The default view shows one row per triaged Gmail
+message with sender, subject, receipt time, latest successful recommendation, reason, and any newer
+processing issue. Reused and forced attempts never duplicate the email. Runs, hashes, prompts,
+usage, timing, traces, and interruption evidence remain available under **Diagnostics**.
 
-Email content is never prefetched. An explicit per-item action performs one exact read-only Gmail
-GET, repeats the WP7 normalization and 1,600-character input cap, and returns sender, subject,
-model-visible content, and any normalized remainder only when all stored hashes still match.
-Private content is rendered as text, kept only in component memory, and cleared on close,
-workspace change, logout, authentication loss, or unmount. The workspace cannot start triage,
-contact UNO Q or Langfuse, store feedback, or modify Gmail.
+Opening an email reads its stored normalized body and exact model input from SQLite; it makes no
+Gmail request. Content is rendered only as text, never prefetched, never written to browser storage,
+and cleared from query/component memory when closed or when authentication/workspace state changes.
+The workspace cannot start triage, record feedback, schedule work, or modify Gmail.
 
-Review requires `API_AUTH_ENABLED=true`, `GMAIL_READ_ENABLED=true`, and
-`GMAIL_TRIAGE_REVIEW_ENABLED=true`. The OAuth token lives in the owner-only mode-`0700`
-`secrets/gmail-oauth` directory so the API service can atomically refresh that token while every
-other secret remains read-only.
+Set `API_AUTH_ENABLED=true` and `EMAIL_TRIAGE_WORKSPACE_ENABLED=true`. Gmail, the model, triage, and
+Langfuse may all be disabled while viewing persisted messages. `GMAIL_TRIAGE_REVIEW_ENABLED` is a
+deprecated compatibility fallback for release `0.15.0`.
+
+The accepted development-only records can be removed once, explicitly and with a protected backup:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli reset-development-data \
+  --confirm DELETE-ALL-EMAIL-TRIAGE-DATA
+```
 
 ## Data and migrations
 
@@ -308,6 +312,8 @@ durable login throttling, audit attribution/idempotency, and a leased web-comman
 `005_notification_outbox` adds atomic outbound delivery, owner pause policy, retry leases, and
 delivery runtime. `006_email_triage_runs` adds durable dry-run lifecycles, unique evaluation
 identities, run items, and separately auditable inference attempts.
+`007_email_triage_messages` adds deduplicated message projections, immutable normalized-content
+snapshots, evaluation/content links, private query text, and retained recommendation reasons.
 Existing telemetry and audit rows stay in place. SQLite uses one `data/telemetry.db`; there is no
 ORM or second database process.
 

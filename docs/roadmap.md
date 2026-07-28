@@ -531,11 +531,15 @@ prompt/model/decoder, persists explicit run/item/attempt lifecycles, reuses iden
 evaluations, and preserves completed work during graceful interruption. It still performs no Gmail
 mutation and makes no classification-quality claim.
 
-Work Package 8 is implemented locally as release `0.14.0` and awaits RUBIK acceptance. It adds an
-authenticated dashboard workspace for migration-006 evidence plus one explicit exact-message Gmail
-re-read. Stored hashes must match before private content is shown; content is text-only, transient,
-and never prefetched. The workspace cannot trigger triage, retain feedback, call the model,
-schedule work, notify Telegram, or modify Gmail.
+Work Package 8 was deployed as release `0.14.0`; the owner confirmed the protected dashboard and
+explicit content view worked on RUBIK. It proved the privacy and access boundary, but operator
+feedback showed that a run-first engineering view was not useful as the daily product surface.
+
+Work Package 8.1 is implemented locally as release `0.15.0` and awaits RUBIK acceptance. It stores
+bounded normalized email content and complete recommendation reasons locally, presents one row per
+triaged email, and moves runs and attempts under Diagnostics. A later failed attempt does not erase
+the latest successful recommendation. Feedback actions, taxonomy changes, historical ingestion,
+scheduling, Telegram integration, and Gmail writes remain deferred.
 
 ## Definition of done for every stage
 
@@ -1013,7 +1017,7 @@ changed, how it was verified, decisions made, and what remains.
 ### 2026-07-28 — Protected shadow-review workspace implemented
 
 **Stage:** 6A, Work Package 8
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Accepted on RUBIK; superseded by the WP8.1 product refactor
 
 **Delivered**
 
@@ -1037,10 +1041,60 @@ changed, how it was verified, decisions made, and what remains.
 - 568 Python tests passed with one opt-in live test skipped. Ruff, formatting, Pyright, ShellCheck,
   13 frontend tests, the production frontend build, isolated package builds, wheel inspection, and
   desktop/mobile browser verification passed.
-- No RUBIK acceptance is claimed until the owner completes the deployment checklist.
+- The owner deployed the protected workspace on RUBIK, exercised it through the authenticated
+  dashboard, and confirmed the feature worked. The subsequent product review identified that the
+  run-first interaction was operationally correct but not useful enough as the long-term primary
+  email view.
 
 **Next**
 
-- Deploy `0.14.0` disabled, then enable protected review and complete the WP8 acceptance checks.
+- Replace the transient run-first review surface with the message-centric WP8.1 workspace while
+  retaining WP8's run evidence under Diagnostics.
 - Keep WP4 quality evaluation, WP9 scheduling, feedback retention, Telegram, and Gmail writes
   separate.
+
+### 2026-07-28 — Message-centric email-triage workspace implemented
+
+**Stage:** 6A, Work Package 8.1
+**Status:** Implemented locally; RUBIK acceptance pending
+
+**Delivered**
+
+- Added migration `007_email_triage_messages` with one durable projection per Gmail message,
+  immutable normalized-content snapshots, exact evaluation-to-snapshot links, retained query text,
+  and complete successful recommendation reasons.
+- Extended manual mailbox triage to persist decoded content before inference, deduplicate repeated
+  messages, reuse successful evaluations, project the newest successful forced attempt, and retain
+  an earlier recommendation when later processing fails.
+- Added authenticated, no-store message list/detail APIs using opaque local IDs and no Gmail call.
+  The prior live re-read route was removed; run and attempt evidence remains under Diagnostics.
+- Rebuilt the dashboard around individual emails by default, with sender, subject, timestamp,
+  recommendation, reason, issue state, on-open stored content, and explicit memory clearing.
+- Added the exact-confirmation `reset-development-data` owner command with an owner-only SQLite
+  backup, unfinished-work refusal, triage-only transactional deletion, and rollback on failure.
+- Prepared the package, API/frontend version contract, configuration, deployment guard, rollback,
+  wheel inspection, architecture, and handoff for release `0.15.0`.
+
+**Privacy**
+
+- Authorized local SQLite and protected backups now contain query, sender, subject, bounded
+  normalized content, exact model input, label, and reason. Raw MIME, attachments, credentials,
+  provider bodies, and GGUF paths remain excluded.
+- Normal logs and real-Gmail Langfuse traces remain redacted. Message details are not prefetched,
+  cached by the browser, placed in URLs/storage, or retained after close, navigation, logout, or
+  authentication loss.
+
+**Verification**
+
+- The complete local Python, Ruff, formatting, Pyright, ShellCheck, frontend, isolated build, wheel
+  inspection, Git-diff, desktop, and mobile gates passed. Exact final test counts are recorded in
+  the WP8.1 handoff.
+- RUBIK acceptance remains owner-controlled and is not inferred from local verification.
+
+**Next**
+
+- Deploy `0.15.0` disabled, verify migration 007, perform the one-time explicitly confirmed
+  development-data reset, then enable the workspace and populate it with a bounded three-message
+  triage.
+- Continue to keep taxonomy/quality, historical ingestion, review feedback, scheduling, Telegram,
+  and Gmail writes in separate future work packages.

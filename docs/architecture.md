@@ -260,7 +260,7 @@ Migration `006_email_triage_runs` separates runs, run items, unique evaluation i
 actual inference attempts. `BEGIN IMMEDIATE` serializes identity reservation; one partial unique
 index prevents concurrent active attempts for the same identity. Reused successful attempts do not
 contact UNO Q or create a trace. SQLite stores IDs, hashes, lengths, versions, label and operational
-evidence but no raw query, sender, subject, body, compiled prompt, output, or reason.
+evidence. That evidence-only constraint was the accepted WP7 baseline.
 
 WP8 adds a protected read-only presentation path without changing that durable boundary:
 
@@ -277,6 +277,26 @@ fingerprints, label, decision hash, reason length, versions, usage, timing, trac
 failure evidence. The exact-content endpoint returns private content only after identity
 verification, adds no-store headers, and makes one Gmail call. It cannot list mail, invoke the
 model, contact Langfuse or Telegram, persist content, or mutate Gmail.
+
+WP8.1 replaces the transient presentation boundary with a durable product projection:
+
+```text
+decoded Gmail document -> immutable content snapshot -> evaluation/attempt history
+                                              \-----> one current message projection
+authenticated dashboard -> bounded message query -> stored text-only detail
+```
+
+Migration `007_email_triage_messages` stores one internal message per Gmail message ID plus
+immutable normalized-content snapshots. Each new evaluation links to the exact snapshot it used.
+The current projection points to the latest processing outcome and separately to the latest
+successful attempt, so a later failure never destroys a prior recommendation. Runs and attempts
+remain the execution ledger under Diagnostics.
+
+The protected message API exposes only an opaque local record ID. It reads SQLite and has no Gmail,
+model, Langfuse, Telegram, or Gmail-write dependency. Sender, subject, bounded normalized content,
+exact model input, query text, label, and reason are authorized local data; raw MIME, attachments,
+credentials, provider bodies, and GGUF paths remain excluded. Real-Gmail Langfuse traces remain
+redacted even though owner-only SQLite and backups retain product content.
 
 ## Adding capability
 
