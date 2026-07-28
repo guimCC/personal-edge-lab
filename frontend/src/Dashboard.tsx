@@ -31,7 +31,7 @@ interface DashboardProps {
 export default function Dashboard({ session, onLogout }: DashboardProps) {
   const [windowOption, setWindowOption] = useState<WindowOption>("6h");
   const [activeWorkspace, setActiveWorkspace] = useState<"climate" | "email-triage">(
-    window.location.hash === "#email-triage" && session.email_triage_review_enabled
+    window.location.hash === "#email-triage" && session.email_triage_workspace_enabled
       ? "email-triage"
       : "climate",
   );
@@ -39,18 +39,18 @@ export default function Dashboard({ session, onLogout }: DashboardProps) {
   useEffect(() => {
     const updateWorkspace = () => {
       const requested =
-        window.location.hash === "#email-triage" && session.email_triage_review_enabled
+        window.location.hash === "#email-triage" && session.email_triage_workspace_enabled
           ? "email-triage"
           : "climate";
       setActiveWorkspace(requested);
-      if (window.location.hash === "#email-triage" && !session.email_triage_review_enabled) {
+      if (window.location.hash === "#email-triage" && !session.email_triage_workspace_enabled) {
         window.location.hash = "#climate";
       }
     };
     window.addEventListener("hashchange", updateWorkspace);
     updateWorkspace();
     return () => window.removeEventListener("hashchange", updateWorkspace);
-  }, [session.email_triage_review_enabled]);
+  }, [session.email_triage_workspace_enabled]);
 
   const climateActive = activeWorkspace === "climate";
   const health = useQuery({
@@ -112,7 +112,7 @@ export default function Dashboard({ session, onLogout }: DashboardProps) {
     <LabShell
       actorId={session.actor_id}
       authEnabled={session.auth_enabled}
-      emailTriageEnabled={session.email_triage_review_enabled}
+      emailTriageEnabled={session.email_triage_workspace_enabled}
       activeWorkspace={activeWorkspace}
       workspaceLabel={climateActive ? "Climate" : "Email triage"}
       systemLabel={systemLabel}

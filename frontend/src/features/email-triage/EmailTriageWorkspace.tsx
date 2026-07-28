@@ -1,47 +1,324 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
-  ApiError,
-  getTriageReviewContent,
+  getTriageMessage,
+  getTriageMessages,
   getTriageRun,
   getTriageRuns,
 } from "../../api/client";
 import type {
-  TriageReviewContent,
+  TriageLabel,
+  TriageMessageStatusFilter,
   TriageRunFilter,
-  TriageRunItem,
 } from "../../api/contracts";
 import { formatDateTime } from "../../shared/format";
 
-type ItemFilter = "recommendations" | "reused" | "failures";
+type WorkspaceView = "emails" | "diagnostics";
+type DiagnosticItemFilter = "recommendations" | "reused" | "failures";
 
-function shortFingerprint(value: string | null): string {
-  return value ? value.slice(0, 16) : "unavailable";
-}
+const LABELS: Array<TriageLabel | "all"> = [
+  "all",
+  "work",
+  "billing",
+  "notification",
+  "newsletter",
+  "personal",
+  "other",
+];
 
 function timing(value: number | null): string {
   return value == null ? "unavailable" : `${value.toFixed(3)}s`;
 }
 
-function itemMatches(item: TriageRunItem, filter: ItemFilter): boolean {
-  if (filter === "recommendations") {
-    return item.status === "succeeded";
-  }
-  if (filter === "reused") {
-    return item.status === "reused";
-  }
-  return item.status === "failed" || item.status === "interrupted";
+function shortFingerprint(value: string | null): string {
+  return value ? value.slice(0, 16) : "unavailable";
 }
 
 export function EmailTriageWorkspace() {
-  const [runFilter, setRunFilter] = useState<TriageRunFilter>("all");
-  const [itemFilter, setItemFilter] = useState<ItemFilter>("recommendations");
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [privateContent, setPrivateContent] = useState<TriageReviewContent | null>(null);
-  const [privateLoading, setPrivateLoading] = useState<number | null>(null);
-  const [privateError, setPrivateError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const [view, setView] = useState<WorkspaceView>("emails");
+  const [statusFilter, setStatusFilter] = useState<TriageMessageStatusFilter>("all");
+  const [labelFilter, setLabelFilter] = useState<TriageLabel | "all">("all");
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
 
+  const messages = useInfiniteQuery({
+    queryKey: ["email-triage-messages", statusFilter, labelFilter],
+    queryFn: ({ pageParam }) =>
+      getTriageMessages(statusFilter, labelFilter, pageParam, 20),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+  const messageItems = useMemo(
+    () => messages.data?.pages.flatMap((page) => page.items) ?? [],
+    [messages.data],
+  );
+  const selectedId = selectedRecordId;
+  const detail = useQuery({
+    queryKey: ["email-triage-message", selectedId],
+    queryFn: () => getTriageMessage(selectedId ?? ""),
+    enabled: view === "emails" && selectedId !== null,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+
+  const clearPrivateDetail = () => {
+    setSelectedRecordId(null);
+    queryClient.removeQueries({ queryKey: ["email-triage-message"] });
+  };
+
+  useEffect(
+    () => () => {
+      queryClient.removeQueries({ queryKey: ["email-triage-message"] });
+    },
+    [queryClient],
+  );
+
+  const changeView = (nextView: WorkspaceView) => {
+    clearPrivateDetail();
+    setView(nextView);
+  };
+
+  return (
+    <section className="triage-workspace" aria-labelledby="triage-workspace-title">
+      <header className="triage-heading">
+        <div>
+          <p className="overline">PERSONAL EMAIL WORKSPACE</p>
+          <h1 id="triage-workspace-title">Email triage</h1>
+          <p>See the emails that entered triage and the latest recommendation for each one.</p>
+        </div>
+        <div className="triage-safety" role="status">
+          <strong>Gmail labels applied: none</strong>
+          <span>Read-only · stored locally on RUBIK</span>
+        </div>
+      </header>
+
+      <nav className="triage-view-tabs" aria-label="Email triage views">
+        <button
+          className={view === "emails" ? "is-selected" : undefined}
+          onClick={() => changeView("emails")}
+          type="button"
+        >
+          Emails
+        </button>
+        <button
+          className={view === "diagnostics" ? "is-selected" : undefined}
+          onClick={() => changeView("diagnostics")}
+          type="button"
+        >
+          Diagnostics
+        </button>
+      </nav>
+
+      {view === "emails" ? (
+        <>
+          <div className="triage-message-filters" aria-label="Email filters">
+            <div className="triage-filters">
+              {(["all", "recommendations", "issues"] as const).map((value) => (
+                <button
+                  className={statusFilter === value ? "is-selected" : undefined}
+                  key={value}
+                  onClick={() => {
+                    clearPrivateDetail();
+                    setStatusFilter(value);
+                  }}
+                  type="button"
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+            <label>
+              Label
+              <select
+                aria-label="Filter by label"
+                onChange={(event) => {
+                  clearPrivateDetail();
+                  setLabelFilter(event.target.value as TriageLabel | "all");
+                }}
+                value={labelFilter}
+              >
+                {LABELS.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="triage-message-layout">
+            <section className="triage-message-list" aria-label="Triaged emails">
+              <div className="triage-section-title">
+                <h2>Recent emails</h2>
+                <span>{messageItems.length} shown</span>
+              </div>
+              {messages.isPending && <p className="triage-muted">Loading emails…</p>}
+              {messages.isError && <p role="alert">Triaged emails are unavailable.</p>}
+              {!messages.isPending && messageItems.length === 0 && (
+                <p className="triage-muted">No triaged emails match this view.</p>
+              )}
+              {messageItems.map((message) => (
+                <button
+                  className={selectedId === message.record_id ? "is-selected" : undefined}
+                  key={message.record_id}
+                  onClick={() => {
+                    queryClient.removeQueries({ queryKey: ["email-triage-message"] });
+                    setSelectedRecordId(message.record_id);
+                  }}
+                  type="button"
+                >
+                  <span className="triage-message-meta">
+                    <strong>{message.sender}</strong>
+                    <time dateTime={message.received_at_utc}>
+                      {formatDateTime(message.received_at_utc)}
+                    </time>
+                  </span>
+                  <span className="triage-message-subject">
+                    {message.subject || "(no subject)"}
+                  </span>
+                  <span className="triage-message-recommendation">
+                    {message.label ? (
+                      <mark>Recommendation · {message.label}</mark>
+                    ) : (
+                      <em>No recommendation</em>
+                    )}
+                    {message.latest_failure_category && (
+                      <em className="triage-issue">
+                        Latest attempt: {message.latest_failure_category}
+                      </em>
+                    )}
+                  </span>
+                  {message.reason_preview && (
+                    <span className="triage-message-reason">{message.reason_preview}</span>
+                  )}
+                </button>
+              ))}
+              {messages.hasNextPage && (
+                <button
+                  className="triage-load-more"
+                  disabled={messages.isFetchingNextPage}
+                  onClick={() => messages.fetchNextPage()}
+                  type="button"
+                >
+                  {messages.isFetchingNextPage ? "Loading…" : "Load more emails"}
+                </button>
+              )}
+            </section>
+
+            <section className="triage-message-detail" aria-label="Selected email">
+              {!selectedId && <p className="triage-muted">Select an email to inspect it.</p>}
+              {detail.isPending && selectedId && <p className="triage-muted">Loading email…</p>}
+              {detail.isError && <p role="alert">This email is unavailable.</p>}
+              {detail.data && (
+                <article>
+                  <header>
+                    <div>
+                      <p className="overline">TRIAGED EMAIL</p>
+                      <h2>{detail.data.summary.subject || "(no subject)"}</h2>
+                      <p>
+                        {detail.data.summary.sender} ·{" "}
+                        {formatDateTime(detail.data.summary.received_at_utc)}
+                      </p>
+                    </div>
+                    <button type="button" onClick={clearPrivateDetail}>
+                      Close and clear
+                    </button>
+                  </header>
+
+                  <section className="triage-decision" aria-label="Recommendation">
+                    <span>Recommendation</span>
+                    <strong>{detail.data.summary.label ?? "Unavailable"}</strong>
+                    <p>
+                      {detail.data.summary.reason_preview ??
+                        "The latest attempt did not produce a recommendation."}
+                    </p>
+                    {detail.data.summary.latest_failure_category && (
+                      <p className="triage-failure">
+                        Latest processing issue:{" "}
+                        {detail.data.summary.latest_failure_category}
+                      </p>
+                    )}
+                  </section>
+
+                  <section className="triage-content">
+                    <h3>Content seen by the model</h3>
+                    <pre>{detail.data.model_input}</pre>
+                    {detail.data.normalized_text.length > detail.data.model_input.length && (
+                      <details>
+                        <summary>
+                          Remaining normalized email (
+                          {detail.data.normalized_text.length - detail.data.model_input.length}{" "}
+                          characters)
+                        </summary>
+                        <pre>
+                          {detail.data.normalized_text.slice(detail.data.model_input.length)}
+                        </pre>
+                      </details>
+                    )}
+                  </section>
+
+                  <details className="triage-technical">
+                    <summary>Technical details</summary>
+                    <dl>
+                      <div>
+                        <dt>Model</dt>
+                        <dd>{detail.data.technical.model_alias ?? "unavailable"}</dd>
+                      </div>
+                      <div>
+                        <dt>Prompt</dt>
+                        <dd>
+                          {detail.data.technical.prompt_source ?? "unavailable"} /{" "}
+                          {detail.data.technical.prompt_version ?? "unavailable"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Usage</dt>
+                        <dd>
+                          {detail.data.technical.total_tokens == null
+                            ? "unavailable"
+                            : `${detail.data.technical.prompt_tokens}/${
+                                detail.data.technical.completion_tokens
+                              }/${detail.data.technical.total_tokens}`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Timing</dt>
+                        <dd>{timing(detail.data.technical.total_seconds)}</dd>
+                      </div>
+                      <div>
+                        <dt>Trace</dt>
+                        <dd>{detail.data.technical.trace_id ? "available" : "unavailable"}</dd>
+                      </div>
+                      <div>
+                        <dt>Normalization</dt>
+                        <dd>
+                          {detail.data.content_source} · {detail.data.normalized_text.length}{" "}
+                          characters
+                        </dd>
+                      </div>
+                    </dl>
+                  </details>
+                </article>
+              )}
+            </section>
+          </div>
+        </>
+      ) : (
+        <TriageDiagnostics />
+      )}
+    </section>
+  );
+}
+
+function TriageDiagnostics() {
+  const [runFilter, setRunFilter] = useState<TriageRunFilter>("all");
+  const [itemFilter, setItemFilter] =
+    useState<DiagnosticItemFilter>("recommendations");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const runs = useQuery({
     queryKey: ["email-triage-runs", runFilter],
     queryFn: () => getTriageRuns(runFilter),
@@ -57,228 +334,122 @@ export function EmailTriageWorkspace() {
     refetchOnWindowFocus: false,
   });
   const visibleItems = useMemo(
-    () => (detail.data?.items ?? []).filter((item) => itemMatches(item, itemFilter)),
+    () =>
+      (detail.data?.items ?? []).filter((item) => {
+        if (itemFilter === "recommendations") return item.status === "succeeded";
+        if (itemFilter === "reused") return item.status === "reused";
+        return item.status === "failed" || item.status === "interrupted";
+      }),
     [detail.data, itemFilter],
   );
 
-  const loadContent = async (item: TriageRunItem) => {
-    if (!selectedId) return;
-    setPrivateContent(null);
-    setPrivateError(null);
-    setPrivateLoading(item.ordinal);
-    try {
-      setPrivateContent(await getTriageReviewContent(selectedId, item.ordinal));
-    } catch (error) {
-      setPrivateError(
-        error instanceof ApiError
-          ? "Private email content is unavailable for this item."
-          : "The private-content response was invalid.",
-      );
-    } finally {
-      setPrivateLoading(null);
-    }
-  };
-
-  const closeContent = () => {
-    setPrivateContent(null);
-    setPrivateError(null);
-  };
-
   return (
-    <section className="triage-workspace" aria-labelledby="triage-workspace-title">
-      <header className="triage-heading">
+    <section className="triage-diagnostics" aria-label="Email triage diagnostics">
+      <header>
         <div>
-          <p className="overline">SHADOW REVIEW</p>
-          <h1 id="triage-workspace-title">Email triage</h1>
-          <p>Review durable recommendations from manual runs. This workspace cannot run triage.</p>
+          <p className="overline">ENGINEERING EVIDENCE</p>
+          <h2>Diagnostics</h2>
         </div>
-        <div className="triage-safety" role="status">
-          <strong>Gmail labels applied: none</strong>
-          <span>Read-only · content loads only when requested</span>
+        <div className="triage-filters" aria-label="Run filters">
+          {(["all", "completed", "issues", "interrupted"] as const).map((value) => (
+            <button
+              className={runFilter === value ? "is-selected" : undefined}
+              key={value}
+              onClick={() => {
+                setRunFilter(value);
+                setSelectedRunId(null);
+              }}
+              type="button"
+            >
+              {value}
+            </button>
+          ))}
         </div>
       </header>
 
-      <div className="triage-filters" aria-label="Run filters">
-        {(["all", "completed", "issues", "interrupted"] as const).map((value) => (
-          <button
-            className={runFilter === value ? "is-selected" : undefined}
-            key={value}
-            onClick={() => {
-              setRunFilter(value);
-              setSelectedRunId(null);
-              closeContent();
-            }}
-            type="button"
-          >
-            {value}
-          </button>
-        ))}
-      </div>
-
       <div className="triage-layout">
-        <section className="triage-runs" aria-labelledby="triage-runs-title">
+        <section className="triage-runs" aria-label="Recent diagnostic runs">
           <div className="triage-section-title">
-            <h2 id="triage-runs-title">Recent runs</h2>
+            <h3>Recent runs</h3>
             <span>{runs.data?.count ?? 0} shown</span>
           </div>
-          {runs.isPending && <p className="triage-muted">Loading evidence…</p>}
-          {runs.isError && <p role="alert">Run evidence is unavailable.</p>}
-          {runs.data?.items.length === 0 && <p className="triage-muted">No matching runs.</p>}
-          <div className="triage-run-list">
-            {runs.data?.items.map((run) => (
-              <button
-                className={selectedId === run.run_id ? "is-selected" : undefined}
-                key={run.run_id}
-                onClick={() => {
-                  setSelectedRunId(run.run_id);
-                  closeContent();
-                }}
-                type="button"
-              >
-                <span className="triage-run-status">{run.status.replaceAll("_", " ")}</span>
-                <strong>{formatDateTime(run.requested_at_utc)}</strong>
-                <span>Query {shortFingerprint(run.query_sha256)}</span>
-                <span>
-                  {run.document_count} documents · {run.succeeded_count} new ·{" "}
-                  {run.reused_count} reused · {run.failed_count + run.interrupted_count} issues
-                </span>
-                {run.force_new_attempt && <em>Forced attempt</em>}
-              </button>
-            ))}
-          </div>
+          {runs.data?.items.map((run) => (
+            <button
+              className={selectedId === run.run_id ? "is-selected" : undefined}
+              key={run.run_id}
+              onClick={() => setSelectedRunId(run.run_id)}
+              type="button"
+            >
+              <span>{run.status.replaceAll("_", " ")}</span>
+              <strong>{formatDateTime(run.requested_at_utc)}</strong>
+              <small>
+                {run.document_count} messages · {run.succeeded_count} new ·{" "}
+                {run.reused_count} reused · {run.failed_count + run.interrupted_count} issues
+              </small>
+            </button>
+          ))}
         </section>
 
-        <section className="triage-detail" aria-labelledby="triage-detail-title">
-          <div className="triage-section-title">
-            <div>
-              <p className="overline">RUN DETAIL</p>
-              <h2 id="triage-detail-title">
-                {selectedId ? shortFingerprint(selectedId) : "Select a run"}
-              </h2>
-            </div>
-            {detail.data && <span>{detail.data.run.status.replaceAll("_", " ")}</span>}
-          </div>
-          {detail.isPending && selectedId && <p className="triage-muted">Loading items…</p>}
-          {detail.isError && <p role="alert">Run detail is unavailable.</p>}
+        <section className="triage-detail" aria-label="Diagnostic run detail">
+          {!detail.data && <p className="triage-muted">Select a run.</p>}
           {detail.data && (
             <>
+              <header className="triage-section-title">
+                <div>
+                  <p className="overline">RUN DETAIL</p>
+                  <h3>{shortFingerprint(detail.data.run.run_id)}</h3>
+                </div>
+                <span>{detail.data.run.status.replaceAll("_", " ")}</span>
+              </header>
               <dl className="triage-run-evidence">
                 <div>
-                  <dt>Requested</dt>
-                  <dd>{detail.data.run.requested_limit}</dd>
+                  <dt>Query</dt>
+                  <dd>{detail.data.run.query_text ?? "Legacy query unavailable"}</dd>
                 </div>
                 <div>
                   <dt>Documents</dt>
                   <dd>{detail.data.run.document_count}</dd>
                 </div>
                 <div>
-                  <dt>Retrieval failures</dt>
-                  <dd>{detail.data.run.retrieval_failure_count}</dd>
-                </div>
-                <div>
-                  <dt>Query fingerprint</dt>
-                  <dd>{shortFingerprint(detail.data.run.query_sha256)}</dd>
+                  <dt>Forced attempt</dt>
+                  <dd>{detail.data.run.force_new_attempt ? "yes" : "no"}</dd>
                 </div>
               </dl>
-
-              <div className="triage-filters triage-item-filters" aria-label="Item filters">
+              <div className="triage-filters" aria-label="Diagnostic item filters">
                 {(["recommendations", "reused", "failures"] as const).map((value) => (
                   <button
                     className={itemFilter === value ? "is-selected" : undefined}
                     key={value}
-                    onClick={() => {
-                      setItemFilter(value);
-                      closeContent();
-                    }}
+                    onClick={() => setItemFilter(value)}
                     type="button"
                   >
                     {value}
                   </button>
                 ))}
               </div>
-
               <div className="triage-item-list">
-                {visibleItems.length === 0 && (
-                  <p className="triage-muted">No items match this view.</p>
-                )}
                 {visibleItems.map((item) => (
                   <article className="triage-item" key={item.ordinal}>
                     <header>
-                      <div>
-                        <span>ITEM {String(item.ordinal).padStart(2, "0")}</span>
-                        <strong>{item.status}</strong>
-                      </div>
-                      {item.label && <mark>Recommendation · {item.label}</mark>}
+                      <strong>Item {item.ordinal}</strong>
+                      <span>{item.status}</span>
                     </header>
-                    <dl>
-                      <div>
-                        <dt>Message fingerprint</dt>
-                        <dd>{shortFingerprint(item.message_fingerprint)}</dd>
-                      </div>
-                      <div>
-                        <dt>Received</dt>
-                        <dd>
-                          {item.received_at_utc
-                            ? formatDateTime(item.received_at_utc)
-                            : "unavailable"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Prompt</dt>
-                        <dd>
-                          {item.prompt_source ?? "unavailable"} /{" "}
-                          {item.prompt_version ?? "unavailable"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Profile / model</dt>
-                        <dd>
-                          {item.profile_version ?? "unavailable"} /{" "}
-                          {item.model_alias ?? "unavailable"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Decision evidence</dt>
-                        <dd>
-                          {shortFingerprint(item.decision_sha256)} · reason{" "}
-                          {item.reason_chars ?? "unavailable"} chars
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Trace</dt>
-                        <dd>{item.trace_id ? "available" : "unavailable"}</dd>
-                      </div>
-                      <div>
-                        <dt>Usage</dt>
-                        <dd>
-                          {item.total_tokens == null
-                            ? "unavailable"
-                            : `${item.prompt_tokens}/${item.completion_tokens}/${item.total_tokens}`}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Timing</dt>
-                        <dd>
-                          queue {timing(item.queue_wait_seconds)} · provider{" "}
-                          {timing(item.provider_seconds)} · total {timing(item.total_seconds)}
-                        </dd>
-                      </div>
-                    </dl>
+                    <p>
+                      {item.label ? `Recommendation: ${item.label}` : "No recommendation"}
+                    </p>
                     {item.failure_category && (
                       <p className="triage-failure">Failure: {item.failure_category}</p>
                     )}
-                    {item.review_available && (
-                      <button
-                        className="triage-load-content"
-                        disabled={privateLoading !== null}
-                        onClick={() => loadContent(item)}
-                        type="button"
-                      >
-                        {privateLoading === item.ordinal
-                          ? "Loading private content…"
-                          : "Load private email content"}
-                      </button>
-                    )}
+                    <details>
+                      <summary>Evidence</summary>
+                      <p>
+                        Prompt {item.prompt_source ?? "unavailable"} /{" "}
+                        {item.prompt_version ?? "unavailable"}
+                      </p>
+                      <p>Model {item.model_alias ?? "unavailable"}</p>
+                      <p>Total time {timing(item.total_seconds)}</p>
+                      <p>Trace {item.trace_id ? "available" : "unavailable"}</p>
+                    </details>
                   </article>
                 ))}
               </div>
@@ -286,53 +457,6 @@ export function EmailTriageWorkspace() {
           )}
         </section>
       </div>
-
-      {(privateContent || privateError) && (
-        <section className="triage-private" aria-label="Private email content">
-          <header>
-            <div>
-              <p className="overline">PRIVATE · TRANSIENT</p>
-              <h2>Email content</h2>
-            </div>
-            <button type="button" onClick={closeContent}>
-              Close and clear
-            </button>
-          </header>
-          {privateError && <p role="alert">{privateError}</p>}
-          {privateContent && (
-            <>
-              <dl>
-                <div>
-                  <dt>Sender</dt>
-                  <dd>{privateContent.sender}</dd>
-                </div>
-                <div>
-                  <dt>Subject</dt>
-                  <dd>{privateContent.subject || "(no subject)"}</dd>
-                </div>
-                <div>
-                  <dt>Identity</dt>
-                  <dd>Verified against stored hashes</dd>
-                </div>
-              </dl>
-              <h3>Content seen by the model</h3>
-              <pre>{privateContent.model_input}</pre>
-              {privateContent.normalized_remainder && (
-                <details>
-                  <summary>
-                    Normalized remainder ({privateContent.normalized_remainder.length} characters)
-                  </summary>
-                  <pre>{privateContent.normalized_remainder}</pre>
-                </details>
-              )}
-              <p className="triage-private-note">
-                Source: {privateContent.content_source} · normalized{" "}
-                {privateContent.normalized_chars} characters · Gmail changes: none
-              </p>
-            </>
-          )}
-        </section>
-      )}
     </section>
   );
 }

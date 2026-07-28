@@ -8,11 +8,14 @@ import {
   readingSchema,
   seriesSchema,
   sessionSchema,
-  triageReviewContentSchema,
+  triageMessageDetailSchema,
+  triageMessageListSchema,
   triageRunDetailSchema,
   triageRunListSchema,
   type BrowserCommand,
   type Reading,
+  type TriageLabel,
+  type TriageMessageStatusFilter,
   type TriageRunFilter,
   type WindowOption,
 } from "./contracts";
@@ -118,10 +121,29 @@ export const getTriageRun = (runId: string) =>
     { cache: "no-store" },
   );
 
-export const getTriageReviewContent = (runId: string, ordinal: number) =>
+export const getTriageMessages = (
+  status: TriageMessageStatusFilter,
+  label: TriageLabel | "all",
+  cursor: string | null = null,
+  limit = 20,
+) => {
+  const parameters = new URLSearchParams({
+    limit: String(limit),
+    status,
+    label,
+  });
+  if (cursor) parameters.set("cursor", cursor);
+  return request(
+    `/api/v1/email-triage/messages?${parameters.toString()}`,
+    triageMessageListSchema,
+    { cache: "no-store" },
+  );
+};
+
+export const getTriageMessage = (recordId: string) =>
   request(
-    `/api/v1/email-triage/runs/${encodeURIComponent(runId)}/items/${ordinal}/review`,
-    triageReviewContentSchema,
+    `/api/v1/email-triage/messages/${encodeURIComponent(recordId)}`,
+    triageMessageDetailSchema,
     { cache: "no-store" },
   );
 

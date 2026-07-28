@@ -18,6 +18,7 @@ export function installPreviewApi(): void {
         authenticated: true,
         auth_enabled: true,
         controls_enabled: true,
+        email_triage_workspace_enabled: true,
         email_triage_review_enabled: true,
         actor_id: "owner",
         csrf_token: "preview-csrf",
@@ -40,29 +41,73 @@ export function installPreviewApi(): void {
       failed_count: 0,
       interrupted_count: 2,
     };
-    if (url.includes("/email-triage/runs/3491124bf8254dbdb6ddd8bfe1a169f0/items/1/review")) {
+    const previewMessage = {
+      record_id: "6986e5b926582dc2a4a4a4a4a4a4a4a4",
+      received_at_utc: isoSecondsAgo(3700),
+      sender: '"Gestió Reserves Saf" <reserves.saf@example.test>',
+      subject: "Reserva",
+      label: "billing",
+      reason_preview:
+        "The email contains billing information connected to a confirmed reservation.",
+      latest_status: "succeeded",
+      latest_failure_category: null,
+      last_triaged_at_utc: isoSecondsAgo(3600),
+      model_input_truncated: true,
+      source_truncated: false,
+      has_recommendation: true,
+    };
+    if (url.endsWith(`/email-triage/messages/${previewMessage.record_id}`)) {
+      const modelInput =
+        "Your sports-facility reservation is confirmed for tomorrow at 18:00. " +
+        "Use the reservation code shown in your account if you need to cancel.";
+      const remainder =
+        " This normalized remainder was not included in the bounded model input.";
       return json({
-        run_id: previewRun.run_id,
-        ordinal: 1,
-        message_fingerprint: "6986e5b926582dc2".padEnd(64, "0"),
-        sender: '"Gestió Reserves Saf" <reserves.saf@example.test>',
-        subject: "Reserva",
-        model_input:
-          "Your sports-facility reservation is confirmed for tomorrow at 18:00. " +
-          "Use the reservation code shown in your account if you need to cancel.",
-        normalized_remainder:
-          "This normalized remainder was not included in the bounded model input.",
-        normalized_chars: 209,
-        model_input_chars: 145,
+        summary: previewMessage,
+        normalized_text: modelInput + remainder,
+        model_input: modelInput,
+        normalized_sha256: "a".repeat(64),
+        model_input_sha256: "b".repeat(64),
+        original_size_bytes: 3000,
         content_source: "plain_text",
         cleanup_flags: ["signature_removed"],
-        source_truncated: false,
-        model_input_truncated: true,
         metadata_truncated: false,
-        identity_verified: true,
-        api_call_count: 1,
-        elapsed_seconds: 0.42,
+        technical: {
+          run_id: previewRun.run_id,
+          item_ordinal: 1,
+          attempt_id: 14,
+          decision_sha256: "d".repeat(64),
+          prompt_source: "langfuse",
+          prompt_version: "1",
+          profile_version: "1.0.0",
+          taxonomy_version: "1.0.0",
+          schema_version: "1.0.0",
+          generation_parameters_version: "1.0.0",
+          provider: "llama_cpp",
+          model_alias: "qwen3-1.7b-q4-k-m",
+          trace_id: "1c68c83e3e504e9b4d2cec785dc7dafd",
+          prompt_tokens: 469,
+          completion_tokens: 40,
+          total_tokens: 509,
+          queue_wait_seconds: 0,
+          provider_seconds: 112.941,
+          total_seconds: 112.942,
+        },
         gmail_changes: "none",
+      });
+    }
+    if (url.includes("/email-triage/messages?")) {
+      const parsed = new URL(url, location.origin);
+      return json({
+        count: 1,
+        limit: 20,
+        status: parsed.searchParams.get("status") ?? "all",
+        label:
+          parsed.searchParams.get("label") === "all"
+            ? null
+            : parsed.searchParams.get("label"),
+        next_cursor: null,
+        items: [previewMessage],
       });
     }
     if (url.endsWith(`/email-triage/runs/${previewRun.run_id}`)) {
@@ -91,7 +136,6 @@ export function installPreviewApi(): void {
             completion_tokens: 40,
             total_tokens: 509,
             attempt_id: 14,
-            review_available: true,
           },
           {
             ordinal: 2,
@@ -114,7 +158,6 @@ export function installPreviewApi(): void {
             completion_tokens: null,
             total_tokens: null,
             attempt_id: null,
-            review_available: false,
           },
         ],
       });
@@ -131,7 +174,7 @@ export function installPreviewApi(): void {
     if (url === "/health") {
       return json({
         status: "healthy",
-        version: "0.14.0",
+        version: "0.15.0",
         checked_at_utc: NOW.toISOString(),
         database: { status: "healthy" },
         telemetry: {
