@@ -1184,7 +1184,7 @@ Agents working from this document must:
 | WP4. Fixture evaluation | Not started | Reproducible quality/latency report |
 | WP5. Langfuse observability | Accepted on RUBIK | Non-blocking synthetic trace contract |
 | WP6. Gmail read-only source | Accepted on RUBIK | Bounded normalized Gmail retrieval |
-| WP7. Durable dry-run pipeline | Not started | Audited Gmail-to-UNO-Q recommendations |
+| WP7. Durable dry-run pipeline | Accepted on RUBIK | Audited Gmail-to-UNO-Q recommendations |
 | WP8. Shadow-mode presentation | Not started | Human-inspectable dry-run results |
 | WP9. Scheduled shadow operation | Optional | Bounded independent worker/timer |
 
@@ -1421,7 +1421,7 @@ The detailed implementation, security, deployment, rollback, and acceptance reco
 [`stage-6a-wp6-handoff.md`](stage-6a-wp6-handoff.md). WP6 was accepted on RUBIK and personal Gmail
 on 2026-07-28.
 
-## Work Package 7 implementation handoff
+## Work Package 7 acceptance handoff
 
 Release `0.13.0` implements durable read-only triage runs:
 
@@ -1438,6 +1438,6 @@ Release `0.13.0` implements durable read-only triage runs:
   Gmail.
 
 The detailed deployment, rollback, and acceptance record is
-[`stage-6a-wp7-handoff.md`](stage-6a-wp7-handoff.md). WP7 is implemented locally and awaits RUBIK
-acceptance. WP4 quality evaluation remains deferred, and WP8 owns any broader operator review
-surface.
+[`stage-6a-wp7-handoff.md`](stage-6a-wp7-handoff.md). WP7 was accepted on RUBIK, personal Gmail,
+UNO Q, and Langfuse Cloud on 2026-07-28. WP4 quality evaluation remains deferred, and WP8 owns any
+broader operator review surface.

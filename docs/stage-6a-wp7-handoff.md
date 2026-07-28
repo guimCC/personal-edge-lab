@@ -1,7 +1,7 @@
 # Stage 6A Work Package 7 handoff
 
 **Release:** `0.13.0`
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Accepted on RUBIK, personal Gmail, UNO Q, and Langfuse Cloud on 2026-07-28
 
 ## Delivered
 
@@ -48,30 +48,41 @@
 
 ## RUBIK acceptance
 
-1. Deploy `0.13.0` with `GMAIL_TRIAGE_ENABLED=false` and verify migration 006 plus SQLite integrity.
-2. Set `GMAIL_TRIAGE_ENABLED=true` only while `GMAIL_READ_ENABLED=true` and
-   `LOCAL_LLM_ENABLED=true`.
-3. Run:
+- Release `0.13.0` deployed first with Gmail triage disabled, then with Gmail read, local inference,
+  and Gmail triage enabled. Migration `006_email_triage_runs` was present and SQLite integrity
+  returned `ok`.
+- Run `366cfdd6ca96441cb11e0ad135276344` processed three normalizable messages sequentially with
+  three successful recommendations, no item failures, three redacted traces, and
+  `Gmail changes: none`.
+- The owner repeated the exact batch and confirmed all three identities were reused quickly without
+  another UNO Q call or Langfuse trace.
+- An explicit new attempt created a separately auditable inference and distinct redacted trace.
+  Bounded `runs` and exact `show` output retained fingerprints, label, prompt/profile/model,
+  usage, timing, status, and trace evidence without durable message content or reason text.
+- Run `3491124bf8254dbdb6ddd8bfe1a169f0` received one `SIGINT`, preserved one completed inference,
+  marked two pending items interrupted, and recorded the run as interrupted. A separate powered-off
+  UNO Q run recorded sanitized connection failures plus interruption evidence and remained isolated
+  from Gmail and the rest of the platform.
+- The owner audited Gmail traces and confirmed one `classify-email` root plus one
+  `generate-triage-decision` generation, the exact managed-prompt link, tags, hashes, lengths,
+  cleanup evidence, label, usage, and timing. Real query, sender, subject, body, compiled prompt,
+  raw model output, and reason were absent.
+- Gmail read state, labels, archive state, and mailbox contents remained unchanged. The owner
+  confirmed the API, collector, alert evaluator, Telegram, dashboard, AC, Gmail retrieval, UNO Q
+  firewall, and existing platform checks remained healthy.
+- Final liveness, readiness, authenticated completion, synthetic triage, managed prompt and trace,
+  migration, and SQLite integrity checks passed.
 
-   ```bash
-   python -m personal_edge_lab.apps.email_triage_cli triage \
-     --query "in:inbox newer_than:7d" --limit 3
-   python -m personal_edge_lab.apps.email_triage_cli runs --limit 20
-   python -m personal_edge_lab.apps.email_triage_cli show --run-id <run-id>
-   ```
+## Acceptance findings
 
-4. Repeat the identical query and confirm all successful identities are reused without new UNO Q
-   calls or Langfuse traces.
-5. Repeat once with `--new-attempt` and confirm a distinct attempt and redacted trace.
-6. Interrupt a bounded run between items and confirm completed items remain successful while
-   pending items and the run are explicitly interrupted.
-7. Audit logs, SQLite, and Langfuse for absence of the raw query, sender, subject, body, reason,
-   compiled prompt, raw output, credentials, provider body, and GGUF path.
-8. Confirm Gmail read state, labels, archive state, and mailbox contents remain unchanged, then
-   rerun the existing Gmail, AI, API, collector, evaluator, Telegram, dashboard, AC, SQLite, UNO Q,
-   and firewall checks.
-
-Do not change this status to accepted until the owner confirms the observed RUBIK results.
+- Real mailbox calls took approximately 21 to 113 seconds. RUBIK therefore uses
+  `LOCAL_LLM_TIMEOUT_SECONDS=180`; the prior 60-second budget caused false timeouts on valid
+  messages.
+- One message in a ten-message Gmail diagnostic batch returned the intentionally sanitized
+  `invalid_message` item failure while nine messages normalized successfully.
+- The provisional taxonomy produced questionable recommendations and some reasons reached the
+  160-character schema boundary. WP7 accepts architecture and operational behavior only; it makes
+  no classification-quality claim.
 
 ## Rollback
 

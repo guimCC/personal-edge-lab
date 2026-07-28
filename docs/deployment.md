@@ -1055,6 +1055,15 @@ LOCAL_LLM_ENABLED=true
 GMAIL_TRIAGE_ENABLED=true
 ```
 
+The accepted RUBIK mailbox runs required this host-specific inference budget:
+
+```dotenv
+LOCAL_LLM_TIMEOUT_SECONDS=180
+```
+
+The general diagnostic default remains 60 seconds. Real mailbox items took up to approximately
+113 seconds during WP7 acceptance, so retaining the default on RUBIK would create false timeouts.
+
 `LANGFUSE_ENABLED` remains independently optional. Deploy again, then run:
 
 ```bash

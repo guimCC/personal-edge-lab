@@ -40,6 +40,37 @@ automation.
   and audit behavior are explicit.
 - Every deployed stage needs automated tests, a rollback path, and verification on the RUBIK.
 
+## Future ideas / parking lot
+
+These notes preserve ideas for discussion after the current Stage 6A work. They are not approved
+scope, are not assigned to a release or sequence, and do not authorize implementation. Each idea
+must be planned and accepted separately before it changes the active roadmap.
+
+- Surface AI and edge-node status through both the dashboard and Telegram. Candidate signals include
+  the local LLM provider/UNO Q and Arduino-class nodes, but the exact devices and the distinction
+  between liveness, readiness, reachability, and degraded status remain undecided.
+- Turn manual triage into an eventual job with two distinct operating modes:
+  - a bounded historical-backlog pass for annotating existing mail;
+  - ongoing processing when new mail arrives.
+- Before either mode becomes operational, replace the provisional taxonomy with owner-chosen labels,
+  definitions, precedence rules, examples, and an improved prompt. Allow time for deliberate
+  taxonomy design rather than treating the current generic labels as final.
+- Explore a Telegram human-review loop for newly classified messages. A notification could present
+  the recommendation and allow the owner to confirm or correct it during an initial annotation
+  period. A dashboard review surface may complement the same workflow.
+- Retain owner feedback as a private labelled dataset that can support evaluation and later prompt
+  improvement. The permitted content, storage location, retention, redaction, and deletion policy
+  remain open decisions.
+- Explore a scheduled Codex-assisted prompt-improvement workflow. It could review negative or
+  corrected examples, propose prompt changes, and compare candidates against prior and held-out
+  examples while preventing train/test leakage. Whether any change may be published automatically
+  or always requires owner approval remains undecided.
+- Explore storing annotation, dataset, and evaluation evidence in Langfuse or another suitable
+  system. The spoken reference to “Langflow” versus the currently integrated Langfuse is preserved
+  as an ambiguity to resolve before planning.
+- Integrate the eventual review, annotation, evaluation, and operational status experience cleanly
+  across Telegram and the dashboard without coupling it to the telemetry, alert, or AC loops.
+
 ## Status overview
 
 | Stage | Status | Outcome |
@@ -493,11 +524,12 @@ retrieval, body-free output/logging, unchanged mailbox state, authorization fail
 and existing-platform regression checks. It does not connect retrieved email to the model,
 Langfuse, persistence, scheduling, or mailbox actions.
 
-Work Package 7 is implemented locally for release `0.13.0` and awaits RUBIK acceptance. The owner
-authorized ephemeral real-email processing on RUBIK, evidence-only SQLite persistence, and redacted
-real-Gmail Langfuse traces. The manual dry run connects the accepted Gmail source to the existing
-prompt/model/decoder, persists explicit run/item/attempt lifecycles, and reuses identical successful
-evaluations. It still performs no Gmail mutation and makes no classification-quality claim.
+Work Package 7 was accepted on RUBIK as release `0.13.0` on 2026-07-28. The owner authorized
+ephemeral real-email processing on RUBIK, evidence-only SQLite persistence, and redacted real-Gmail
+Langfuse traces. The manual dry run connects the accepted Gmail source to the existing
+prompt/model/decoder, persists explicit run/item/attempt lifecycles, reuses identical successful
+evaluations, and preserves completed work during graceful interruption. It still performs no Gmail
+mutation and makes no classification-quality claim.
 
 ## Definition of done for every stage
 
@@ -917,10 +949,10 @@ changed, how it was verified, decisions made, and what remains.
 - Accept WP7 release `0.13.0` on RUBIK using a three-message dry run, duplicate reuse, one explicit
   new attempt, redaction audit, interruption evidence, and the existing-platform regression suite.
 
-### 2026-07-28 — Durable read-only triage runs implemented
+### 2026-07-28 — Durable read-only triage runs accepted
 
 **Stage:** 6A, Work Package 7
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Accepted on RUBIK, personal Gmail, UNO Q, and Langfuse Cloud
 
 **Delivered**
 
@@ -940,7 +972,34 @@ changed, how it was verified, decisions made, and what remains.
 - Real-Gmail traces contain hashes, lengths, cleanup evidence, label, versions, usage, and timing.
   Full trace content remains restricted to checked-in synthetic fixtures.
 
+**Verification**
+
+- Migration `006_email_triage_runs` was present on RUBIK and SQLite integrity returned `ok`.
+- A bounded three-message run completed with three results and no failures. The identical run reused
+  all successful identities without new UNO Q calls or Langfuse traces; an explicit new attempt
+  produced a separately recorded inference and redacted trace.
+- Graceful interruption preserved one completed result and marked the two remaining items plus the
+  run as interrupted. A separate powered-off UNO Q exercise produced sanitized connection failures
+  without affecting Gmail or other platform capabilities.
+- The owner confirmed Gmail state remained unchanged and audited the real-Gmail Langfuse trace as
+  one stable root plus one generation with the exact prompt link and redacted evidence only.
+- The owner confirmed the API, collector, alert evaluator, Telegram, dashboard, AC, Gmail retrieval,
+  UNO Q firewall, and existing platform behavior remained healthy.
+- Public liveness, readiness, authenticated completion, synthetic structured triage, and managed
+  prompt tracing passed after the rollout.
+
+**Known limitations**
+
+- Real mailbox inference took up to approximately 113 seconds on the accepted Qwen3 1.7B node, so
+  RUBIK uses `LOCAL_LLM_TIMEOUT_SECONDS=180` while the general operator default remains 60 seconds.
+- One message in a ten-message diagnostic batch was rejected as `invalid_message`; the other nine
+  normalized successfully. Attachment-only or otherwise unsupported content remains an explicit
+  per-item failure.
+- The provisional taxonomy produced questionable classifications and reasons that reached the
+  160-character schema boundary. These are quality findings for WP4, not accepted accuracy claims.
+
 **Next**
 
-- Deploy disabled, enable the three explicit gates, execute the WP7 acceptance run, audit SQLite,
-  logs, Langfuse, and Gmail state, then record only owner-confirmed evidence in the WP7 handoff.
+- Decide the smallest useful WP8 operator-review workflow without introducing Gmail writes.
+- Complete the deferred WP4 fixture evaluation before treating provisional recommendations as
+  reliable or beginning Stage 6B mailbox-action planning.
