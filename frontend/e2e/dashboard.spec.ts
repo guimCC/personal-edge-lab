@@ -113,7 +113,16 @@ test("renders the phone-first health overview without horizontal overflow", asyn
   await expect(page.getByRole("heading", { name: "Room climate" })).toBeVisible();
   await expect(page.getByText("24.5")).toBeVisible();
   if (testInfo.project.name === "phone") {
-    await expect(page.getByLabel("All systems operational")).toBeVisible();
+    const mobileNavigation = page.getByRole("navigation", {
+      name: "Mobile workspace sections",
+    });
+    await expect(mobileNavigation).toBeVisible();
+    await expect(mobileNavigation.getByRole("link", { name: "Climate" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(mobileNavigation.getByRole("link", { name: "Activity" })).toBeVisible();
+    await expect(mobileNavigation.getByRole("link", { name: "System" })).toBeVisible();
   } else {
     await expect(
       page.locator(".rail-status").getByText("All systems operational"),
