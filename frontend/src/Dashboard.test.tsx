@@ -1,6 +1,6 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   healthyAlerts,
@@ -13,7 +13,31 @@ import { installReactTestEnvironment, renderApp } from "./test/renderApp";
 
 installReactTestEnvironment();
 
+afterEach(() => {
+  window.history.replaceState(null, "", "#climate");
+});
+
 describe("lab dashboard", () => {
+  it("moves the desktop navigation state with climate sections", async () => {
+    installDashboardApi();
+    renderApp();
+
+    await screen.findByRole("heading", { name: "Room climate" });
+    const navigation = screen.getByRole("navigation", { name: "Workspace sections" });
+    const climate = within(navigation).getByRole("link", { name: /Climate$/ });
+    const activity = within(navigation).getByRole("link", { name: /Activity$/ });
+    const system = within(navigation).getByRole("link", { name: /System$/ });
+    expect(climate).toHaveAttribute("aria-current", "page");
+
+    await userEvent.click(activity);
+    await waitFor(() => expect(activity).toHaveAttribute("aria-current", "page"));
+    expect(climate).not.toHaveAttribute("aria-current");
+
+    await userEvent.click(system);
+    await waitFor(() => expect(system).toHaveAttribute("aria-current", "page"));
+    expect(activity).not.toHaveAttribute("aria-current");
+  });
+
   it("prioritizes climate while keeping healthy operations available", async () => {
     installDashboardApi();
     renderApp();

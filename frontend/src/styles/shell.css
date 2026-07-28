@@ -100,30 +100,16 @@
   color: var(--paper);
 }
 
-.lab-navigation a.is-active::after {
-  width: 7px;
-  height: 7px;
-  justify-self: end;
-  border-radius: 50%;
-  background: var(--lab-signal);
-  box-shadow: 0 0 0 1px #15170f;
-  content: "";
+.mobile-navigation {
+  display: none;
 }
 
 .rail-status {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
   margin-top: auto;
   padding-top: 18px;
   border-top: 1px solid var(--line);
-}
-
-.rail-status .signal {
-  width: 10px;
-  height: 10px;
-  margin-top: 3px;
-  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor, transparent 72%);
 }
 
 .rail-status div {

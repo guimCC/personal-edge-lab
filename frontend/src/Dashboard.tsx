@@ -20,8 +20,8 @@ import {
   OperationsPanel,
 } from "./features/operations/OperationsPanel";
 import { formatDateTime } from "./shared/format";
-import { overallSystemLabel, statusTone } from "./shared/status";
-import { LabShell } from "./shell/LabShell";
+import { overallSystemLabel } from "./shared/status";
+import { LabShell, type NavigationSection } from "./shell/LabShell";
 
 interface DashboardProps {
   session: Session;
@@ -30,19 +30,15 @@ interface DashboardProps {
 
 export default function Dashboard({ session, onLogout }: DashboardProps) {
   const [windowOption, setWindowOption] = useState<WindowOption>("6h");
-  const [activeWorkspace, setActiveWorkspace] = useState<"climate" | "email-triage">(
-    window.location.hash === "#email-triage" && session.email_triage_workspace_enabled
-      ? "email-triage"
-      : "climate",
+  const [activeSection, setActiveSection] = useState<NavigationSection>(
+    sectionFromHash(window.location.hash, session.email_triage_workspace_enabled),
   );
   const queryClient = useQueryClient();
   useEffect(() => {
     const updateWorkspace = () => {
-      const requested =
-        window.location.hash === "#email-triage" && session.email_triage_workspace_enabled
-          ? "email-triage"
-          : "climate";
-      setActiveWorkspace(requested);
+      setActiveSection(
+        sectionFromHash(window.location.hash, session.email_triage_workspace_enabled),
+      );
       if (window.location.hash === "#email-triage" && !session.email_triage_workspace_enabled) {
         window.location.hash = "#climate";
       }
@@ -52,7 +48,7 @@ export default function Dashboard({ session, onLogout }: DashboardProps) {
     return () => window.removeEventListener("hashchange", updateWorkspace);
   }, [session.email_triage_workspace_enabled]);
 
-  const climateActive = activeWorkspace === "climate";
+  const climateActive = activeSection !== "email-triage";
   const health = useQuery({
     queryKey: ["health"],
     queryFn: getHealth,
@@ -106,17 +102,15 @@ export default function Dashboard({ session, onLogout }: DashboardProps) {
     alerts.dataUpdatedAt,
   );
   const systemLabel = overallSystemLabel(health.data, disconnected);
-  const systemTone = statusTone(disconnected ? "degraded" : (health.data?.status ?? "unknown"));
 
   return (
     <LabShell
       actorId={session.actor_id}
       authEnabled={session.auth_enabled}
       emailTriageEnabled={session.email_triage_workspace_enabled}
-      activeWorkspace={activeWorkspace}
-      workspaceLabel={climateActive ? "Climate" : "Email triage"}
+      activeSection={activeSection}
+      workspaceLabel={WORKSPACE_LABELS[activeSection]}
       systemLabel={systemLabel}
-      systemTone={systemTone}
       version={health.data?.version}
       timezone={timezone}
       lastUpdated={
@@ -191,4 +185,20 @@ export default function Dashboard({ session, onLogout }: DashboardProps) {
       )}
     </LabShell>
   );
+}
+
+const WORKSPACE_LABELS: Record<NavigationSection, string> = {
+  climate: "Climate",
+  activity: "Activity",
+  system: "System",
+  "email-triage": "Email triage",
+};
+
+function sectionFromHash(hash: string, emailTriageEnabled: boolean): NavigationSection {
+  if (hash === "#email-triage") {
+    return emailTriageEnabled ? "email-triage" : "climate";
+  }
+  if (hash === "#activity") return "activity";
+  if (hash === "#system") return "system";
+  return "climate";
 }

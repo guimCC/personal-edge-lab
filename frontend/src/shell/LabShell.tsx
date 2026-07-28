@@ -1,15 +1,12 @@
 import type { ReactNode } from "react";
 
-import type { StatusTone } from "../shared/status";
-
 interface LabShellProps {
   actorId?: string | null;
   authEnabled: boolean;
   emailTriageEnabled: boolean;
-  activeWorkspace: "climate" | "email-triage";
+  activeSection: NavigationSection;
   workspaceLabel: string;
   systemLabel: string;
-  systemTone: StatusTone;
   version?: string;
   timezone: string;
   lastUpdated: string;
@@ -18,20 +15,28 @@ interface LabShellProps {
   children: ReactNode;
 }
 
-const NAVIGATION = [
-  { href: "#climate", index: "01", label: "Climate" },
-  { href: "#activity", index: "02", label: "Activity" },
-  { href: "#system", index: "03", label: "System" },
+export type NavigationSection = "climate" | "activity" | "system" | "email-triage";
+
+interface NavigationItem {
+  href: `#${NavigationSection}`;
+  index: string;
+  label: string;
+  section: NavigationSection;
+}
+
+const NAVIGATION: NavigationItem[] = [
+  { href: "#climate", index: "01", label: "Climate", section: "climate" },
+  { href: "#activity", index: "02", label: "Activity", section: "activity" },
+  { href: "#system", index: "03", label: "System", section: "system" },
 ];
 
 export function LabShell({
   actorId,
   authEnabled,
   emailTriageEnabled,
-  activeWorkspace,
+  activeSection,
   workspaceLabel,
   systemLabel,
-  systemTone,
   version,
   timezone,
   lastUpdated,
@@ -39,6 +44,18 @@ export function LabShell({
   onLogout,
   children,
 }: LabShellProps) {
+  const navigation = emailTriageEnabled
+    ? [
+        ...NAVIGATION,
+        {
+          href: "#email-triage" as const,
+          index: "04",
+          label: "Email triage",
+          section: "email-triage" as const,
+        },
+      ]
+    : NAVIGATION;
+
   return (
     <div className="lab-shell">
       <aside className="lab-rail">
@@ -53,33 +70,10 @@ export function LabShell({
         </a>
 
         <nav className="lab-navigation" aria-label="Workspace sections">
-          {NAVIGATION.map((item) => (
-            <a
-              className={
-                activeWorkspace === "climate" && item.href === "#climate"
-                  ? "is-active"
-                  : undefined
-              }
-              href={item.href}
-              key={item.href}
-            >
-              <span>{item.index}</span>
-              {item.label}
-            </a>
-          ))}
-          {emailTriageEnabled && (
-            <a
-              className={activeWorkspace === "email-triage" ? "is-active" : undefined}
-              href="#email-triage"
-            >
-              <span>04</span>
-              Email triage
-            </a>
-          )}
+          <NavigationLinks items={navigation} activeSection={activeSection} />
         </nav>
 
         <div className="rail-status">
-          <span className={`signal signal-${systemTone}`} aria-hidden="true" />
           <div>
             <strong>{systemLabel}</strong>
             <small>{authEnabled ? `Owner · ${actorId ?? "owner"}` : "Trusted local access"}</small>
@@ -98,8 +92,11 @@ export function LabShell({
               <small>RUBIK</small>
             </span>
           </a>
-          <span className={`signal signal-${systemTone}`} aria-label={systemLabel} />
         </header>
+
+        <nav className="mobile-navigation" aria-label="Mobile workspace sections">
+          <NavigationLinks items={navigation} activeSection={activeSection} />
+        </nav>
 
         <div className="workspace-bar">
           <div>
@@ -129,4 +126,27 @@ export function LabShell({
       </div>
     </div>
   );
+}
+
+function NavigationLinks({
+  items,
+  activeSection,
+}: {
+  items: NavigationItem[];
+  activeSection: NavigationSection;
+}) {
+  return items.map((item) => {
+    const active = item.section === activeSection;
+    return (
+      <a
+        aria-current={active ? "page" : undefined}
+        className={active ? "is-active" : undefined}
+        href={item.href}
+        key={item.href}
+      >
+        <span>{item.index}</span>
+        {item.label}
+      </a>
+    );
+  });
 }

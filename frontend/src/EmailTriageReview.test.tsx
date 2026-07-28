@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -174,6 +174,12 @@ describe("message-centric email-triage workspace", () => {
     const rendered = renderApp();
 
     expect(await screen.findByRole("heading", { name: "Email triage" })).toBeVisible();
+    const mobileNavigation = screen.getByRole("navigation", {
+      name: "Mobile workspace sections",
+    });
+    expect(
+      within(mobileNavigation).getByRole("link", { name: /Email triage/ }),
+    ).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("Gmail labels applied: none")).toBeVisible();
     expect(await screen.findByText("Recommendation · work")).toBeVisible();
     expect(
@@ -211,7 +217,10 @@ describe("message-centric email-triage workspace", () => {
     expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeVisible();
     expect(await screen.findByText(/1 messages · 1 new/)).toBeVisible();
 
-    fireEvent.click(screen.getByRole("link", { name: /Climate/ }));
+    const desktopNavigation = screen.getByRole("navigation", {
+      name: "Workspace sections",
+    });
+    fireEvent.click(within(desktopNavigation).getByRole("link", { name: /Climate/ }));
     await waitFor(() =>
       expect(screen.queryByText("private-body-sentinel")).not.toBeInTheDocument(),
     );
