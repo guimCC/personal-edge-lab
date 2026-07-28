@@ -9,11 +9,26 @@ from datetime import datetime
 from pathlib import Path
 
 from personal_edge_lab.domain.ai import CompletionResult
-from personal_edge_lab.domain.email import EmailItemFailure, EmailMessageId
+from personal_edge_lab.domain.email import (
+    EmailContentSource,
+    EmailDocument,
+    EmailItemFailure,
+    EmailMessageId,
+)
 from personal_edge_lab.domain.email_triage import (
     PromptSourceKind,
     TriageDecision,
     TriageLabel,
+)
+from personal_edge_lab.domain.email_triage_messages import (
+    StoredTriageMessage,
+    TriageMessageCursor,
+    TriageMessageDetail,
+    TriageMessageFilter,
+    TriageMessagePage,
+    TriageMessageSummary,
+    TriageMessageTechnicalEvidence,
+    validate_message_limit,
 )
 from personal_edge_lab.domain.email_triage_review import (
     TriageReviewReference,
@@ -22,6 +37,7 @@ from personal_edge_lab.domain.email_triage_review import (
 from personal_edge_lab.domain.email_triage_runs import (
     StoredTriageDecision,
     TriageEvaluationIdentity,
+    TriageInputEvidence,
     TriageReservation,
     TriageReservationStatus,
     TriageRunDetails,
@@ -36,6 +52,7 @@ from personal_edge_lab.infrastructure.persistence.sqlite.connection import open_
 
 class SqliteTriageRunRepository:
     def __init__(self, database_path: Path, *, timeout_seconds: float = 5.0) -> None:
+        self._database_path = database_path
         self._connection = open_connection(database_path, timeout_seconds=timeout_seconds)
 
     def __enter__(self) -> SqliteTriageRunRepository:
@@ -80,6 +97,17 @@ class SqliteTriageRunRepository:
                 )
                 self._connection.execute(
                     """
+                    UPDATE email_triage_messages
+                    SET latest_status = 'interrupted',
+                        latest_failure_category = 'interrupted',
+                        last_seen_at_utc = ?
+                    WHERE latest_run_id = ?
+                      AND latest_status IN ('pending', 'classifying')
+                    """,
+                    (recovered_at.isoformat(), run_id),
+                )
+                self._connection.execute(
+                    """
                     UPDATE email_triage_runs
                     SET status = 'interrupted', updated_at_utc = ?,
                         completed_at_utc = ?, failure_category = 'interrupted'
@@ -102,18 +130,20 @@ class SqliteTriageRunRepository:
         requested_limit: int,
         force_new_attempt: bool,
         requested_at: datetime,
+        query_text: str = "",
     ) -> None:
         self._connection.execute(
             """
             INSERT INTO email_triage_runs (
-                run_id, operation_id, query_sha256, requested_limit,
+                run_id, operation_id, query_sha256, query_text, requested_limit,
                 force_new_attempt, status, requested_at_utc, updated_at_utc
-            ) VALUES (?, ?, ?, ?, ?, 'requested', ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?)
             """,
             (
                 run_id,
                 operation_id,
                 query_sha256,
+                query_text,
                 requested_limit,
                 int(force_new_attempt),
                 requested_at.isoformat(),
@@ -195,9 +225,115 @@ class SqliteTriageRunRepository:
             message_id=message_id,
             message_fingerprint=_sha256(fingerprint_source),
             received_at=None,
+            message_record_id=None,
             category=failure.category.value,
             recorded_at=recorded_at,
         )
+
+    def store_message(
+        self,
+        *,
+        run_id: str,
+        ordinal: int,
+        document: EmailDocument,
+        evidence: TriageInputEvidence,
+        model_input: str,
+        recorded_at: datetime,
+    ) -> StoredTriageMessage:
+        record_id = _sha256(f"email-triage-message:{document.message_id.value}")[:32]
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._connection.execute(
+                """
+                INSERT INTO email_triage_messages (
+                    record_id, gmail_message_id, gmail_thread_id, received_at_utc,
+                    latest_run_id, latest_item_ordinal, latest_status,
+                    first_seen_at_utc, last_seen_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                ON CONFLICT(gmail_message_id) DO UPDATE SET
+                    gmail_thread_id = excluded.gmail_thread_id,
+                    received_at_utc = excluded.received_at_utc,
+                    latest_run_id = excluded.latest_run_id,
+                    latest_item_ordinal = excluded.latest_item_ordinal,
+                    latest_status = 'pending',
+                    latest_failure_category = NULL,
+                    last_seen_at_utc = excluded.last_seen_at_utc
+                """,
+                (
+                    record_id,
+                    document.message_id.value,
+                    document.thread_id.value,
+                    document.received_at.isoformat(),
+                    run_id,
+                    ordinal,
+                    recorded_at.isoformat(),
+                    recorded_at.isoformat(),
+                ),
+            )
+            message_row = self._connection.execute(
+                "SELECT id, record_id FROM email_triage_messages WHERE gmail_message_id = ?",
+                (document.message_id.value,),
+            ).fetchone()
+            if message_row is None:
+                raise sqlite3.DatabaseError("triage message storage failed")
+            message_record_id = int(message_row["id"])
+            self._connection.execute(
+                """
+                INSERT INTO email_triage_content_snapshots (
+                    message_record_id, sender, subject, normalized_text, model_input,
+                    normalized_sha256, model_input_sha256, original_size_bytes,
+                    content_source, cleanup_flags_json, source_truncated,
+                    model_input_truncated, metadata_truncated, created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(message_record_id, normalized_sha256, model_input_sha256)
+                DO NOTHING
+                """,
+                (
+                    message_record_id,
+                    document.sender,
+                    document.subject,
+                    document.text,
+                    model_input,
+                    evidence.normalized_sha256,
+                    evidence.model_input_sha256,
+                    document.original_size_bytes,
+                    document.content_source.value,
+                    json.dumps(evidence.cleanup_flags, separators=(",", ":")),
+                    int(document.truncated),
+                    int(evidence.model_input_truncated),
+                    int(document.metadata_truncated),
+                    recorded_at.isoformat(),
+                ),
+            )
+            snapshot_row = self._connection.execute(
+                """
+                SELECT id FROM email_triage_content_snapshots
+                WHERE message_record_id = ?
+                  AND normalized_sha256 = ?
+                  AND model_input_sha256 = ?
+                """,
+                (
+                    message_record_id,
+                    evidence.normalized_sha256,
+                    evidence.model_input_sha256,
+                ),
+            ).fetchone()
+            if snapshot_row is None:
+                raise sqlite3.DatabaseError("triage content storage failed")
+            snapshot_id = int(snapshot_row["id"])
+            self._connection.execute(
+                "UPDATE email_triage_messages SET current_content_snapshot_id = ? WHERE id = ?",
+                (snapshot_id, message_record_id),
+            )
+            self._connection.commit()
+            return StoredTriageMessage(
+                database_id=message_record_id,
+                record_id=str(message_row["record_id"]),
+                content_snapshot_id=snapshot_id,
+            )
+        except BaseException:
+            self._connection.rollback()
+            raise
 
     def reserve(
         self,
@@ -208,6 +344,8 @@ class SqliteTriageRunRepository:
         operation_id: str,
         force_new_attempt: bool,
         reserved_at: datetime,
+        message_record_id: int | None = None,
+        content_snapshot_id: int | None = None,
     ) -> TriageReservation:
         self._connection.execute("BEGIN IMMEDIATE")
         try:
@@ -222,12 +360,23 @@ class SqliteTriageRunRepository:
             if evaluation is None:
                 raise sqlite3.DatabaseError("triage evaluation reservation failed")
             evaluation_id = int(evaluation["id"])
+            if content_snapshot_id is not None:
+                self._connection.execute(
+                    """
+                    INSERT INTO email_triage_evaluation_content (
+                        evaluation_id, content_snapshot_id
+                    ) VALUES (?, ?)
+                    ON CONFLICT(evaluation_id) DO NOTHING
+                    """,
+                    (evaluation_id, content_snapshot_id),
+                )
             self._connection.execute(
                 """
                 INSERT INTO email_triage_run_items (
                     run_id, ordinal, gmail_message_id, message_fingerprint,
-                    received_at_utc, evaluation_id, status, recorded_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+                    received_at_utc, evaluation_id, message_record_id,
+                    status, recorded_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 """,
                 (
                     run_id,
@@ -236,6 +385,7 @@ class SqliteTriageRunRepository:
                     identity.input.message_fingerprint,
                     identity.input.received_at.isoformat(),
                     evaluation_id,
+                    message_record_id,
                     reserved_at.isoformat(),
                 ),
             )
@@ -258,6 +408,16 @@ class SqliteTriageRunRepository:
                     failure_category="concurrent_evaluation",
                     completed_at=reserved_at,
                 )
+                if message_record_id is not None:
+                    self._set_message_processing(
+                        message_record_id,
+                        run_id=run_id,
+                        ordinal=ordinal,
+                        status=TriageRunItemStatus.FAILED,
+                        failure_category="concurrent_evaluation",
+                        successful_attempt_id=None,
+                        seen_at=reserved_at,
+                    )
                 self._connection.commit()
                 return TriageReservation(
                     TriageReservationStatus.CONCURRENT,
@@ -289,6 +449,16 @@ class SqliteTriageRunRepository:
                     failure_category=None,
                     completed_at=reserved_at,
                 )
+                if message_record_id is not None:
+                    self._set_message_processing(
+                        message_record_id,
+                        run_id=run_id,
+                        ordinal=ordinal,
+                        status=TriageRunItemStatus.REUSED,
+                        failure_category=None,
+                        successful_attempt_id=attempt_id,
+                        seen_at=reserved_at,
+                    )
                 self._connection.commit()
                 return TriageReservation(
                     TriageReservationStatus.REUSED,
@@ -334,6 +504,16 @@ class SqliteTriageRunRepository:
                 failure_category=None,
                 completed_at=None,
             )
+            if message_record_id is not None:
+                self._set_message_processing(
+                    message_record_id,
+                    run_id=run_id,
+                    ordinal=ordinal,
+                    status=TriageRunItemStatus.CLASSIFYING,
+                    failure_category=None,
+                    successful_attempt_id=None,
+                    seen_at=reserved_at,
+                )
             self._connection.execute(
                 "UPDATE email_triage_runs SET updated_at_utc = ? WHERE run_id = ?",
                 (reserved_at.isoformat(), run_id),
@@ -399,7 +579,7 @@ class SqliteTriageRunRepository:
                     model_alias = ?, queue_wait_seconds = ?, provider_seconds = ?,
                     total_seconds = ?, prompt_tokens = ?, completion_tokens = ?,
                     total_tokens = ?, label = ?, decision_sha256 = ?,
-                    reason_chars = ?, trace_id = ?, trace_unavailable = ?
+                    reason_chars = ?, reason_text = ?, trace_id = ?, trace_unavailable = ?
                 WHERE id = ? AND run_id = ? AND item_ordinal = ?
                   AND status IN ('reserved', 'running')
                 """,
@@ -416,6 +596,7 @@ class SqliteTriageRunRepository:
                     decision.label.value,
                     decision_sha256,
                     len(decision.reason),
+                    decision.reason,
                     trace_id,
                     int(trace_unavailable),
                     attempt_id,
@@ -432,6 +613,17 @@ class SqliteTriageRunRepository:
                 failure_category=None,
                 completed_at=completed_at,
             )
+            message_record_id = self._message_record_id(run_id, ordinal)
+            if message_record_id is not None:
+                self._set_message_processing(
+                    message_record_id,
+                    run_id=run_id,
+                    ordinal=ordinal,
+                    status=TriageRunItemStatus.SUCCEEDED,
+                    failure_category=None,
+                    successful_attempt_id=attempt_id,
+                    seen_at=completed_at,
+                )
             self._connection.execute(
                 "UPDATE email_triage_runs SET updated_at_utc = ? WHERE run_id = ?",
                 (completed_at.isoformat(), run_id),
@@ -504,6 +696,17 @@ class SqliteTriageRunRepository:
                 failure_category=category,
                 completed_at=completed_at,
             )
+            message_record_id = self._message_record_id(run_id, ordinal)
+            if message_record_id is not None:
+                self._set_message_processing(
+                    message_record_id,
+                    run_id=run_id,
+                    ordinal=ordinal,
+                    status=TriageRunItemStatus.FAILED,
+                    failure_category=category,
+                    successful_attempt_id=None,
+                    seen_at=completed_at,
+                )
             self._connection.execute(
                 "UPDATE email_triage_runs SET updated_at_utc = ? WHERE run_id = ?",
                 (completed_at.isoformat(), run_id),
@@ -521,6 +724,7 @@ class SqliteTriageRunRepository:
         message_id: str | None,
         message_fingerprint: str,
         received_at: datetime | None,
+        message_record_id: int | None,
         category: str,
         recorded_at: datetime,
         interrupted: bool = False,
@@ -529,9 +733,9 @@ class SqliteTriageRunRepository:
             """
             INSERT INTO email_triage_run_items (
                 run_id, ordinal, gmail_message_id, message_fingerprint,
-                received_at_utc, status, failure_category,
+                received_at_utc, message_record_id, status, failure_category,
                 recorded_at_utc, completed_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
@@ -539,6 +743,7 @@ class SqliteTriageRunRepository:
                 message_id,
                 message_fingerprint,
                 received_at.isoformat() if received_at else None,
+                message_record_id,
                 (
                     TriageRunItemStatus.INTERRUPTED.value
                     if interrupted
@@ -549,6 +754,18 @@ class SqliteTriageRunRepository:
                 recorded_at.isoformat(),
             ),
         )
+        if message_record_id is not None:
+            self._set_message_processing(
+                message_record_id,
+                run_id=run_id,
+                ordinal=ordinal,
+                status=(
+                    TriageRunItemStatus.INTERRUPTED if interrupted else TriageRunItemStatus.FAILED
+                ),
+                failure_category=category,
+                successful_attempt_id=None,
+                seen_at=recorded_at,
+            )
         self._connection.execute(
             "UPDATE email_triage_runs SET updated_at_utc = ? WHERE run_id = ?",
             (recorded_at.isoformat(), run_id),
@@ -746,6 +963,167 @@ class SqliteTriageRunRepository:
             ),
         )
 
+    def message_page(
+        self,
+        *,
+        limit: int,
+        message_filter: TriageMessageFilter,
+        label: TriageLabel | None,
+        cursor: TriageMessageCursor | None,
+    ) -> TriageMessagePage:
+        validate_message_limit(limit)
+        predicates: list[str] = []
+        parameters: list[object] = []
+        if message_filter is TriageMessageFilter.RECOMMENDATIONS:
+            predicates.append("m.latest_successful_attempt_id IS NOT NULL")
+        elif message_filter is TriageMessageFilter.ISSUES:
+            predicates.append(
+                "m.latest_status IN ('pending', 'classifying', 'failed', 'interrupted')"
+            )
+        if label is not None:
+            predicates.append("a.label = ?")
+            parameters.append(label.value)
+        if cursor is not None:
+            predicates.append(
+                "(m.received_at_utc < ? OR (m.received_at_utc = ? AND m.record_id < ?))"
+            )
+            cursor_value = cursor.received_at.isoformat()
+            parameters.extend((cursor_value, cursor_value, cursor.record_id))
+        where_sql = f"WHERE {' AND '.join(predicates)}" if predicates else ""
+        rows = self._connection.execute(
+            f"""
+            SELECT m.record_id, m.received_at_utc, m.latest_status,
+                m.latest_failure_category, m.last_seen_at_utc,
+                s.sender, s.subject, s.model_input_truncated, s.source_truncated,
+                a.label, a.reason_text
+            FROM email_triage_messages m
+            JOIN email_triage_content_snapshots s
+              ON s.id = m.current_content_snapshot_id
+            LEFT JOIN email_triage_attempts a
+              ON a.id = m.latest_successful_attempt_id
+            {where_sql}
+            ORDER BY m.received_at_utc DESC, m.record_id DESC
+            LIMIT ?
+            """,
+            (*parameters, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        visible = rows[:limit]
+        items = tuple(_message_summary(row) for row in visible)
+        next_cursor = None
+        if has_more and visible:
+            last = visible[-1]
+            next_cursor = TriageMessageCursor(
+                received_at=datetime.fromisoformat(str(last["received_at_utc"])),
+                record_id=str(last["record_id"]),
+            )
+        return TriageMessagePage(items=items, next_cursor=next_cursor)
+
+    def message_detail(self, record_id: str) -> TriageMessageDetail | None:
+        row = self._connection.execute(
+            """
+            SELECT m.record_id, m.received_at_utc, m.latest_run_id,
+                m.latest_item_ordinal, m.latest_status, m.latest_failure_category,
+                m.last_seen_at_utc, m.latest_successful_attempt_id,
+                s.sender, s.subject, s.normalized_text, s.model_input,
+                s.normalized_sha256, s.model_input_sha256, s.original_size_bytes,
+                s.content_source, s.cleanup_flags_json, s.source_truncated,
+                s.model_input_truncated, s.metadata_truncated,
+                a.decision_sha256, a.provider, a.model_alias, a.trace_id,
+                a.prompt_tokens, a.completion_tokens, a.total_tokens,
+                a.queue_wait_seconds, a.provider_seconds, a.total_seconds,
+                a.label, a.reason_text, a.run_id AS successful_run_id,
+                a.item_ordinal AS successful_item_ordinal,
+                e.prompt_source, e.prompt_version, e.profile_version,
+                e.taxonomy_version, e.schema_version, e.generation_parameters_version
+            FROM email_triage_messages m
+            JOIN email_triage_content_snapshots s
+              ON s.id = m.current_content_snapshot_id
+            LEFT JOIN email_triage_attempts a
+              ON a.id = m.latest_successful_attempt_id
+            LEFT JOIN email_triage_evaluations e
+              ON e.id = a.evaluation_id
+            WHERE m.record_id = ?
+            """,
+            (record_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        summary = _message_summary(row)
+        evidence_run_id = (
+            str(row["successful_run_id"])
+            if row["successful_run_id"] is not None
+            else str(row["latest_run_id"])
+        )
+        evidence_item_ordinal = (
+            int(row["successful_item_ordinal"])
+            if row["successful_item_ordinal"] is not None
+            else int(row["latest_item_ordinal"])
+        )
+        technical = TriageMessageTechnicalEvidence(
+            run_id=evidence_run_id,
+            item_ordinal=evidence_item_ordinal,
+            attempt_id=(
+                int(row["latest_successful_attempt_id"])
+                if row["latest_successful_attempt_id"] is not None
+                else None
+            ),
+            decision_sha256=(
+                str(row["decision_sha256"]) if row["decision_sha256"] is not None else None
+            ),
+            prompt_source=(
+                PromptSourceKind(str(row["prompt_source"]))
+                if row["prompt_source"] is not None
+                else None
+            ),
+            prompt_version=(
+                str(row["prompt_version"]) if row["prompt_version"] is not None else None
+            ),
+            profile_version=(
+                str(row["profile_version"]) if row["profile_version"] is not None else None
+            ),
+            taxonomy_version=(
+                str(row["taxonomy_version"]) if row["taxonomy_version"] is not None else None
+            ),
+            schema_version=(
+                str(row["schema_version"]) if row["schema_version"] is not None else None
+            ),
+            generation_parameters_version=(
+                str(row["generation_parameters_version"])
+                if row["generation_parameters_version"] is not None
+                else None
+            ),
+            provider=str(row["provider"]) if row["provider"] is not None else None,
+            model_alias=str(row["model_alias"]) if row["model_alias"] is not None else None,
+            trace_id=str(row["trace_id"]) if row["trace_id"] is not None else None,
+            prompt_tokens=(int(row["prompt_tokens"]) if row["prompt_tokens"] is not None else None),
+            completion_tokens=(
+                int(row["completion_tokens"]) if row["completion_tokens"] is not None else None
+            ),
+            total_tokens=(int(row["total_tokens"]) if row["total_tokens"] is not None else None),
+            queue_wait_seconds=(
+                float(row["queue_wait_seconds"]) if row["queue_wait_seconds"] is not None else None
+            ),
+            provider_seconds=(
+                float(row["provider_seconds"]) if row["provider_seconds"] is not None else None
+            ),
+            total_seconds=(
+                float(row["total_seconds"]) if row["total_seconds"] is not None else None
+            ),
+        )
+        return TriageMessageDetail(
+            summary=summary,
+            normalized_text=str(row["normalized_text"]),
+            model_input=str(row["model_input"]),
+            normalized_sha256=str(row["normalized_sha256"]),
+            model_input_sha256=str(row["model_input_sha256"]),
+            original_size_bytes=int(row["original_size_bytes"]),
+            content_source=EmailContentSource(str(row["content_source"])),
+            cleanup_flags=tuple(json.loads(str(row["cleanup_flags_json"]))),
+            metadata_truncated=bool(row["metadata_truncated"]),
+            technical=technical,
+        )
+
     def _insert_evaluation(
         self,
         identity: TriageEvaluationIdentity,
@@ -829,6 +1207,50 @@ class SqliteTriageRunRepository:
         )
         _require_one(cursor, "triage run item")
 
+    def _message_record_id(self, run_id: str, ordinal: int) -> int | None:
+        row = self._connection.execute(
+            """
+            SELECT message_record_id FROM email_triage_run_items
+            WHERE run_id = ? AND ordinal = ?
+            """,
+            (run_id, ordinal),
+        ).fetchone()
+        if row is None or row["message_record_id"] is None:
+            return None
+        return int(row["message_record_id"])
+
+    def _set_message_processing(
+        self,
+        message_record_id: int,
+        *,
+        run_id: str,
+        ordinal: int,
+        status: TriageRunItemStatus,
+        failure_category: str | None,
+        successful_attempt_id: int | None,
+        seen_at: datetime,
+    ) -> None:
+        cursor = self._connection.execute(
+            """
+            UPDATE email_triage_messages
+            SET latest_run_id = ?, latest_item_ordinal = ?, latest_status = ?,
+                latest_failure_category = ?,
+                latest_successful_attempt_id = COALESCE(?, latest_successful_attempt_id),
+                last_seen_at_utc = ?
+            WHERE id = ?
+            """,
+            (
+                run_id,
+                ordinal,
+                status.value,
+                failure_category,
+                successful_attempt_id,
+                seen_at.isoformat(),
+                message_record_id,
+            ),
+        )
+        _require_one(cursor, "triage message")
+
     def _update_run_state(
         self,
         run_id: str,
@@ -862,6 +1284,7 @@ def _run_summary(row: sqlite3.Row) -> TriageRunSummary:
         reused_count=int(row["reused_count"]),
         failed_count=int(row["failed_count"]),
         interrupted_count=int(row["interrupted_count"]),
+        query_text=(str(row["query_text"]) if row["query_text"] is not None else None),
     )
 
 
@@ -910,6 +1333,29 @@ def _item_summary(row: sqlite3.Row) -> TriageRunItemSummary:
             int(row["selected_attempt_id"]) if row["selected_attempt_id"] is not None else None
         ),
         review_available=bool(row["review_available"]),
+    )
+
+
+def _message_summary(row: sqlite3.Row) -> TriageMessageSummary:
+    label = TriageLabel(str(row["label"])) if row["label"] is not None else None
+    reason = str(row["reason_text"]) if row["reason_text"] is not None else None
+    return TriageMessageSummary(
+        record_id=str(row["record_id"]),
+        received_at=datetime.fromisoformat(str(row["received_at_utc"])),
+        sender=str(row["sender"]),
+        subject=str(row["subject"]),
+        label=label,
+        reason=reason,
+        latest_status=TriageRunItemStatus(str(row["latest_status"])),
+        latest_failure_category=(
+            str(row["latest_failure_category"])
+            if row["latest_failure_category"] is not None
+            else None
+        ),
+        last_triaged_at=datetime.fromisoformat(str(row["last_seen_at_utc"])),
+        model_input_truncated=bool(row["model_input_truncated"]),
+        source_truncated=bool(row["source_truncated"]),
+        has_recommendation=label is not None and reason is not None,
     )
 
 

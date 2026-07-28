@@ -71,6 +71,7 @@ class TriageMailboxBatch:
             run_id=run_id,
             operation_id=operation_id,
             query_sha256=query_sha256,
+            query_text=request.query,
             requested_limit=request.limit,
             force_new_attempt=force_new_attempt,
             requested_at=requested_at,
@@ -182,6 +183,14 @@ class TriageMailboxBatch:
         force_new_attempt: bool,
     ) -> MailboxTriageItemResult:
         evidence, email = prepare_triage_input(document)
+        stored_message = self._repository.store_message(
+            run_id=run_id,
+            ordinal=ordinal,
+            document=document,
+            evidence=evidence,
+            model_input=email.message,
+            recorded_at=self._clock(),
+        )
         try:
             prepared = self._triage_service.prepare(email)
         except Exception:
@@ -192,6 +201,7 @@ class TriageMailboxBatch:
                 message_id=document.message_id.value,
                 message_fingerprint=evidence.message_fingerprint,
                 received_at=document.received_at,
+                message_record_id=stored_message.database_id,
                 category="triage_input",
                 recorded_at=recorded_at,
             )
@@ -205,6 +215,8 @@ class TriageMailboxBatch:
             identity=identity,
             operation_id=item_operation_id,
             force_new_attempt=force_new_attempt,
+            message_record_id=stored_message.database_id,
+            content_snapshot_id=stored_message.content_snapshot_id,
             reserved_at=self._clock(),
         )
         if reservation.status is TriageReservationStatus.REUSED:
@@ -356,14 +368,23 @@ class TriageMailboxBatch:
         results: list[MailboxTriageItemResult],
     ) -> int:
         for document in documents:
-            evidence, _email = prepare_triage_input(document)
+            evidence, email = prepare_triage_input(document)
             recorded_at = self._clock()
+            stored_message = self._repository.store_message(
+                run_id=run_id,
+                ordinal=ordinal,
+                document=document,
+                evidence=evidence,
+                model_input=email.message,
+                recorded_at=recorded_at,
+            )
             self._repository.record_item_failure(
                 run_id,
                 ordinal=ordinal,
                 message_id=document.message_id.value,
                 message_fingerprint=evidence.message_fingerprint,
                 received_at=document.received_at,
+                message_record_id=stored_message.database_id,
                 category="interrupted",
                 recorded_at=recorded_at,
                 interrupted=True,

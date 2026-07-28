@@ -240,6 +240,7 @@ class TriageRunSummary:
     reused_count: int
     failed_count: int
     interrupted_count: int
+    query_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

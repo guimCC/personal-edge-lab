@@ -484,6 +484,87 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version="007_email_triage_messages",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS email_triage_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_id TEXT NOT NULL UNIQUE,
+                gmail_message_id TEXT NOT NULL UNIQUE,
+                gmail_thread_id TEXT NOT NULL,
+                received_at_utc TEXT NOT NULL,
+                current_content_snapshot_id INTEGER,
+                latest_run_id TEXT NOT NULL,
+                latest_item_ordinal INTEGER NOT NULL CHECK (latest_item_ordinal BETWEEN 1 AND 10),
+                latest_status TEXT NOT NULL
+                    CHECK (
+                        latest_status IN (
+                            'pending', 'classifying', 'succeeded',
+                            'reused', 'failed', 'interrupted'
+                        )
+                    ),
+                latest_failure_category TEXT,
+                latest_successful_attempt_id INTEGER,
+                first_seen_at_utc TEXT NOT NULL,
+                last_seen_at_utc TEXT NOT NULL,
+                FOREIGN KEY (latest_run_id) REFERENCES email_triage_runs (run_id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_email_triage_messages_recent
+            ON email_triage_messages (received_at_utc DESC, record_id DESC)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_email_triage_messages_status
+            ON email_triage_messages (latest_status, received_at_utc DESC)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS email_triage_content_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_record_id INTEGER NOT NULL,
+                sender TEXT NOT NULL CHECK (length(sender) BETWEEN 1 AND 160),
+                subject TEXT NOT NULL CHECK (length(subject) <= 256),
+                normalized_text TEXT NOT NULL CHECK (length(normalized_text) <= 8000),
+                model_input TEXT NOT NULL CHECK (length(model_input) <= 1600),
+                normalized_sha256 TEXT NOT NULL,
+                model_input_sha256 TEXT NOT NULL,
+                original_size_bytes INTEGER NOT NULL CHECK (original_size_bytes >= 0),
+                content_source TEXT NOT NULL
+                    CHECK (content_source IN ('plain_text', 'html', 'empty')),
+                cleanup_flags_json TEXT NOT NULL,
+                source_truncated INTEGER NOT NULL CHECK (source_truncated IN (0, 1)),
+                model_input_truncated INTEGER NOT NULL CHECK (model_input_truncated IN (0, 1)),
+                metadata_truncated INTEGER NOT NULL CHECK (metadata_truncated IN (0, 1)),
+                created_at_utc TEXT NOT NULL,
+                UNIQUE (message_record_id, normalized_sha256, model_input_sha256),
+                FOREIGN KEY (message_record_id) REFERENCES email_triage_messages (id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS email_triage_evaluation_content (
+                evaluation_id INTEGER PRIMARY KEY,
+                content_snapshot_id INTEGER NOT NULL,
+                FOREIGN KEY (evaluation_id) REFERENCES email_triage_evaluations (id),
+                FOREIGN KEY (content_snapshot_id) REFERENCES email_triage_content_snapshots (id)
+            )
+            """,
+            """
+            ALTER TABLE email_triage_runs ADD COLUMN query_text TEXT
+            """,
+            """
+            ALTER TABLE email_triage_run_items ADD COLUMN message_record_id INTEGER
+            """,
+            """
+            ALTER TABLE email_triage_attempts ADD COLUMN reason_text TEXT
+                CHECK (reason_text IS NULL OR length(reason_text) BETWEEN 1 AND 160)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_email_triage_items_message
+            ON email_triage_run_items (message_record_id, run_id)
+            """,
+        ),
+    ),
 )
 
 

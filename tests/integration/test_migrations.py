@@ -3,7 +3,10 @@ from __future__ import annotations
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
-from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+from personal_edge_lab.infrastructure.persistence.sqlite.migrations import (
+    MIGRATIONS,
+    run_migrations,
+)
 
 
 def object_names(database) -> set[str]:
@@ -52,6 +55,12 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         "email_triage_attempts",
         "idx_email_triage_one_active_attempt",
         "idx_email_triage_attempts_run",
+        "email_triage_messages",
+        "idx_email_triage_messages_recent",
+        "idx_email_triage_messages_status",
+        "email_triage_content_snapshots",
+        "email_triage_evaluation_content",
+        "idx_email_triage_items_message",
     } <= object_names(database)
     with sqlite3.connect(database) as connection:
         versions = list(connection.execute("SELECT version FROM schema_migrations"))
@@ -62,6 +71,7 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         ("004_operational_alerts",),
         ("005_notification_outbox",),
         ("006_email_triage_runs",),
+        ("007_email_triage_messages",),
     ]
 
 
@@ -123,6 +133,52 @@ def test_migration_preserves_existing_tables_rows_and_indexes(tmp_path) -> None:
     assert before_names <= object_names(database)
 
 
+def test_message_migration_preserves_existing_triage_evidence(tmp_path) -> None:
+    database = tmp_path / "wp7.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            CREATE TABLE schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at_utc TEXT NOT NULL
+            )
+            """
+        )
+        for migration in MIGRATIONS[:-1]:
+            for statement in migration.statements:
+                connection.execute(statement)
+            connection.execute(
+                "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (?, ?)",
+                (migration.version, "2026-07-28T12:00:00+00:00"),
+            )
+        connection.execute(
+            """
+            INSERT INTO email_triage_runs (
+                run_id, operation_id, query_sha256, requested_limit,
+                force_new_attempt, status, requested_at_utc, updated_at_utc,
+                completed_at_utc
+            ) VALUES (
+                'accepted-wp7-run', 'accepted-wp7-operation', ?, 1, 0,
+                'completed_with_results', '2026-07-28T12:00:00+00:00',
+                '2026-07-28T12:01:00+00:00', '2026-07-28T12:01:00+00:00'
+            )
+            """,
+            ("f" * 64,),
+        )
+
+    run_migrations(database)
+
+    with sqlite3.connect(database) as connection:
+        preserved = connection.execute(
+            "SELECT run_id, status, query_text FROM email_triage_runs"
+        ).fetchone()
+        version = connection.execute(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = '007_email_triage_messages'"
+        ).fetchone()
+    assert preserved == ("accepted-wp7-run", "completed_with_results", None)
+    assert version == (1,)
+
+
 def test_concurrent_app_startup_applies_migration_once(tmp_path) -> None:
     database = tmp_path / "race.db"
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -139,4 +195,5 @@ def test_concurrent_app_startup_applies_migration_once(tmp_path) -> None:
         ("004_operational_alerts", 1),
         ("005_notification_outbox", 1),
         ("006_email_triage_runs", 1),
+        ("007_email_triage_messages", 1),
     ]

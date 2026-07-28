@@ -338,7 +338,7 @@ def test_disabled_mailbox_triage_performs_zero_http_calls(
     assert "GMAIL_TRIAGE_ENABLED" in stderr.getvalue()
 
 
-def test_mailbox_triage_is_durable_private_and_reuses_success(
+def test_mailbox_triage_persists_product_content_but_keeps_logs_private_and_reuses(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -408,10 +408,11 @@ def test_mailbox_triage_is_durable_private_and_reuses_success(
         b"sender@example.test",
         b"private-body-sentinel",
         b"private-reason-sentinel",
-        b"/private/model/path.gguf",
     ):
-        assert sentinel not in persisted
+        assert sentinel in persisted
         assert sentinel.decode() not in caplog.text
+    assert b"/private/model/path.gguf" not in persisted
+    assert "/private/model/path.gguf" not in caplog.text
 
     monkeypatch.setenv("GMAIL_TRIAGE_ENABLED", "false")
     monkeypatch.setenv("GMAIL_READ_ENABLED", "false")
@@ -463,3 +464,40 @@ def test_mailbox_triage_limit_is_rejected_before_http(
         == 2
     )
     assert calls == 0
+
+
+def test_development_reset_cli_requires_exact_confirmation_and_reports_backup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "telemetry.db"
+    monkeypatch.setenv("DATABASE_PATH", str(database))
+    refused = StringIO()
+    assert (
+        main(
+            ["reset-development-data", "--confirm", "yes"],
+            stdout=StringIO(),
+            stderr=refused,
+            operation_id_factory=lambda: "reset-refused",
+        )
+        == 2
+    )
+    assert "exact reset confirmation" in refused.getvalue()
+
+    output = StringIO()
+    assert (
+        main(
+            [
+                "reset-development-data",
+                "--confirm",
+                "DELETE-ALL-EMAIL-TRIAGE-DATA",
+            ],
+            stdout=output,
+            stderr=StringIO(),
+            operation_id_factory=lambda: "reset-success",
+        )
+        == 0
+    )
+    assert "Deleted email-triage rows: 0" in output.getvalue()
+    assert "Other application data: preserved" in output.getvalue()
+    assert list((tmp_path / "backups").glob("telemetry-triage-reset-*.db"))

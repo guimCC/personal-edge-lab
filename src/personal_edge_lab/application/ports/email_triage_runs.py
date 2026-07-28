@@ -6,10 +6,12 @@ from datetime import datetime
 from typing import Protocol
 
 from personal_edge_lab.domain.ai import CompletionResult
-from personal_edge_lab.domain.email import EmailItemFailure
+from personal_edge_lab.domain.email import EmailDocument, EmailItemFailure
 from personal_edge_lab.domain.email_triage import TriageDecision
+from personal_edge_lab.domain.email_triage_messages import StoredTriageMessage
 from personal_edge_lab.domain.email_triage_runs import (
     TriageEvaluationIdentity,
+    TriageInputEvidence,
     TriageReservation,
     TriageRunDetails,
     TriageRunStatus,
@@ -29,6 +31,7 @@ class TriageRunRepository(Protocol):
         requested_limit: int,
         force_new_attempt: bool,
         requested_at: datetime,
+        query_text: str = "",
     ) -> None: ...
 
     def mark_retrieving(self, run_id: str, *, updated_at: datetime) -> None: ...
@@ -63,6 +66,17 @@ class TriageRunRepository(Protocol):
         recorded_at: datetime,
     ) -> None: ...
 
+    def store_message(
+        self,
+        *,
+        run_id: str,
+        ordinal: int,
+        document: EmailDocument,
+        evidence: TriageInputEvidence,
+        model_input: str,
+        recorded_at: datetime,
+    ) -> StoredTriageMessage: ...
+
     def reserve(
         self,
         run_id: str,
@@ -72,6 +86,8 @@ class TriageRunRepository(Protocol):
         operation_id: str,
         force_new_attempt: bool,
         reserved_at: datetime,
+        message_record_id: int | None = None,
+        content_snapshot_id: int | None = None,
     ) -> TriageReservation: ...
 
     def mark_attempt_running(
@@ -123,6 +139,7 @@ class TriageRunRepository(Protocol):
         message_id: str | None,
         message_fingerprint: str,
         received_at: datetime | None,
+        message_record_id: int | None,
         category: str,
         recorded_at: datetime,
         interrupted: bool = False,

@@ -51,6 +51,11 @@ from personal_edge_lab.infrastructure.observability.langfuse import LangfuseTria
 from personal_edge_lab.infrastructure.persistence.sqlite.email_triage import (
     SqliteTriageRunRepository,
 )
+from personal_edge_lab.infrastructure.persistence.sqlite.email_triage_reset import (
+    RESET_CONFIRMATION,
+    TriageDevelopmentResetError,
+    reset_triage_development_data,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
 from personal_edge_lab.modules.email_triage import EmailTriageService, TriageMailboxBatch
 from personal_edge_lab.modules.email_triage.prompt import (
@@ -96,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
     runs_parser.add_argument("--limit", type=int, default=20)
     show_parser = subparsers.add_parser("show", help="show one durable triage run")
     show_parser.add_argument("--run-id", required=True)
+    reset_parser = subparsers.add_parser(
+        "reset-development-data",
+        help="back up and delete only disposable email-triage development records",
+    )
+    reset_parser.add_argument("--confirm", required=True)
     return parser
 
 
@@ -139,7 +149,14 @@ def main(
         )
     if args.command == "runs":
         return _run_history(operation_id, args.limit, stdout=stdout, stderr=stderr)
-    return _show_run(operation_id, args.run_id, stdout=stdout, stderr=stderr)
+    if args.command == "show":
+        return _show_run(operation_id, args.run_id, stdout=stdout, stderr=stderr)
+    return _run_development_reset(
+        operation_id,
+        confirmation=args.confirm,
+        stdout=stdout,
+        stderr=stderr,
+    )
 
 
 def _run_authorize(
@@ -483,7 +500,10 @@ def _show_run(
     print(f"Operation: {operation_id}", file=stdout)
     print(f"Run: {run.run_id}", file=stdout)
     print(f"Status: {run.status.value}", file=stdout)
-    print(f"Query hash: {run.query_sha256[:16]}", file=stdout)
+    print(
+        f"Query: {_sanitize_terminal_text(run.query_text or 'legacy query unavailable')}",
+        file=stdout,
+    )
     print(f"Requested: {run.requested_at.isoformat()}", file=stdout)
     for item in details.items:
         print(f"Item {item.ordinal}: {item.status.value}", file=stdout)
@@ -515,6 +535,58 @@ def _show_run(
             print(f"  Provider elapsed: {item.provider_seconds:.3f}s", file=stdout)
         if item.total_seconds is not None:
             print(f"  Elapsed: {item.total_seconds:.3f}s", file=stdout)
+    return 0
+
+
+def _run_development_reset(
+    operation_id: str,
+    *,
+    confirmation: str,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    try:
+        settings = TriageHistorySettings.from_env()
+    except ConfigurationError as error:
+        return _configuration_failure(operation_id, error, stderr=stderr)
+    configure_logging(settings.log_level)
+    if confirmation != RESET_CONFIRMATION:
+        print(
+            f"Operation: {operation_id}\nConfiguration error: exact reset confirmation is required",
+            file=stderr,
+        )
+        return 2
+    try:
+        run_migrations(settings.database_path)
+        result = reset_triage_development_data(
+            settings.database_path,
+            confirmation=confirmation,
+            now=datetime.now(UTC),
+        )
+    except TriageDevelopmentResetError:
+        LOGGER.warning(
+            "email_triage operation_id=%s command=reset-development-data "
+            "outcome=failure category=reset_refused",
+            operation_id,
+        )
+        print(f"Operation: {operation_id}\nReset refused.", file=stderr)
+        return 5
+    except (OSError, sqlite3.Error):
+        return _persistence_failure(operation_id, "reset-development-data", stderr=stderr)
+
+    total = sum(result.deleted_counts.values())
+    LOGGER.warning(
+        "email_triage operation_id=%s command=reset-development-data "
+        "outcome=success deleted_row_count=%d",
+        operation_id,
+        total,
+    )
+    print(f"Operation: {operation_id}", file=stdout)
+    print(f"Backup: {result.backup_path}", file=stdout)
+    print(f"Deleted email-triage rows: {total}", file=stdout)
+    for table, count in result.deleted_counts.items():
+        print(f"  {table}: {count}", file=stdout)
+    print("Other application data: preserved", file=stdout)
     return 0
 
 

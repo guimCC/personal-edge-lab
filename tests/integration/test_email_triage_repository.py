@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from personal_edge_lab.domain.ai import CompletionResult, CompletionTiming, ModelIdentity
 from personal_edge_lab.domain.email import (
     EmailContentSource,
+    EmailDocument,
     EmailMessageId,
     EmailThreadId,
 )
@@ -15,6 +16,7 @@ from personal_edge_lab.domain.email_triage import (
     TriageLabel,
     TriagePromptIdentity,
 )
+from personal_edge_lab.domain.email_triage_messages import TriageMessageFilter
 from personal_edge_lab.domain.email_triage_review import TriageRunFilter
 from personal_edge_lab.domain.email_triage_runs import (
     TriageEvaluationIdentity,
@@ -27,6 +29,7 @@ from personal_edge_lab.infrastructure.persistence.sqlite.email_triage import (
     SqliteTriageRunRepository,
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+from personal_edge_lab.modules.email_triage.input import prepare_triage_input
 
 NOW = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
 
@@ -229,7 +232,7 @@ def test_stale_unknown_work_is_explicitly_interrupted(tmp_path) -> None:
         assert details.items[0].status is TriageRunItemStatus.INTERRUPTED
 
 
-def test_repository_never_stores_query_or_email_content(tmp_path) -> None:
+def test_repository_stores_decision_reason_but_not_unprovided_email_content(tmp_path) -> None:
     database = tmp_path / "triage.db"
     run_migrations(database)
     with SqliteTriageRunRepository(database) as repository:
@@ -250,9 +253,9 @@ def test_repository_never_stores_query_or_email_content(tmp_path) -> None:
         b"private-query-sentinel",
         b"sender@example.test",
         b"private-body-sentinel",
-        b"private-reason-sentinel",
     ):
         assert sentinel not in raw_database
+    assert b"private-reason-sentinel" in raw_database
 
 
 def test_review_queries_expose_decision_evidence_but_keep_gmail_id_internal(
@@ -294,3 +297,133 @@ def test_review_queries_expose_decision_evidence_but_keep_gmail_id_internal(
     assert not hasattr(detail.items[0], "message_id")
     assert reference is not None
     assert reference.message_id == EmailMessageId("message-a")
+
+
+def test_message_projection_deduplicates_and_preserves_success_after_later_failure(
+    tmp_path,
+) -> None:
+    database = tmp_path / "triage.db"
+    run_migrations(database)
+    document = EmailDocument(
+        message_id=EmailMessageId("message-product"),
+        thread_id=EmailThreadId("thread-product"),
+        received_at=NOW,
+        sender="Product Sender <product@example.test>",
+        subject="Product subject",
+        text="product body sentinel",
+        content_source=EmailContentSource.PLAIN_TEXT,
+        original_size_bytes=21,
+        normalized_char_count=21,
+        truncated=False,
+        metadata_truncated=False,
+        quoted_text_removed=False,
+        signature_removed=False,
+        tracking_removed=False,
+        duplicate_lines_removed=False,
+    )
+    evidence, email = prepare_triage_input(document)
+    identity = TriageEvaluationIdentity(
+        identity_sha256="9" * 64,
+        input=evidence,
+        profile_name="email-triage",
+        profile_version="1.0.0",
+        taxonomy_version="1.0.0",
+        schema_version="1.0.0",
+        generation_parameters_version="1.0.0",
+        prompt=TriagePromptIdentity(
+            name="personal-edge-lab/email-triage",
+            version="7",
+            source=PromptSourceKind.LANGFUSE,
+        ),
+        model_alias="qwen3-1.7b-q4-k-m",
+    )
+    with SqliteTriageRunRepository(database) as repository:
+        _create_run(repository, "product-one")
+        first_stored = repository.store_message(
+            run_id="product-one",
+            ordinal=1,
+            document=document,
+            evidence=evidence,
+            model_input=email.message,
+            recorded_at=NOW,
+        )
+        first = repository.reserve(
+            "product-one",
+            ordinal=1,
+            identity=identity,
+            operation_id="product-first-attempt",
+            force_new_attempt=False,
+            message_record_id=first_stored.database_id,
+            content_snapshot_id=first_stored.content_snapshot_id,
+            reserved_at=NOW,
+        )
+        assert first.attempt_id is not None
+        _complete(repository, "product-one", first.attempt_id)
+        repository.complete_run(
+            "product-one",
+            status=TriageRunStatus.COMPLETED_WITH_RESULTS,
+            completed_at=NOW,
+        )
+
+        later = NOW + timedelta(seconds=1)
+        _create_run(repository, "product-two", force=True, at=later)
+        second_stored = repository.store_message(
+            run_id="product-two",
+            ordinal=1,
+            document=document,
+            evidence=evidence,
+            model_input=email.message,
+            recorded_at=later,
+        )
+        second = repository.reserve(
+            "product-two",
+            ordinal=1,
+            identity=identity,
+            operation_id="product-second-attempt",
+            force_new_attempt=True,
+            message_record_id=second_stored.database_id,
+            content_snapshot_id=second_stored.content_snapshot_id,
+            reserved_at=later,
+        )
+        assert second.attempt_id is not None
+        repository.fail_attempt(
+            attempt_id=second.attempt_id,
+            run_id="product-two",
+            ordinal=1,
+            category="timeout",
+            provider="llama_cpp",
+            model_alias="qwen3-1.7b-q4-k-m",
+            queue_wait_seconds=0,
+            provider_seconds=60,
+            attempt_count=1,
+            retry_eligible=True,
+            retry_after_seconds=None,
+            trace_id=None,
+            trace_unavailable=True,
+            completed_at=later,
+        )
+
+        page = repository.message_page(
+            limit=20,
+            message_filter=TriageMessageFilter.ISSUES,
+            label=None,
+            cursor=None,
+        )
+        recommendations = repository.message_page(
+            limit=20,
+            message_filter=TriageMessageFilter.RECOMMENDATIONS,
+            label=None,
+            cursor=None,
+        )
+        assert len(page.items) == 1
+        assert len(recommendations.items) == 1
+        assert page.items[0].latest_status is TriageRunItemStatus.FAILED
+        assert page.items[0].latest_failure_category == "timeout"
+        assert page.items[0].label is TriageLabel.BILLING
+        assert page.items[0].reason == "private-reason-sentinel"
+        assert first_stored.record_id == second_stored.record_id
+        detail = repository.message_detail(first_stored.record_id)
+        assert detail is not None
+        assert detail.normalized_text == "product body sentinel"
+        assert detail.technical.attempt_id == first.attempt_id
+        assert detail.technical.run_id == "product-one"
