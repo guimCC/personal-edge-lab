@@ -141,3 +141,45 @@ test("switches to the bounded 24-hour chart window", async ({ page }) => {
     "true",
   );
 });
+
+test("keeps the phone email workspace centered without horizontal overflow", async (
+  { page },
+  testInfo,
+) => {
+  test.skip(testInfo.project.name !== "phone");
+  await page.unroute("**/api/v1/auth/session");
+  await page.route("**/api/v1/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        authenticated: false,
+        auth_enabled: false,
+        controls_enabled: false,
+        email_triage_workspace_enabled: true,
+        email_triage_review_enabled: true,
+      },
+    }),
+  );
+  await page.route("**/api/v1/email-triage/messages?*", (route) =>
+    route.fulfill({
+      json: {
+        count: 0,
+        limit: 20,
+        status: "all",
+        label: null,
+        next_cursor: null,
+        items: [],
+      },
+    }),
+  );
+
+  await page.goto("/#email-triage");
+  await expect(page.getByRole("heading", { name: "Email triage" })).toBeVisible();
+  const mobileNavigation = page.getByRole("navigation", {
+    name: "Mobile workspace sections",
+  });
+  const navigationWidths = await mobileNavigation.getByRole("link").evaluateAll((links) =>
+    links.map((link) => link.getBoundingClientRect().width),
+  );
+  expect(Math.max(...navigationWidths) - Math.min(...navigationWidths)).toBeLessThan(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

@@ -422,6 +422,24 @@
 }
 
 @media (max-width: 780px) {
+  .triage-workspace,
+  .triage-workspace > *,
+  .triage-heading > *,
+  .triage-message-layout,
+  .triage-message-list,
+  .triage-message-detail,
+  .triage-message-list > button,
+  .triage-message-meta,
+  .triage-message-recommendation {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .triage-workspace,
+  .triage-message-layout {
+    width: 100%;
+  }
+
   .triage-heading,
   .triage-message-filters,
   .triage-diagnostics > header {
@@ -444,6 +462,18 @@
     overflow-y: auto;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .triage-message-meta,
+  .triage-message-recommendation {
+    display: grid;
+    justify-content: stretch;
+    gap: 5px;
+  }
+
+  .triage-message-meta strong {
+    width: 100%;
+    min-width: 0;
   }
 }
 
