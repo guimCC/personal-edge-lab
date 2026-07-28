@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 
 import pytest
@@ -25,7 +24,6 @@ from personal_edge_lab.apps.telemetry_collector.config import (
     ConfigurationError as TelemetryConfigurationError,
 )
 from personal_edge_lab.apps.telemetry_collector.config import Settings as TelemetrySettings
-from personal_edge_lab.infrastructure.gmail.oauth import GMAIL_READONLY_SCOPE
 
 TELEMETRY_VARIABLES = (
     "EDGE_NODE_BASE_URL",
@@ -53,6 +51,7 @@ API_VARIABLES = (
     "PUBLIC_ORIGIN",
     "API_AUTH_ENABLED",
     "API_AC_CONTROL_ENABLED",
+    "EMAIL_TRIAGE_WORKSPACE_ENABLED",
     "GMAIL_TRIAGE_REVIEW_ENABLED",
     "GMAIL_READ_ENABLED",
     "GMAIL_CLIENT_SECRET_FILE",
@@ -176,6 +175,7 @@ def test_api_environment_defaults(monkeypatch) -> None:
     assert settings.docs_enabled is True
     assert settings.auth_enabled is False
     assert settings.ac_control_enabled is False
+    assert settings.email_triage_workspace_enabled is False
     assert settings.gmail_triage_review_enabled is False
     assert settings.public_origin == "https://rubik-edge-01.local"
     assert str(settings.database_path) == "data/telemetry.db"
@@ -184,15 +184,15 @@ def test_api_environment_defaults(monkeypatch) -> None:
     assert settings.log_level_name == "INFO"
 
 
-def test_gmail_review_requires_authentication(monkeypatch) -> None:
+def test_email_triage_workspace_requires_authentication(monkeypatch) -> None:
     clear(monkeypatch, API_VARIABLES)
-    monkeypatch.setenv("GMAIL_TRIAGE_REVIEW_ENABLED", "true")
+    monkeypatch.setenv("EMAIL_TRIAGE_WORKSPACE_ENABLED", "true")
 
     with pytest.raises(ApiConfigurationError, match="API_AUTH_ENABLED"):
         ApiSettings.from_env()
 
 
-def test_gmail_review_requires_read_gate_and_private_refresh_directory(
+def test_email_triage_workspace_needs_no_gmail_configuration_and_new_gate_wins(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -200,58 +200,17 @@ def test_gmail_review_requires_read_gate_and_private_refresh_directory(
     password_hash = tmp_path / "owner-password.hash"
     password_hash.write_text("$argon2id$test", encoding="utf-8")
     password_hash.chmod(0o600)
-    client = tmp_path / "gmail-client.json"
-    client.write_text(
-        json.dumps(
-            {
-                "installed": {
-                    "client_id": "client-id",
-                    "client_secret": "secret",
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": ["http://127.0.0.1"],
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    client.chmod(0o600)
-    token_directory = tmp_path / "gmail-oauth"
-    token_directory.mkdir(mode=0o700)
-    token = token_directory / "gmail-token.json"
-    token.write_text(
-        json.dumps(
-            {
-                "token": "access",
-                "refresh_token": "refresh",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "client_id": "client-id",
-                "client_secret": "secret",
-                "scopes": [GMAIL_READONLY_SCOPE],
-            }
-        ),
-        encoding="utf-8",
-    )
-    token.chmod(0o600)
     monkeypatch.setenv("API_AUTH_ENABLED", "true")
     monkeypatch.setenv("PUBLIC_ORIGIN", "https://rubik-edge-01.local")
     monkeypatch.setenv("AUTH_PASSWORD_HASH_FILE", str(password_hash))
     monkeypatch.setenv("GMAIL_TRIAGE_REVIEW_ENABLED", "true")
-    monkeypatch.setenv("GMAIL_CLIENT_SECRET_FILE", str(client))
-    monkeypatch.setenv("GMAIL_TOKEN_FILE", str(token))
-
-    with pytest.raises(ApiConfigurationError, match="GMAIL_READ_ENABLED"):
-        ApiSettings.from_env()
-
-    monkeypatch.setenv("GMAIL_READ_ENABLED", "true")
     settings = ApiSettings.from_env()
+    assert settings.email_triage_workspace_enabled is True
     assert settings.gmail_triage_review_enabled is True
-    assert settings.gmail is not None
-    assert settings.gmail.token_file == token
 
-    token_directory.chmod(0o755)
-    with pytest.raises(ApiConfigurationError, match="0700"):
-        ApiSettings.from_env()
+    monkeypatch.setenv("EMAIL_TRIAGE_WORKSPACE_ENABLED", "false")
+    settings = ApiSettings.from_env()
+    assert settings.triage_workspace_enabled is False
 
 
 def test_api_environment_overrides(monkeypatch, tmp_path) -> None:

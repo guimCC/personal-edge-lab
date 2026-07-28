@@ -11,6 +11,7 @@ class SessionResponse(ApiModel):
     authenticated: bool
     auth_enabled: bool
     controls_enabled: bool
+    email_triage_workspace_enabled: bool = False
     email_triage_review_enabled: bool = False
     actor_id: str | None = None
     csrf_token: str | None = None

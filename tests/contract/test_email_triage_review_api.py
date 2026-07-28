@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import UTC, datetime
 
 from pwdlib import PasswordHash
@@ -29,26 +28,12 @@ from personal_edge_lab.infrastructure.persistence.sqlite.email_triage import (
     SqliteTriageRunRepository,
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+from personal_edge_lab.modules.email_triage.input import prepare_triage_input
 
 NOW = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
 ORIGIN = "https://rubik-edge-01.local"
 PASSWORD = "review-password!"
 MESSAGE_ID = EmailMessageId("private-gmail-message-id")
-
-
-class _ExactSource:
-    def __init__(self, document: EmailDocument) -> None:
-        self.document = document
-        self.calls = 0
-        self.closed = False
-
-    def retrieve_exact(self, message_id: EmailMessageId) -> EmailDocument:
-        self.calls += 1
-        assert message_id == MESSAGE_ID
-        return self.document
-
-    def close(self) -> None:
-        self.closed = True
 
 
 def _settings(tmp_path, *, enabled: bool = True) -> Settings:
@@ -67,7 +52,7 @@ def _settings(tmp_path, *, enabled: bool = True) -> Settings:
         public_origin=ORIGIN,
         auth_enabled=True,
         password_hash_file=password_hash,
-        gmail_triage_review_enabled=enabled,
+        email_triage_workspace_enabled=enabled,
     )
 
 
@@ -92,8 +77,6 @@ def _document(*, text: str = "private-body-" * 180) -> EmailDocument:
 
 
 def _identity(document: EmailDocument) -> TriageEvaluationIdentity:
-    from personal_edge_lab.modules.email_triage.input import prepare_triage_input
-
     evidence, _email = prepare_triage_input(document)
     return TriageEvaluationIdentity(
         identity_sha256="a" * 64,
@@ -112,13 +95,15 @@ def _identity(document: EmailDocument) -> TriageEvaluationIdentity:
     )
 
 
-def _seed(database, document: EmailDocument) -> None:
+def _seed(database, document: EmailDocument) -> str:
     run_migrations(database)
+    evidence, email = prepare_triage_input(document)
     with SqliteTriageRunRepository(database) as repository:
         repository.create_run(
             run_id="run-review",
             operation_id="operation-review",
             query_sha256="f" * 64,
+            query_text="in:inbox private-query",
             requested_limit=1,
             force_new_attempt=False,
             requested_at=NOW,
@@ -134,12 +119,22 @@ def _seed(database, document: EmailDocument) -> None:
             has_more=False,
             updated_at=NOW,
         )
+        stored = repository.store_message(
+            run_id="run-review",
+            ordinal=1,
+            document=document,
+            evidence=evidence,
+            model_input=email.message,
+            recorded_at=NOW,
+        )
         reservation = repository.reserve(
             "run-review",
             ordinal=1,
             identity=_identity(document),
             operation_id="attempt-review",
             force_new_attempt=False,
+            message_record_id=stored.database_id,
+            content_snapshot_id=stored.content_snapshot_id,
             reserved_at=NOW,
         )
         assert reservation.attempt_id is not None
@@ -169,19 +164,22 @@ def _seed(database, document: EmailDocument) -> None:
             status=TriageRunStatus.COMPLETED_WITH_RESULTS,
             completed_at=NOW,
         )
+    return stored.record_id
 
 
 def _login(client: TestClient) -> None:
     response = client.post("/api/v1/auth/login", json={"password": PASSWORD})
     assert response.status_code == 200
+    assert response.json()["email_triage_workspace_enabled"] is True
+    assert response.json()["email_triage_review_enabled"] is True
 
 
-def test_review_routes_are_authenticated_and_disabled_as_not_found(tmp_path) -> None:
+def test_workspace_routes_are_authenticated_and_disabled_as_not_found(tmp_path) -> None:
     settings = _settings(tmp_path, enabled=False)
     with TestClient(create_app(settings), base_url=ORIGIN) as client:
-        response = client.get("/api/v1/email-triage/runs")
-        _login(client)
-        disabled = client.get("/api/v1/email-triage/runs")
+        response = client.get("/api/v1/email-triage/messages")
+        _login_disabled = client.post("/api/v1/auth/login", json={"password": PASSWORD})
+        disabled = client.get("/api/v1/email-triage/messages")
 
     assert response.status_code == 404
     assert disabled.status_code == 404
@@ -189,62 +187,50 @@ def test_review_routes_are_authenticated_and_disabled_as_not_found(tmp_path) -> 
     assert disabled.headers["Pragma"] == "no-cache"
 
 
-def test_review_list_detail_and_explicit_private_content_contract(tmp_path) -> None:
+def test_message_list_and_persisted_detail_need_no_gmail_call(tmp_path) -> None:
     settings = _settings(tmp_path)
     document = _document()
-    _seed(settings.database_path, document)
-    source = _ExactSource(document)
-    with TestClient(
-        create_app(settings, gmail_source_factory=lambda: source),
-        base_url=ORIGIN,
-    ) as client:
-        unauthorized = client.get("/api/v1/email-triage/runs")
+    record_id = _seed(settings.database_path, document)
+
+    with TestClient(create_app(settings), base_url=ORIGIN) as client:
+        unauthorized = client.get("/api/v1/email-triage/messages")
         _login(client)
-        listing = client.get("/api/v1/email-triage/runs?limit=20&status=completed")
-        detail = client.get("/api/v1/email-triage/runs/run-review")
-        assert source.calls == 0
-        content = client.get("/api/v1/email-triage/runs/run-review/items/1/review")
+        listing = client.get(
+            "/api/v1/email-triage/messages?limit=20&status=recommendations&label=work"
+        )
+        detail = client.get(f"/api/v1/email-triage/messages/{record_id}")
 
     assert unauthorized.status_code == 401
     assert listing.status_code == 200
+    assert listing.headers["Cache-Control"] == "no-store"
     assert listing.json()["count"] == 1
+    assert listing.json()["items"][0]["sender"] == document.sender
+    assert listing.json()["items"][0]["subject"] == document.subject
+    assert listing.json()["items"][0]["label"] == "work"
+    assert listing.json()["items"][0]["reason_preview"] == "private reason sentinel"
     assert detail.status_code == 200
-    detail_text = detail.text
-    assert MESSAGE_ID.value not in detail_text
-    assert "private-thread-id" not in detail_text
-    assert "private reason sentinel" not in detail_text
-    assert detail.json()["items"][0]["label"] == "work"
-    assert detail.json()["items"][0]["reason_chars"] == 23
-    assert content.status_code == 200
-    assert content.headers["Cache-Control"] == "no-store"
-    assert content.headers["Pragma"] == "no-cache"
-    assert content.json()["sender"] == document.sender
-    assert content.json()["subject"] == document.subject
-    assert len(content.json()["model_input"]) == 1600
-    assert content.json()["normalized_remainder"]
-    assert content.json()["identity_verified"] is True
-    assert source.calls == 1
-    assert source.closed is True
+    assert detail.headers["Cache-Control"] == "no-store"
+    assert detail.json()["normalized_text"] == document.text
+    assert len(detail.json()["model_input"]) == 1600
+    assert detail.json()["summary"]["label"] == "work"
+    assert detail.json()["technical"]["trace_id"] == "4" * 32
+    assert MESSAGE_ID.value not in detail.text
+    assert "private-thread-id" not in detail.text
 
 
-def test_changed_message_content_is_sanitized_and_never_returned(tmp_path, caplog) -> None:
+def test_message_filters_cursor_and_missing_detail_are_bounded(tmp_path) -> None:
     settings = _settings(tmp_path)
-    original = _document()
-    _seed(settings.database_path, original)
-    changed = replace(
-        original,
-        text="changed-private-body-sentinel",
-        normalized_char_count=29,
-    )
-    with TestClient(
-        create_app(settings, gmail_source_factory=lambda: _ExactSource(changed)),
-        base_url=ORIGIN,
-    ) as client:
+    record_id = _seed(settings.database_path, _document())
+    with TestClient(create_app(settings), base_url=ORIGIN) as client:
         _login(client)
-        response = client.get("/api/v1/email-triage/runs/run-review/items/1/review")
+        empty = client.get("/api/v1/email-triage/messages?status=issues")
+        bad_label = client.get("/api/v1/email-triage/messages?label=invalid")
+        bad_cursor = client.get("/api/v1/email-triage/messages?cursor=not-a-cursor")
+        missing = client.get("/api/v1/email-triage/messages/00000000000000000000000000000000")
+        existing = client.get(f"/api/v1/email-triage/messages/{record_id}")
 
-    assert response.status_code == 409
-    assert response.json() == {"detail": "review content unavailable"}
-    assert "changed-private-body-sentinel" not in response.text
-    assert "changed-private-body-sentinel" not in caplog.text
-    assert MESSAGE_ID.value not in caplog.text
+    assert empty.json()["items"] == []
+    assert bad_label.status_code == 422
+    assert bad_cursor.status_code == 422
+    assert missing.status_code == 404
+    assert existing.status_code == 200

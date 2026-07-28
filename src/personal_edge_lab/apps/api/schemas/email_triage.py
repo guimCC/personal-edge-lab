@@ -6,7 +6,12 @@ from datetime import datetime
 from typing import Literal
 
 from personal_edge_lab.apps.api.schemas.common import ApiModel
-from personal_edge_lab.domain.email_triage_review import TriageReviewContent, TriageRunFilter
+from personal_edge_lab.domain.email_triage_messages import (
+    TriageMessageDetail,
+    TriageMessageFilter,
+    TriageMessageSummary,
+)
+from personal_edge_lab.domain.email_triage_review import TriageRunFilter
 from personal_edge_lab.domain.email_triage_runs import (
     TriageRunDetails,
     TriageRunItemSummary,
@@ -28,6 +33,7 @@ class TriageRunSummaryResponse(ApiModel):
     reused_count: int
     failed_count: int
     interrupted_count: int
+    query_text: str | None
 
     @classmethod
     def from_domain(cls, value: TriageRunSummary) -> TriageRunSummaryResponse:
@@ -45,6 +51,7 @@ class TriageRunSummaryResponse(ApiModel):
             reused_count=value.reused_count,
             failed_count=value.failed_count,
             interrupted_count=value.interrupted_count,
+            query_text=value.query_text,
         )
 
 
@@ -76,7 +83,6 @@ class TriageRunItemResponse(ApiModel):
     completion_tokens: int | None
     total_tokens: int | None
     attempt_id: int | None
-    review_available: bool
 
     @classmethod
     def from_domain(cls, value: TriageRunItemSummary) -> TriageRunItemResponse:
@@ -101,7 +107,6 @@ class TriageRunItemResponse(ApiModel):
             completion_tokens=value.completion_tokens,
             total_tokens=value.total_tokens,
             attempt_id=value.attempt_id,
-            review_available=value.review_available,
         )
 
 
@@ -118,44 +123,116 @@ class TriageRunDetailResponse(ApiModel):
         )
 
 
-class TriageReviewContentResponse(ApiModel):
-    run_id: str
-    ordinal: int
-    message_fingerprint: str
+class TriageMessageSummaryResponse(ApiModel):
+    record_id: str
+    received_at_utc: datetime
     sender: str
     subject: str
+    label: str | None
+    reason_preview: str | None
+    latest_status: str
+    latest_failure_category: str | None
+    last_triaged_at_utc: datetime
+    model_input_truncated: bool
+    source_truncated: bool
+    has_recommendation: bool
+
+    @classmethod
+    def from_domain(cls, value: TriageMessageSummary) -> TriageMessageSummaryResponse:
+        return cls(
+            record_id=value.record_id,
+            received_at_utc=value.received_at,
+            sender=value.sender,
+            subject=value.subject,
+            label=value.label.value if value.label is not None else None,
+            reason_preview=value.reason,
+            latest_status=value.latest_status.value,
+            latest_failure_category=value.latest_failure_category,
+            last_triaged_at_utc=value.last_triaged_at,
+            model_input_truncated=value.model_input_truncated,
+            source_truncated=value.source_truncated,
+            has_recommendation=value.has_recommendation,
+        )
+
+
+class TriageMessageListResponse(ApiModel):
+    count: int
+    limit: int
+    status: TriageMessageFilter
+    label: str | None
+    next_cursor: str | None
+    items: list[TriageMessageSummaryResponse]
+
+
+class TriageMessageTechnicalResponse(ApiModel):
+    run_id: str
+    item_ordinal: int
+    attempt_id: int | None
+    decision_sha256: str | None
+    prompt_source: str | None
+    prompt_version: str | None
+    profile_version: str | None
+    taxonomy_version: str | None
+    schema_version: str | None
+    generation_parameters_version: str | None
+    provider: str | None
+    model_alias: str | None
+    trace_id: str | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    queue_wait_seconds: float | None
+    provider_seconds: float | None
+    total_seconds: float | None
+
+
+class TriageMessageDetailResponse(ApiModel):
+    summary: TriageMessageSummaryResponse
+    normalized_text: str
     model_input: str
-    normalized_remainder: str
-    normalized_chars: int
-    model_input_chars: int
+    normalized_sha256: str
+    model_input_sha256: str
+    original_size_bytes: int
     content_source: str
     cleanup_flags: list[str]
-    source_truncated: bool
-    model_input_truncated: bool
     metadata_truncated: bool
-    identity_verified: bool
-    api_call_count: Literal[1]
-    elapsed_seconds: float
+    technical: TriageMessageTechnicalResponse
     gmail_changes: Literal["none"] = "none"
 
     @classmethod
-    def from_domain(cls, value: TriageReviewContent) -> TriageReviewContentResponse:
+    def from_domain(cls, value: TriageMessageDetail) -> TriageMessageDetailResponse:
+        technical = value.technical
         return cls(
-            run_id=value.run_id,
-            ordinal=value.ordinal,
-            message_fingerprint=value.message_fingerprint,
-            sender=value.sender,
-            subject=value.subject,
+            summary=TriageMessageSummaryResponse.from_domain(value.summary),
+            normalized_text=value.normalized_text,
             model_input=value.model_input,
-            normalized_remainder=value.normalized_remainder,
-            normalized_chars=value.normalized_chars,
-            model_input_chars=value.model_input_chars,
+            normalized_sha256=value.normalized_sha256,
+            model_input_sha256=value.model_input_sha256,
+            original_size_bytes=value.original_size_bytes,
             content_source=value.content_source.value,
             cleanup_flags=list(value.cleanup_flags),
-            source_truncated=value.source_truncated,
-            model_input_truncated=value.model_input_truncated,
             metadata_truncated=value.metadata_truncated,
-            identity_verified=value.identity_verified,
-            api_call_count=1,
-            elapsed_seconds=value.elapsed_seconds,
+            technical=TriageMessageTechnicalResponse(
+                run_id=technical.run_id,
+                item_ordinal=technical.item_ordinal,
+                attempt_id=technical.attempt_id,
+                decision_sha256=technical.decision_sha256,
+                prompt_source=(
+                    technical.prompt_source.value if technical.prompt_source is not None else None
+                ),
+                prompt_version=technical.prompt_version,
+                profile_version=technical.profile_version,
+                taxonomy_version=technical.taxonomy_version,
+                schema_version=technical.schema_version,
+                generation_parameters_version=technical.generation_parameters_version,
+                provider=technical.provider,
+                model_alias=technical.model_alias,
+                trace_id=technical.trace_id,
+                prompt_tokens=technical.prompt_tokens,
+                completion_tokens=technical.completion_tokens,
+                total_tokens=technical.total_tokens,
+                queue_wait_seconds=technical.queue_wait_seconds,
+                provider_seconds=technical.provider_seconds,
+                total_seconds=technical.total_seconds,
+            ),
         )

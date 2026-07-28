@@ -247,7 +247,9 @@ def test_wp7_batch_depends_on_ports_not_sqlite_or_gmail_adapters() -> None:
     paths = [
         PACKAGE_ROOT / "modules/email_triage/batch.py",
         PACKAGE_ROOT / "application/ports/email_triage_runs.py",
+        PACKAGE_ROOT / "application/ports/email_triage_messages.py",
         PACKAGE_ROOT / "domain/email_triage_runs.py",
+        PACKAGE_ROOT / "domain/email_triage_messages.py",
     ]
     forbidden = (
         "personal_edge_lab.infrastructure",
@@ -256,6 +258,32 @@ def test_wp7_batch_depends_on_ports_not_sqlite_or_gmail_adapters() -> None:
         "langfuse",
         "pydantic",
         "sqlite3",
+    )
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(forbidden)
+        )
+        for path in paths
+    }
+    assert not {path: names for path, names in violations.items() if names}
+
+
+def test_wp8_1_message_api_has_no_gmail_model_observability_or_telegram_dependency() -> None:
+    paths = [
+        PACKAGE_ROOT / "apps/api/routers/email_triage.py",
+        PACKAGE_ROOT / "apps/api/context.py",
+        PACKAGE_ROOT / "application/ports/email_triage_messages.py",
+        PACKAGE_ROOT / "domain/email_triage_messages.py",
+    ]
+    forbidden = (
+        "personal_edge_lab.infrastructure.gmail",
+        "personal_edge_lab.infrastructure.ai",
+        "personal_edge_lab.infrastructure.observability",
+        "personal_edge_lab.apps.telegram_bot",
+        "google",
+        "httpx",
+        "langfuse",
+        "opentelemetry",
     )
     violations = {
         str(path.relative_to(PACKAGE_ROOT)): sorted(

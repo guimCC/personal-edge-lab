@@ -8,7 +8,8 @@ from personal_edge_lab.apps.api.schemas.ac import (
 )
 from personal_edge_lab.apps.api.schemas.auth import LoginRequest, SessionResponse
 from personal_edge_lab.apps.api.schemas.email_triage import (
-    TriageReviewContentResponse,
+    TriageMessageDetailResponse,
+    TriageMessageListResponse,
     TriageRunDetailResponse,
     TriageRunListResponse,
 )
@@ -52,7 +53,8 @@ __all__ = [
     "TemperatureHistoryResponse",
     "TemperatureReadingResponse",
     "TemperatureSeriesResponse",
-    "TriageReviewContentResponse",
+    "TriageMessageDetailResponse",
+    "TriageMessageListResponse",
     "TriageRunDetailResponse",
     "TriageRunListResponse",
 ]

@@ -15,7 +15,6 @@ from fastapi.staticfiles import StaticFiles
 
 from personal_edge_lab import __version__
 from personal_edge_lab.application.ports.ac import AcController
-from personal_edge_lab.application.ports.email_triage_review import ExactEmailSource
 from personal_edge_lab.apps.api.config import Settings
 from personal_edge_lab.apps.api.context import ApiContext
 from personal_edge_lab.apps.api.routers.ac import create_ac_router
@@ -37,14 +36,12 @@ def create_app(
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     token_generator: Callable[[], str] | None = None,
     ac_controller_factory: Callable[[], AcController] | None = None,
-    gmail_source_factory: Callable[[], ExactEmailSource] | None = None,
 ) -> FastAPI:
     context = ApiContext(
         settings,
         clock=clock,
         token_generator=token_generator,
         ac_controller_factory=ac_controller_factory,
-        gmail_source_factory=gmail_source_factory,
     )
 
     @asynccontextmanager
