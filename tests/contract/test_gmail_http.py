@@ -13,6 +13,7 @@ from personal_edge_lab.application.ports.email import (
 from personal_edge_lab.domain.email import (
     EmailContentSource,
     EmailItemFailureCategory,
+    EmailMessageId,
     EmailRetrievalRequest,
 )
 from personal_edge_lab.infrastructure.gmail.client import GmailEmailSource
@@ -101,6 +102,39 @@ def test_exact_get_only_contract_and_bearer_header() -> None:
     assert batch.api_call_count == 2
     assert batch.documents[0].content_source is EmailContentSource.PLAIN_TEXT
     assert batch.documents[0].text == "Hello owner"
+
+
+def test_review_exact_get_never_lists_or_mutates_gmail() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=_message("m1", body="Private body sentinel"))
+
+    with _source(handler) as source:
+        document = source.retrieve_exact(EmailMessageId("m1"))
+
+    assert document.text == "Private body sentinel"
+    assert len(requests) == 1
+    assert requests[0].method == "GET"
+    assert requests[0].url.path == "/gmail/v1/users/me/messages/m1"
+    assert dict(requests[0].url.params) == {"format": "full"}
+
+
+def test_review_deleted_message_is_sanitized_and_not_retried() -> None:
+    attempts = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(404, text="private-provider-body-sentinel")
+
+    with _source(handler) as source, pytest.raises(EmailSourceError) as caught:
+        source.retrieve_exact(EmailMessageId("deleted"))
+
+    assert attempts == 1
+    assert caught.value.category is EmailSourceFailureCategory.NOT_FOUND
+    assert "sentinel" not in str(caught.value)
 
 
 def test_empty_search_is_a_successful_empty_batch() -> None:

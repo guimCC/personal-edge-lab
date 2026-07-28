@@ -9,11 +9,15 @@ from datetime import datetime
 from pathlib import Path
 
 from personal_edge_lab.domain.ai import CompletionResult
-from personal_edge_lab.domain.email import EmailItemFailure
+from personal_edge_lab.domain.email import EmailItemFailure, EmailMessageId
 from personal_edge_lab.domain.email_triage import (
     PromptSourceKind,
     TriageDecision,
     TriageLabel,
+)
+from personal_edge_lab.domain.email_triage_review import (
+    TriageReviewReference,
+    TriageRunFilter,
 )
 from personal_edge_lab.domain.email_triage_runs import (
     StoredTriageDecision,
@@ -618,6 +622,48 @@ class SqliteTriageRunRepository:
         ).fetchall()
         return [_run_summary(row) for row in rows]
 
+    def review_recent(
+        self,
+        *,
+        limit: int,
+        run_filter: TriageRunFilter,
+    ) -> list[TriageRunSummary]:
+        validate_recent_run_limit(limit)
+        predicates = {
+            TriageRunFilter.ALL: ("", ()),
+            TriageRunFilter.COMPLETED: (
+                "WHERE r.status = ?",
+                (TriageRunStatus.COMPLETED_WITH_RESULTS.value,),
+            ),
+            TriageRunFilter.ISSUES: (
+                "WHERE r.status IN (?, ?)",
+                (
+                    TriageRunStatus.COMPLETED_WITH_FAILURES.value,
+                    TriageRunStatus.FAILED_BEFORE_ITEMS.value,
+                ),
+            ),
+            TriageRunFilter.INTERRUPTED: (
+                "WHERE r.status = ?",
+                (TriageRunStatus.INTERRUPTED.value,),
+            ),
+        }
+        where_sql, parameters = predicates[run_filter]
+        rows = self._connection.execute(
+            f"""
+            SELECT r.*,
+                {_count_sql("succeeded")} AS succeeded_count,
+                {_count_sql("reused")} AS reused_count,
+                {_count_sql("failed")} AS failed_count,
+                {_count_sql("interrupted")} AS interrupted_count
+            FROM email_triage_runs r
+            {where_sql}
+            ORDER BY r.requested_at_utc DESC, r.run_id DESC
+            LIMIT ?
+            """,
+            (*parameters, limit),
+        ).fetchall()
+        return [_run_summary(row) for row in rows]
+
     def get(self, run_id: str) -> TriageRunDetails | None:
         row = self._connection.execute(
             f"""
@@ -636,9 +682,16 @@ class SqliteTriageRunRepository:
             """
             SELECT i.ordinal, i.message_fingerprint, i.received_at_utc,
                 i.status, i.failure_category, i.selected_attempt_id,
-                a.label, a.trace_id, a.queue_wait_seconds, a.provider_seconds,
+                a.label, a.decision_sha256, a.reason_chars, a.trace_id,
+                a.queue_wait_seconds, a.provider_seconds,
                 a.total_seconds, a.prompt_tokens, a.completion_tokens, a.total_tokens,
-                e.prompt_source, e.prompt_version, e.profile_version, e.model_alias
+                e.prompt_source, e.prompt_version, e.profile_version, e.model_alias,
+                CASE WHEN i.gmail_message_id IS NOT NULL
+                    AND a.label IS NOT NULL
+                    AND e.normalized_sha256 IS NOT NULL
+                    AND e.model_input_sha256 IS NOT NULL
+                    AND e.model_message_chars IS NOT NULL
+                    THEN 1 ELSE 0 END AS review_available
             FROM email_triage_run_items i
             LEFT JOIN email_triage_attempts a ON a.id = i.selected_attempt_id
             LEFT JOIN email_triage_evaluations e ON e.id = i.evaluation_id
@@ -650,6 +703,47 @@ class SqliteTriageRunRepository:
         return TriageRunDetails(
             run=_run_summary(row),
             items=tuple(_item_summary(item) for item in items),
+        )
+
+    def review_reference(
+        self,
+        run_id: str,
+        ordinal: int,
+    ) -> TriageReviewReference | None:
+        row = self._connection.execute(
+            """
+            SELECT i.run_id, i.ordinal, i.gmail_message_id, i.message_fingerprint,
+                i.status, a.label, e.normalized_sha256, e.model_input_sha256,
+                e.model_message_chars
+            FROM email_triage_run_items i
+            LEFT JOIN email_triage_attempts a ON a.id = i.selected_attempt_id
+            LEFT JOIN email_triage_evaluations e ON e.id = i.evaluation_id
+            WHERE i.run_id = ? AND i.ordinal = ?
+            """,
+            (run_id, ordinal),
+        ).fetchone()
+        if row is None:
+            return None
+        return TriageReviewReference(
+            run_id=str(row["run_id"]),
+            ordinal=int(row["ordinal"]),
+            message_id=(
+                EmailMessageId(str(row["gmail_message_id"]))
+                if row["gmail_message_id"] is not None
+                else None
+            ),
+            message_fingerprint=str(row["message_fingerprint"]),
+            item_status=TriageRunItemStatus(str(row["status"])),
+            label=TriageLabel(str(row["label"])) if row["label"] is not None else None,
+            normalized_sha256=(
+                str(row["normalized_sha256"]) if row["normalized_sha256"] is not None else None
+            ),
+            model_input_sha256=(
+                str(row["model_input_sha256"]) if row["model_input_sha256"] is not None else None
+            ),
+            model_message_chars=(
+                int(row["model_message_chars"]) if row["model_message_chars"] is not None else None
+            ),
         )
 
     def _insert_evaluation(
@@ -782,6 +876,10 @@ def _item_summary(row: sqlite3.Row) -> TriageRunItemSummary:
         ),
         status=TriageRunItemStatus(str(row["status"])),
         label=TriageLabel(str(row["label"])) if row["label"] is not None else None,
+        decision_sha256=(
+            str(row["decision_sha256"]) if row["decision_sha256"] is not None else None
+        ),
+        reason_chars=(int(row["reason_chars"]) if row["reason_chars"] is not None else None),
         failure_category=(
             str(row["failure_category"]) if row["failure_category"] is not None else None
         ),
@@ -811,6 +909,7 @@ def _item_summary(row: sqlite3.Row) -> TriageRunItemSummary:
         attempt_id=(
             int(row["selected_attempt_id"]) if row["selected_attempt_id"] is not None else None
         ),
+        review_available=bool(row["review_available"]),
     )
 
 

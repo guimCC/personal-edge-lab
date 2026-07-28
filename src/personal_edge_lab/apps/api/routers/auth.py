@@ -22,6 +22,7 @@ def create_auth_router(context: ApiContext) -> APIRouter:
                 authenticated=False,
                 auth_enabled=False,
                 controls_enabled=False,
+                email_triage_review_enabled=False,
             )
         session = context.current_session(request)
         if session is None:
@@ -30,8 +31,13 @@ def create_auth_router(context: ApiContext) -> APIRouter:
                 authenticated=False,
                 auth_enabled=True,
                 controls_enabled=settings.ac_control_enabled,
+                email_triage_review_enabled=False,
             )
-        return _session_response(session, controls_enabled=settings.ac_control_enabled)
+        return _session_response(
+            session,
+            controls_enabled=settings.ac_control_enabled,
+            email_triage_review_enabled=settings.gmail_triage_review_enabled,
+        )
 
     @router.post("/login", response_model=SessionResponse)
     def login(body: LoginRequest, response: Response) -> SessionResponse:
@@ -66,6 +72,7 @@ def create_auth_router(context: ApiContext) -> APIRouter:
         return _session_response(
             result.session,
             controls_enabled=settings.ac_control_enabled,
+            email_triage_review_enabled=settings.gmail_triage_review_enabled,
         )
 
     @router.post("/logout", status_code=204)
@@ -88,11 +95,13 @@ def _session_response(
     session: AuthenticatedSession,
     *,
     controls_enabled: bool,
+    email_triage_review_enabled: bool,
 ) -> SessionResponse:
     return SessionResponse(
         authenticated=True,
         auth_enabled=True,
         controls_enabled=controls_enabled,
+        email_triage_review_enabled=email_triage_review_enabled,
         actor_id=session.actor_id,
         csrf_token=session.csrf_token,
         idle_expires_at_utc=session.idle_expires_at_utc,

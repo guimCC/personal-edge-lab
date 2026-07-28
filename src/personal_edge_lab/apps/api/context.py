@@ -11,8 +11,11 @@ from fastapi import HTTPException, Request
 from pwdlib import PasswordHash
 
 from personal_edge_lab.application.ports.ac import AcController
+from personal_edge_lab.application.ports.email_triage_review import ExactEmailSource
 from personal_edge_lab.apps.api.config import Settings
 from personal_edge_lab.domain.auth import AuthenticatedSession
+from personal_edge_lab.infrastructure.gmail.client import GmailEmailSource
+from personal_edge_lab.infrastructure.gmail.oauth import GoogleOAuthCredentialStore
 from personal_edge_lab.infrastructure.persistence.sqlite.auth import SqliteAuthRepository
 from personal_edge_lab.modules.authentication import AuthenticationService
 
@@ -28,12 +31,30 @@ class ApiContext:
         clock: Callable[[], datetime],
         token_generator: Callable[[], str] | None,
         ac_controller_factory: Callable[[], AcController] | None,
+        gmail_source_factory: Callable[[], ExactEmailSource] | None,
     ) -> None:
         self.settings = settings
         self.clock = clock
         self.token_generator = token_generator
         self.ac_controller_factory = ac_controller_factory
+        self.gmail_source_factory = gmail_source_factory
         self.password_hasher = PasswordHash.recommended()
+
+    def gmail_source(self) -> ExactEmailSource:
+        if self.gmail_source_factory is not None:
+            return self.gmail_source_factory()
+        gmail = self.settings.gmail
+        if gmail is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return GmailEmailSource(
+            credentials=GoogleOAuthCredentialStore(
+                token_file=gmail.token_file,
+                timeout_seconds=gmail.timeout_seconds,
+            ),
+            timeout_seconds=gmail.timeout_seconds,
+            max_message_bytes=gmail.max_message_bytes,
+            max_normalized_chars=gmail.max_normalized_chars,
+        )
 
     def authentication_service(
         self,
@@ -84,6 +105,11 @@ class ApiContext:
         if self.settings.auth_enabled and session is None:
             raise HTTPException(status_code=401, detail="authentication required")
         return session
+
+    def require_triage_review(self, request: Request) -> AuthenticatedSession | None:
+        if not self.settings.gmail_triage_review_enabled:
+            raise HTTPException(status_code=404, detail="not found")
+        return self.require_session(request)
 
     def require_csrf(
         self,

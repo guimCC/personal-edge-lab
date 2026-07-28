@@ -531,6 +531,12 @@ prompt/model/decoder, persists explicit run/item/attempt lifecycles, reuses iden
 evaluations, and preserves completed work during graceful interruption. It still performs no Gmail
 mutation and makes no classification-quality claim.
 
+Work Package 8 is implemented locally as release `0.14.0` and awaits RUBIK acceptance. It adds an
+authenticated dashboard workspace for migration-006 evidence plus one explicit exact-message Gmail
+re-read. Stored hashes must match before private content is shown; content is text-only, transient,
+and never prefetched. The workspace cannot trigger triage, retain feedback, call the model,
+schedule work, notify Telegram, or modify Gmail.
+
 ## Definition of done for every stage
 
 A stage is `Done` only when:
@@ -1003,3 +1009,38 @@ changed, how it was verified, decisions made, and what remains.
 - Decide the smallest useful WP8 operator-review workflow without introducing Gmail writes.
 - Complete the deferred WP4 fixture evaluation before treating provisional recommendations as
   reliable or beginning Stage 6B mailbox-action planning.
+
+### 2026-07-28 — Protected shadow-review workspace implemented
+
+**Stage:** 6A, Work Package 8
+**Status:** Implemented locally; RUBIK acceptance pending
+
+**Delivered**
+
+- Added authenticated bounded run/detail API reads over existing migration-006 evidence.
+- Added explicit exact-message Gmail review with canonical normalization and stored-hash
+  verification before private content is associated with a recommendation.
+- Added a feature-gated dashboard workspace with run/item filters, recommendation language,
+  transient text-only private content, and no Gmail-action surface.
+- Added a dedicated owner-only OAuth refresh directory and API sandbox write access limited to that
+  directory plus the existing data directory.
+
+**Privacy**
+
+- Public schemas expose no Gmail IDs, reason text, query, sender, subject, or body.
+- Private content is never prefetched, persisted, logged, traced, cached through query state, or
+  written to browser storage; close, navigation, logout, and authentication loss remove it.
+- The new API performs no model, Langfuse, Telegram, Gmail-list, or Gmail-write operation.
+
+**Verification**
+
+- 568 Python tests passed with one opt-in live test skipped. Ruff, formatting, Pyright, ShellCheck,
+  13 frontend tests, the production frontend build, isolated package builds, wheel inspection, and
+  desktop/mobile browser verification passed.
+- No RUBIK acceptance is claimed until the owner completes the deployment checklist.
+
+**Next**
+
+- Deploy `0.14.0` disabled, then enable protected review and complete the WP8 acceptance checks.
+- Keep WP4 quality evaluation, WP9 scheduling, feedback retention, Telegram, and Gmail writes
+  separate.

@@ -1127,3 +1127,92 @@ WP0 firewall checks. Record only observed evidence in `docs/stage-6a-wp7-handoff
 Set `GMAIL_TRIAGE_ENABLED=false`, reinstall the retained `0.12.0` wheel, and restart only existing
 processes that received the package. Migration 006 remains as an inert additive schema; do not
 drop its tables. No mailbox, prompt, trace, or OAuth rollback exists.
+
+## Stage 6A WP8 protected shadow-review rollout
+
+Release `0.14.0` adds authenticated API reads and a dashboard workspace over existing migration-006
+evidence. It adds no migration, worker, timer, model call, Langfuse call, feedback store, or Gmail
+write capability.
+
+### 1. Prepare the private OAuth refresh directory
+
+Keep the existing token until acceptance is complete. Create the new canonical directory and copy
+the token as the owner:
+
+```bash
+install -d -m 0700 /home/ubuntu/personal-edge-lab/secrets/gmail-oauth
+install -m 0600 \
+  /home/ubuntu/personal-edge-lab/secrets/gmail-token.json \
+  /home/ubuntu/personal-edge-lab/secrets/gmail-oauth/gmail-token.json
+stat -c '%a %U %G %n' \
+  /home/ubuntu/personal-edge-lab/secrets/gmail-oauth \
+  /home/ubuntu/personal-edge-lab/secrets/gmail-oauth/gmail-token.json
+```
+
+Update `.env`:
+
+```dotenv
+GMAIL_TOKEN_FILE=/home/ubuntu/personal-edge-lab/secrets/gmail-oauth/gmail-token.json
+GMAIL_TRIAGE_REVIEW_ENABLED=false
+```
+
+The directory must be owned by `ubuntu` with mode `0700`; the token must be an owner-owned,
+non-symlinked regular file with mode `0600`. The API unit grants write access only to `data` and
+this directory so atomic token refresh can replace the file. All other secrets remain read-only.
+
+### 2. Deploy and verify the disabled surface
+
+```bash
+git pull --ff-only
+./scripts/deploy-rubik.sh
+curl -k -i https://rubik-edge-01.local/api/v1/email-triage/runs
+```
+
+The navigation entry must be absent and the endpoint must return 404 with `Cache-Control: no-store`
+and `Pragma: no-cache`.
+
+### 3. Enable protected review
+
+Keep the accepted Gmail read and authentication settings enabled, then set:
+
+```dotenv
+API_AUTH_ENABLED=true
+GMAIL_READ_ENABLED=true
+GMAIL_TRIAGE_REVIEW_ENABLED=true
+```
+
+`GMAIL_TRIAGE_ENABLED`, `LOCAL_LLM_ENABLED`, and `LANGFUSE_ENABLED` are independent and may be
+false. Deploy again, log in through the dashboard, and open `#email-triage`. Inspect successful,
+reused, failed, and interrupted WP7 runs. Every result must be described as a recommendation and
+the workspace must state `Gmail labels applied: none`.
+
+### 4. Explicit private-content acceptance
+
+Choose one reviewable item and click **Load private email content**. Confirm:
+
+- exactly one Gmail message is fetched and no list or write operation occurs;
+- sender and subject match Gmail;
+- the first 1,600 normalized characters are shown as content seen by the model;
+- any normalized remainder is collapsed by default;
+- content appears only when the recomputed message fingerprint, normalized hash, model-input hash,
+  and model-input length match the stored WP7 evidence;
+- HTML-looking values render as inert text;
+- close, workspace change, logout, or authentication loss removes the content;
+- browser storage remains empty and every API response is marked no-store.
+
+Confirm Gmail read/label/archive state is unchanged and private content is absent from normal logs,
+SQLite, Langfuse, and browser storage. Then rerun Gmail fetch, AI health/readiness/completion,
+synthetic triage, API `0.14.0`, collector, evaluator, Telegram, dashboard, AC, SQLite integrity,
+UNO Q, and firewall checks. Record only observed evidence in `docs/stage-6a-wp8-handoff.md`.
+
+After acceptance, remove the obsolete token copy only as an explicit owner action:
+
+```bash
+rm /home/ubuntu/personal-edge-lab/secrets/gmail-token.json
+```
+
+### WP8 rollback
+
+Set `GMAIL_TRIAGE_REVIEW_ENABLED=false`, reinstall the retained `0.13.0` wheel, restore the previous
+API unit, and restart the API. The canonical token remains compatible with the CLI. No database,
+Gmail, trace, or prompt rollback is required.

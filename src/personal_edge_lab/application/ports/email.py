@@ -15,6 +15,7 @@ class EmailSourceFailureCategory(StrEnum):
     PERMISSION_DENIED = "permission_denied"
     RATE_LIMITED = "rate_limited"
     SOURCE_UNAVAILABLE = "source_unavailable"
+    NOT_FOUND = "not_found"
     INVALID_RESPONSE = "invalid_response"
 
 

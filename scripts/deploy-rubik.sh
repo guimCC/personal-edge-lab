@@ -156,12 +156,21 @@ LOCAL_LLM_ENABLED_VALUE="${LOCAL_LLM_ENABLED:-false}"
 LANGFUSE_ENABLED_VALUE="${LANGFUSE_ENABLED:-false}"
 GMAIL_READ_ENABLED_VALUE="${GMAIL_READ_ENABLED:-false}"
 GMAIL_TRIAGE_ENABLED_VALUE="${GMAIL_TRIAGE_ENABLED:-false}"
+GMAIL_TRIAGE_REVIEW_ENABLED_VALUE="${GMAIL_TRIAGE_REVIEW_ENABLED:-false}"
 if [[ "$GMAIL_TRIAGE_ENABLED_VALUE" == "true" ]]; then
     [[ "$GMAIL_READ_ENABLED_VALUE" == "true" ]] || {
         fail "Gmail triage requires GMAIL_READ_ENABLED=true"
     }
     [[ "$LOCAL_LLM_ENABLED_VALUE" == "true" ]] || {
         fail "Gmail triage requires LOCAL_LLM_ENABLED=true"
+    }
+fi
+if [[ "$GMAIL_TRIAGE_REVIEW_ENABLED_VALUE" == "true" ]]; then
+    [[ "$AUTH_ENABLED" == "true" ]] || {
+        fail "Gmail triage review requires API_AUTH_ENABLED=true"
+    }
+    [[ "$GMAIL_READ_ENABLED_VALUE" == "true" ]] || {
+        fail "Gmail triage review requires GMAIL_READ_ENABLED=true"
     }
 fi
 if [[ "$AUTH_ENABLED" == "true" ]]; then
@@ -388,6 +397,19 @@ try:
 except (AssertionError, KeyError, OSError, UnicodeDecodeError, json.JSONDecodeError):
     raise SystemExit("Gmail credential files contain invalid private JSON") from None
 PY
+    if [[ "$GMAIL_TRIAGE_REVIEW_ENABLED_VALUE" == "true" ]]; then
+        GMAIL_TOKEN_DIRECTORY="$(dirname -- "$GMAIL_TOKEN_FILE")"
+        [[ ! -L "$GMAIL_TOKEN_DIRECTORY" && -d "$GMAIL_TOKEN_DIRECTORY" ]] || {
+            fail "GMAIL_TOKEN_FILE parent must be a real directory"
+        }
+        [[ "$(stat -c '%a' "$GMAIL_TOKEN_DIRECTORY")" == "700" ]] || {
+            fail "GMAIL_TOKEN_FILE parent must have mode 700"
+        }
+        [[ "$(stat -c '%U' "$GMAIL_TOKEN_DIRECTORY")" == "$(id -un)" ]] || {
+            fail "GMAIL_TOKEN_FILE parent must be owned by the deployment user"
+        }
+        unset GMAIL_TOKEN_DIRECTORY
+    fi
     unset GMAIL_FILE_SETTING GMAIL_FILE_PATH
 fi
 

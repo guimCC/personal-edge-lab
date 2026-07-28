@@ -17,6 +17,10 @@ from personal_edge_lab.apps.configuration import (
     read_positive_float,
     read_positive_int,
 )
+from personal_edge_lab.apps.gmail_configuration import (
+    GmailFetchSettings,
+    validate_gmail_token_directory,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +48,8 @@ class Settings:
     command_rate_limit_per_minute: int = 6
     ac_node_base_url: str = "http://ac-controller-01.local"
     ac_command_timeout_seconds: float = 5.0
+    gmail_triage_review_enabled: bool = False
+    gmail: GmailFetchSettings | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -87,6 +93,7 @@ class Settings:
             "http://ac-controller-01.local",
         )
         ac_command_timeout_seconds = read_positive_float("AC_COMMAND_TIMEOUT_SECONDS", "5")
+        gmail_triage_review_enabled = read_bool("GMAIL_TRIAGE_REVIEW_ENABLED", "false")
 
         if session_idle_seconds > session_absolute_seconds:
             raise ConfigurationError(
@@ -110,6 +117,12 @@ class Settings:
                 raise ConfigurationError("AC controls require authentication")
             if docs_enabled:
                 raise ConfigurationError("AC controls require API_DOCS_ENABLED=false")
+        gmail: GmailFetchSettings | None = None
+        if gmail_triage_review_enabled:
+            if not auth_enabled:
+                raise ConfigurationError("Gmail triage review requires API_AUTH_ENABLED=true")
+            gmail = GmailFetchSettings.from_env()
+            validate_gmail_token_directory(gmail.token_file)
 
         database_path = read_file_path("DATABASE_PATH", "./data/telemetry.db")
         device_id = read_nonblank("DEVICE_ID", "ac-controller-01")
@@ -139,4 +152,6 @@ class Settings:
             command_rate_limit_per_minute=command_rate_limit,
             ac_node_base_url=ac_node_base_url,
             ac_command_timeout_seconds=ac_command_timeout_seconds,
+            gmail_triage_review_enabled=gmail_triage_review_enabled,
+            gmail=gmail,
         )

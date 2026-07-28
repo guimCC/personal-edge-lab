@@ -1185,7 +1185,7 @@ Agents working from this document must:
 | WP5. Langfuse observability | Accepted on RUBIK | Non-blocking synthetic trace contract |
 | WP6. Gmail read-only source | Accepted on RUBIK | Bounded normalized Gmail retrieval |
 | WP7. Durable dry-run pipeline | Accepted on RUBIK | Audited Gmail-to-UNO-Q recommendations |
-| WP8. Shadow-mode presentation | Not started | Human-inspectable dry-run results |
+| WP8. Shadow-mode presentation | Implemented locally; acceptance pending | Protected transient dashboard review |
 | WP9. Scheduled shadow operation | Optional | Bounded independent worker/timer |
 
 WP0 was accepted on RUBIK on 2026-07-26. The live contract was captured, the RUBIK key copy was
@@ -1441,3 +1441,21 @@ The detailed deployment, rollback, and acceptance record is
 [`stage-6a-wp7-handoff.md`](stage-6a-wp7-handoff.md). WP7 was accepted on RUBIK, personal Gmail,
 UNO Q, and Langfuse Cloud on 2026-07-28. WP4 quality evaluation remains deferred, and WP8 owns any
 broader operator review surface.
+
+## Work Package 8 implementation handoff
+
+Release `0.14.0` implements the protected shadow-review workspace:
+
+- authenticated bounded run list and exact run-detail API reads over migration 006;
+- no public Gmail identifiers and no retained reason text;
+- one explicit exact-message Gmail GET followed by the canonical normalization/input cap and stored
+  hash verification;
+- transient sender, subject, model-visible content, and normalized remainder with no-store
+  responses and text-only dashboard rendering;
+- feature-gated `#email-triage` navigation, evidence filters, recommendation language, and an
+  explicit `Gmail labels applied: none` guarantee;
+- no triage trigger, model/Langfuse/Telegram call, feedback retention, scheduler, migration, or
+  Gmail mutation.
+
+The detailed implementation, privacy controls, deployment, rollback, and pending acceptance record
+is [`stage-6a-wp8-handoff.md`](stage-6a-wp8-handoff.md).

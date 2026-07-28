@@ -8,8 +8,12 @@ import {
   readingSchema,
   seriesSchema,
   sessionSchema,
+  triageReviewContentSchema,
+  triageRunDetailSchema,
+  triageRunListSchema,
   type BrowserCommand,
   type Reading,
+  type TriageRunFilter,
   type WindowOption,
 } from "./contracts";
 
@@ -99,6 +103,27 @@ export const getSeries = (window: WindowOption) =>
 
 export const getCommandHistory = () =>
   request("/api/v1/ac/history?limit=10", commandHistorySchema);
+
+export const getTriageRuns = (status: TriageRunFilter, limit = 20) =>
+  request(
+    `/api/v1/email-triage/runs?limit=${limit}&status=${encodeURIComponent(status)}`,
+    triageRunListSchema,
+    { cache: "no-store" },
+  );
+
+export const getTriageRun = (runId: string) =>
+  request(
+    `/api/v1/email-triage/runs/${encodeURIComponent(runId)}`,
+    triageRunDetailSchema,
+    { cache: "no-store" },
+  );
+
+export const getTriageReviewContent = (runId: string, ordinal: number) =>
+  request(
+    `/api/v1/email-triage/runs/${encodeURIComponent(runId)}/items/${ordinal}/review`,
+    triageReviewContentSchema,
+    { cache: "no-store" },
+  );
 
 export const sendCommand = (
   command: BrowserCommand,

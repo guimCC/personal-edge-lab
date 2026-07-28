@@ -10,8 +10,8 @@ The API is LAN-only, has no CORS policy, and requires the owner session for all 
 control endpoints. All timestamps are RFC 3339 UTC. Invalid request shapes and query parameters
 return HTTP 422. SQLite failures return a sanitized HTTP 503.
 
-Release `0.13.0` does not change this HTTP contract. Durable read-only Gmail triage remains an
-operator CLI and is not exposed through the API or dashboard.
+Release `0.14.0` adds an authenticated, feature-gated email-triage review surface. It presents
+existing CLI-created evidence and cannot start triage or modify Gmail.
 
 ## Authentication
 
@@ -47,6 +47,9 @@ These routes return HTTP 401 without a valid owner session:
 | `GET /api/v1/telemetry/history` | Newest-first readings; `limit` 1–1000, default 100 |
 | `GET /api/v1/telemetry/series` | `1h`, `6h`, or `24h` aggregated buckets including explicit gaps |
 | `GET /api/v1/ac/history` | Newest-first command audit; `limit` 1–100, default 20 |
+| `GET /api/v1/email-triage/runs` | Review-enabled bounded run summaries; `limit` 1–100 and status filter |
+| `GET /api/v1/email-triage/runs/{run_id}` | Exact run and item evidence without Gmail IDs or reason text |
+| `GET /api/v1/email-triage/runs/{run_id}/items/{ordinal}/review` | One explicit exact Gmail re-read after content-hash verification |
 
 Operational degradation still returns HTTP 200 from `/health`; only SQLite failure returns 503.
 Audit items include nullable `actor_id`, `idempotency_key`, and `request_source` (`dashboard` or
@@ -69,6 +72,24 @@ long-running active incident from being hidden by newer recovery history. Active
 is measured through the API check time; recovered duration ends at recovery. Evidence contains only
 stable categories and sanitized operator-facing text. The evaluator creates alert state from stored
 telemetry and collector status; this read route never contacts the ESP32 or systemd.
+
+## Protected email-triage review
+
+The three email-triage routes return 404 unless `GMAIL_TRIAGE_REVIEW_ENABLED=true`, and otherwise
+require the owner session. The session response reports `email_triage_review_enabled` so the
+dashboard can hide the workspace. Review additionally requires Gmail read access but does not
+require the triage, local-model, or Langfuse gates.
+
+`status` accepts `all`, `completed`, `issues`, or `interrupted`. Public evidence never contains raw
+Gmail message/thread IDs, sender, subject, body, query, prompt, raw output, or reason. The explicit
+item-review response may contain sender, subject, the exact first 1,600 normalized characters seen
+by WP7, and the normalized remainder. It is returned only when freshly recomputed normalization,
+model-input, length, and message-fingerprint evidence match migration 006.
+
+All review responses, including failures, carry `Cache-Control: no-store` and `Pragma: no-cache`.
+Deleted, changed, malformed, unauthorized, or unavailable messages return only sanitized
+unavailability. The endpoint performs one `messages.get?format=full`; it does not list, retry,
+download attachments, or call any Gmail write operation.
 
 ## Authenticated AC command
 

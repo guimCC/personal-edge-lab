@@ -13,10 +13,8 @@ from personal_edge_lab.application.ports.email import EmailSource, EmailSourceEr
 from personal_edge_lab.application.ports.email_triage_runs import TriageRunRepository
 from personal_edge_lab.domain.email import EmailDocument, EmailRetrievalRequest
 from personal_edge_lab.domain.email_triage import (
-    MAX_MESSAGE_CHARS,
     PreparedTriage,
     RedactedTriageTracePayload,
-    TriageEmail,
     TriageOutputError,
 )
 from personal_edge_lab.domain.email_triage_runs import (
@@ -28,6 +26,7 @@ from personal_edge_lab.domain.email_triage_runs import (
     TriageRunItemStatus,
     TriageRunStatus,
 )
+from personal_edge_lab.modules.email_triage.input import prepare_triage_input
 from personal_edge_lab.modules.email_triage.service import EmailTriageService
 
 STALE_WORK_SECONDS = 300
@@ -182,7 +181,7 @@ class TriageMailboxBatch:
         ordinal: int,
         force_new_attempt: bool,
     ) -> MailboxTriageItemResult:
-        evidence, email = _input_evidence(document)
+        evidence, email = prepare_triage_input(document)
         try:
             prepared = self._triage_service.prepare(email)
         except Exception:
@@ -357,7 +356,7 @@ class TriageMailboxBatch:
         results: list[MailboxTriageItemResult],
     ) -> int:
         for document in documents:
-            evidence, _email = _input_evidence(document)
+            evidence, _email = prepare_triage_input(document)
             recorded_at = self._clock()
             self._repository.record_item_failure(
                 run_id,
@@ -400,52 +399,6 @@ class TriageMailboxBatch:
             retrieval_failure_count=retrieval_failure_count,
             elapsed_seconds=self._monotonic() - started,
         )
-
-
-def _input_evidence(document: EmailDocument) -> tuple[TriageInputEvidence, TriageEmail]:
-    model_message = document.text[:MAX_MESSAGE_CHARS]
-    email = TriageEmail(
-        sender=document.sender,
-        subject=document.subject,
-        message=model_message,
-    )
-    canonical_input = json.dumps(
-        {"message": email.message, "sender": email.sender, "subject": email.subject},
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-    cleanup_flags = tuple(
-        name
-        for name, enabled in (
-            ("quoted_text_removed", document.quoted_text_removed),
-            ("signature_removed", document.signature_removed),
-            ("tracking_removed", document.tracking_removed),
-            ("duplicate_lines_removed", document.duplicate_lines_removed),
-        )
-        if enabled
-    )
-    return (
-        TriageInputEvidence(
-            message_id=document.message_id,
-            thread_id=document.thread_id,
-            received_at=document.received_at,
-            message_fingerprint=_sha256(document.message_id.value),
-            normalized_sha256=_sha256(document.text),
-            model_input_sha256=_sha256(canonical_input),
-            sender_chars=len(document.sender),
-            subject_chars=len(document.subject),
-            normalized_chars=len(document.text),
-            model_message_chars=len(model_message),
-            original_size_bytes=document.original_size_bytes,
-            content_source=document.content_source,
-            source_truncated=document.truncated,
-            model_input_truncated=len(document.text) > len(model_message),
-            metadata_truncated=document.metadata_truncated,
-            cleanup_flags=cleanup_flags,
-        ),
-        email,
-    )
 
 
 def _evaluation_identity(

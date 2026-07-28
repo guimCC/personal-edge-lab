@@ -6,10 +6,92 @@ export const sessionSchema = z.object({
   authenticated: z.boolean(),
   auth_enabled: z.boolean(),
   controls_enabled: z.boolean(),
+  email_triage_review_enabled: z.boolean().default(false),
   actor_id: z.string().nullable().optional(),
   csrf_token: z.string().nullable().optional(),
   idle_expires_at_utc: optionalTimestamp.optional(),
   absolute_expires_at_utc: optionalTimestamp.optional(),
+});
+
+export const triageRunFilterSchema = z.enum([
+  "all",
+  "completed",
+  "issues",
+  "interrupted",
+]);
+
+export const triageRunSummarySchema = z.object({
+  run_id: z.string(),
+  status: z.string(),
+  query_sha256: z.string(),
+  requested_limit: z.number().int().positive(),
+  force_new_attempt: z.boolean(),
+  requested_at_utc: z.string().datetime(),
+  completed_at_utc: optionalTimestamp,
+  document_count: z.number().int().nonnegative(),
+  retrieval_failure_count: z.number().int().nonnegative(),
+  succeeded_count: z.number().int().nonnegative(),
+  reused_count: z.number().int().nonnegative(),
+  failed_count: z.number().int().nonnegative(),
+  interrupted_count: z.number().int().nonnegative(),
+});
+
+export const triageRunListSchema = z.object({
+  count: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  status: triageRunFilterSchema,
+  items: z.array(triageRunSummarySchema),
+});
+
+export const triageRunItemSchema = z.object({
+  ordinal: z.number().int().positive(),
+  message_fingerprint: z.string(),
+  received_at_utc: optionalTimestamp,
+  status: z.string(),
+  label: z.string().nullable(),
+  decision_sha256: z.string().nullable(),
+  reason_chars: z.number().int().nonnegative().nullable(),
+  failure_category: z.string().nullable(),
+  prompt_source: z.string().nullable(),
+  prompt_version: z.string().nullable(),
+  profile_version: z.string().nullable(),
+  model_alias: z.string().nullable(),
+  trace_id: z.string().nullable(),
+  queue_wait_seconds: z.number().nonnegative().nullable(),
+  provider_seconds: z.number().nonnegative().nullable(),
+  total_seconds: z.number().nonnegative().nullable(),
+  prompt_tokens: z.number().int().nonnegative().nullable(),
+  completion_tokens: z.number().int().nonnegative().nullable(),
+  total_tokens: z.number().int().nonnegative().nullable(),
+  attempt_id: z.number().int().positive().nullable(),
+  review_available: z.boolean(),
+});
+
+export const triageRunDetailSchema = z.object({
+  run: triageRunSummarySchema,
+  items: z.array(triageRunItemSchema),
+  gmail_changes: z.literal("none"),
+});
+
+export const triageReviewContentSchema = z.object({
+  run_id: z.string(),
+  ordinal: z.number().int().positive(),
+  message_fingerprint: z.string(),
+  sender: z.string(),
+  subject: z.string(),
+  model_input: z.string(),
+  normalized_remainder: z.string(),
+  normalized_chars: z.number().int().nonnegative(),
+  model_input_chars: z.number().int().nonnegative(),
+  content_source: z.string(),
+  cleanup_flags: z.array(z.string()),
+  source_truncated: z.boolean(),
+  model_input_truncated: z.boolean(),
+  metadata_truncated: z.boolean(),
+  identity_verified: z.literal(true),
+  api_call_count: z.literal(1),
+  elapsed_seconds: z.number().nonnegative(),
+  gmail_changes: z.literal("none"),
 });
 
 export const healthSchema = z.object({
@@ -152,6 +234,12 @@ export const commandResponseSchema = z.object({
 });
 
 export type Session = z.infer<typeof sessionSchema>;
+export type TriageRunFilter = z.infer<typeof triageRunFilterSchema>;
+export type TriageRunSummary = z.infer<typeof triageRunSummarySchema>;
+export type TriageRunList = z.infer<typeof triageRunListSchema>;
+export type TriageRunItem = z.infer<typeof triageRunItemSchema>;
+export type TriageRunDetail = z.infer<typeof triageRunDetailSchema>;
+export type TriageReviewContent = z.infer<typeof triageReviewContentSchema>;
 export type Health = z.infer<typeof healthSchema>;
 export type Alerts = z.infer<typeof alertsSchema>;
 export type Reading = z.infer<typeof readingSchema>;

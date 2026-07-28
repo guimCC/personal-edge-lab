@@ -249,6 +249,8 @@ class TriageRunItemSummary:
     received_at: datetime | None
     status: TriageRunItemStatus
     label: TriageLabel | None
+    decision_sha256: str | None
+    reason_chars: int | None
     failure_category: str | None
     prompt_source: PromptSourceKind | None
     prompt_version: str | None
@@ -262,6 +264,7 @@ class TriageRunItemSummary:
     completion_tokens: int | None
     total_tokens: int | None
     attempt_id: int | None
+    review_available: bool
 
 
 @dataclass(frozen=True, slots=True)

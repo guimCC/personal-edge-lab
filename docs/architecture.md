@@ -262,6 +262,22 @@ index prevents concurrent active attempts for the same identity. Reused successf
 contact UNO Q or create a trace. SQLite stores IDs, hashes, lengths, versions, label and operational
 evidence but no raw query, sender, subject, body, compiled prompt, output, or reason.
 
+WP8 adds a protected read-only presentation path without changing that durable boundary:
+
+```text
+authenticated dashboard -> bounded run/detail query -> migration 006 evidence
+explicit item action     -> exact Gmail GET -> repeat normalization/input cap
+                                           -> verify stored hashes
+                                           -> transient text-only response
+```
+
+The review use case depends on a bounded evidence repository and an exact-message source port.
+Only Gmail infrastructure sees the internal message ID. Public run/detail schemas expose
+fingerprints, label, decision hash, reason length, versions, usage, timing, trace availability, and
+failure evidence. The exact-content endpoint returns private content only after identity
+verification, adds no-store headers, and makes one Gmail call. It cannot list mail, invoke the
+model, contact Langfuse or Telegram, persist content, or mutate Gmail.
+
 ## Adding capability
 
 ### Add a domain model

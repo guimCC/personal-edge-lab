@@ -9,6 +9,12 @@ At the current 15-second cadence this is approximately 2.1 million rows per devi
 Command audit, authentication throttle state, collector runtime status, alert incidents, and alert
 transitions are not included in automatic telemetry retention.
 
+Email-triage migration-006 records retain evidence only: internal Gmail identifiers, hashes,
+lengths, versions, proposed label, usage, timing, trace availability, and categorized outcomes.
+They do not retain query text, sender, subject, body, prompt, model output, or reason text. WP8
+private review content is fetched on demand, held only in browser component memory, and is not a
+retained data class.
+
 ## Enforcement
 
 Retention cleanup is intentionally deferred until the first stored reading approaches 365 days old.

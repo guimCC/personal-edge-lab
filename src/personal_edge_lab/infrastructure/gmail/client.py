@@ -113,6 +113,28 @@ class GmailEmailSource:
             elapsed_seconds=time.perf_counter() - started,
         )
 
+    def retrieve_exact(self, message_id: EmailMessageId) -> EmailDocument:
+        """Retrieve and normalize one exact Gmail message with one API attempt."""
+
+        if self._closed:
+            raise RuntimeError("Gmail email source is closed")
+        self._api_call_count = 0
+        access_token = self._credentials.access_token()
+        response = self._get_json(
+            f"/gmail/v1/users/me/messages/{quote(message_id.value, safe='')}",
+            params={"format": "full"},
+            access_token=access_token,
+        )
+        try:
+            return self._parse_message(response, expected_id=message_id)
+        except GmailMessageNormalizationError as error:
+            raise EmailSourceError(
+                "Gmail message could not be normalized",
+                category=EmailSourceFailureCategory.INVALID_RESPONSE,
+                retry_eligible=False,
+                api_call_count=self._api_call_count,
+            ) from error
+
     def _list_message_ids(
         self,
         request: EmailRetrievalRequest,
@@ -296,6 +318,10 @@ class GmailEmailSource:
             category = EmailSourceFailureCategory.PERMISSION_DENIED
             retry_eligible = False
             message = "Gmail read permission was denied"
+        elif status == 404:
+            category = EmailSourceFailureCategory.NOT_FOUND
+            retry_eligible = False
+            message = "Gmail message is unavailable"
         elif status == 429:
             category = EmailSourceFailureCategory.RATE_LIMITED
             retry_eligible = True

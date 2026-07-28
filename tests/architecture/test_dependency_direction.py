@@ -277,3 +277,32 @@ def test_triage_sqlite_adapter_has_no_gmail_or_model_wire_dependency() -> None:
         "google",
     )
     assert not {name for name in imports_in(path) if name.startswith(forbidden)}
+
+
+def test_wp8_review_use_case_has_no_adapter_model_observability_or_telegram_dependency() -> None:
+    paths = [
+        PACKAGE_ROOT / "modules/email_triage/review.py",
+        PACKAGE_ROOT / "modules/email_triage/input.py",
+        PACKAGE_ROOT / "application/ports/email_triage_review.py",
+        PACKAGE_ROOT / "domain/email_triage_review.py",
+    ]
+    forbidden = (
+        "personal_edge_lab.apps",
+        "personal_edge_lab.infrastructure",
+        "personal_edge_lab.application.ports.ai",
+        "personal_edge_lab.infrastructure.observability",
+        "personal_edge_lab.apps.telegram_bot",
+        "fastapi",
+        "google",
+        "httpx",
+        "langfuse",
+        "opentelemetry",
+        "sqlite3",
+    )
+    violations = {
+        str(path.relative_to(PACKAGE_ROOT)): sorted(
+            name for name in imports_in(path) if name.startswith(forbidden)
+        )
+        for path in paths
+    }
+    assert not {path: names for path, names in violations.items() if names}

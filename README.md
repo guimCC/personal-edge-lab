@@ -279,6 +279,25 @@ timing, and usage; full content remains restricted to checked-in synthetic fixtu
 `LOCAL_LLM_ENABLED=true`. Langfuse remains optional. The `runs` and `show` history commands require
 only the local database.
 
+## Review triage recommendations in the dashboard
+
+Release `0.14.0` adds a protected `#email-triage` workspace for existing WP7 runs. The navigation
+entry appears only to an authenticated owner when `GMAIL_TRIAGE_REVIEW_ENABLED=true`. It lists
+bounded run and item evidence, labels every result as a recommendation, and states
+`Gmail labels applied: none`.
+
+Email content is never prefetched. An explicit per-item action performs one exact read-only Gmail
+GET, repeats the WP7 normalization and 1,600-character input cap, and returns sender, subject,
+model-visible content, and any normalized remainder only when all stored hashes still match.
+Private content is rendered as text, kept only in component memory, and cleared on close,
+workspace change, logout, authentication loss, or unmount. The workspace cannot start triage,
+contact UNO Q or Langfuse, store feedback, or modify Gmail.
+
+Review requires `API_AUTH_ENABLED=true`, `GMAIL_READ_ENABLED=true`, and
+`GMAIL_TRIAGE_REVIEW_ENABLED=true`. The OAuth token lives in the owner-only mode-`0700`
+`secrets/gmail-oauth` directory so the API service can atomically refresh that token while every
+other secret remains read-only.
+
 ## Data and migrations
 
 All applications run the same standard-library migration runner before opening a repository.

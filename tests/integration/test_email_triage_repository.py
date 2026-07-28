@@ -15,6 +15,7 @@ from personal_edge_lab.domain.email_triage import (
     TriageLabel,
     TriagePromptIdentity,
 )
+from personal_edge_lab.domain.email_triage_review import TriageRunFilter
 from personal_edge_lab.domain.email_triage_runs import (
     TriageEvaluationIdentity,
     TriageInputEvidence,
@@ -252,3 +253,44 @@ def test_repository_never_stores_query_or_email_content(tmp_path) -> None:
         b"private-reason-sentinel",
     ):
         assert sentinel not in raw_database
+
+
+def test_review_queries_expose_decision_evidence_but_keep_gmail_id_internal(
+    tmp_path,
+) -> None:
+    database = tmp_path / "triage.db"
+    run_migrations(database)
+    with SqliteTriageRunRepository(database) as repository:
+        _create_run(repository, "review-run")
+        reservation = repository.reserve(
+            "review-run",
+            ordinal=1,
+            identity=_identity(),
+            operation_id="review-attempt",
+            force_new_attempt=False,
+            reserved_at=NOW,
+        )
+        assert reservation.attempt_id is not None
+        _complete(repository, "review-run", reservation.attempt_id)
+        repository.complete_run(
+            "review-run",
+            status=TriageRunStatus.COMPLETED_WITH_RESULTS,
+            completed_at=NOW,
+        )
+
+        completed = repository.review_recent(
+            limit=20,
+            run_filter=TriageRunFilter.COMPLETED,
+        )
+        issues = repository.review_recent(limit=20, run_filter=TriageRunFilter.ISSUES)
+        detail = repository.get("review-run")
+        reference = repository.review_reference("review-run", 1)
+
+    assert [run.run_id for run in completed] == ["review-run"]
+    assert issues == []
+    assert detail is not None
+    assert detail.items[0].decision_sha256 is not None
+    assert detail.items[0].reason_chars == len("private-reason-sentinel")
+    assert not hasattr(detail.items[0], "message_id")
+    assert reference is not None
+    assert reference.message_id == EmailMessageId("message-a")

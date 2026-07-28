@@ -15,11 +15,13 @@ from fastapi.staticfiles import StaticFiles
 
 from personal_edge_lab import __version__
 from personal_edge_lab.application.ports.ac import AcController
+from personal_edge_lab.application.ports.email_triage_review import ExactEmailSource
 from personal_edge_lab.apps.api.config import Settings
 from personal_edge_lab.apps.api.context import ApiContext
 from personal_edge_lab.apps.api.routers.ac import create_ac_router
 from personal_edge_lab.apps.api.routers.auth import create_auth_router
 from personal_edge_lab.apps.api.routers.dashboard import create_dashboard_router
+from personal_edge_lab.apps.api.routers.email_triage import create_email_triage_router
 from personal_edge_lab.apps.api.routers.operations import create_operations_router
 from personal_edge_lab.apps.api.routers.telemetry import create_telemetry_router
 from personal_edge_lab.apps.api.schemas.common import StoredDataError
@@ -35,12 +37,14 @@ def create_app(
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     token_generator: Callable[[], str] | None = None,
     ac_controller_factory: Callable[[], AcController] | None = None,
+    gmail_source_factory: Callable[[], ExactEmailSource] | None = None,
 ) -> FastAPI:
     context = ApiContext(
         settings,
         clock=clock,
         token_generator=token_generator,
         ac_controller_factory=ac_controller_factory,
+        gmail_source_factory=gmail_source_factory,
     )
 
     @asynccontextmanager
@@ -63,6 +67,7 @@ def create_app(
     app.include_router(create_operations_router(context))
     app.include_router(create_telemetry_router(context))
     app.include_router(create_ac_router(context))
+    app.include_router(create_email_triage_router(context))
     app.include_router(create_dashboard_router(DASHBOARD_DIRECTORY))
     return app
 
@@ -95,6 +100,9 @@ def _configure_security_headers(app: FastAPI) -> None:
     @app.middleware("http")
     async def response_security_headers(request: Request, call_next):
         response = await call_next(request)
+        if request.url.path.startswith("/api/v1/email-triage/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Pragma"] = "no-cache"
         if request.url.path.startswith("/assets/") and response.status_code == 200:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         response.headers.setdefault("X-Content-Type-Options", "nosniff")

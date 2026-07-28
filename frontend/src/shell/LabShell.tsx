@@ -5,6 +5,9 @@ import type { StatusTone } from "../shared/status";
 interface LabShellProps {
   actorId?: string | null;
   authEnabled: boolean;
+  emailTriageEnabled: boolean;
+  activeWorkspace: "climate" | "email-triage";
+  workspaceLabel: string;
   systemLabel: string;
   systemTone: StatusTone;
   version?: string;
@@ -24,6 +27,9 @@ const NAVIGATION = [
 export function LabShell({
   actorId,
   authEnabled,
+  emailTriageEnabled,
+  activeWorkspace,
+  workspaceLabel,
   systemLabel,
   systemTone,
   version,
@@ -47,9 +53,13 @@ export function LabShell({
         </a>
 
         <nav className="lab-navigation" aria-label="Workspace sections">
-          {NAVIGATION.map((item, position) => (
+          {NAVIGATION.map((item) => (
             <a
-              className={position === 0 ? "is-active" : undefined}
+              className={
+                activeWorkspace === "climate" && item.href === "#climate"
+                  ? "is-active"
+                  : undefined
+              }
               href={item.href}
               key={item.href}
             >
@@ -57,6 +67,15 @@ export function LabShell({
               {item.label}
             </a>
           ))}
+          {emailTriageEnabled && (
+            <a
+              className={activeWorkspace === "email-triage" ? "is-active" : undefined}
+              href="#email-triage"
+            >
+              <span>04</span>
+              Email triage
+            </a>
+          )}
         </nav>
 
         <div className="rail-status">
@@ -85,7 +104,7 @@ export function LabShell({
         <div className="workspace-bar">
           <div>
             <span>WORKSPACE</span>
-            <strong>Climate</strong>
+            <strong>{workspaceLabel}</strong>
           </div>
           <div className="workspace-actions">
             <button className="text-action" type="button" onClick={onRefresh}>

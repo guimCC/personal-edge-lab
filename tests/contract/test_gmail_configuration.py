@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from personal_edge_lab.apps.email_triage_cli import config
+from personal_edge_lab.apps import gmail_configuration as config
 from personal_edge_lab.apps.email_triage_cli.config import (
     ConfigurationError,
     GmailAuthorizationSettings,
