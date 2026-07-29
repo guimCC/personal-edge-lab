@@ -112,6 +112,16 @@ class TriageRunRepository(Protocol):
         completed_at: datetime,
     ) -> None: ...
 
+    def complete_rule_attempt(
+        self,
+        *,
+        attempt_id: int,
+        run_id: str,
+        ordinal: int,
+        decision: TriageDecision,
+        completed_at: datetime,
+    ) -> None: ...
+
     def fail_attempt(
         self,
         *,

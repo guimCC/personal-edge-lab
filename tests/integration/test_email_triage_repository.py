@@ -102,9 +102,9 @@ def _complete(repository, run_id: str, attempt_id: int) -> None:
         attempt_id=attempt_id,
         run_id=run_id,
         ordinal=1,
-        decision=TriageDecision(TriageLabel.BILLING, "private-reason-sentinel"),
+        decision=TriageDecision(TriageLabel.ADMIN, "private-reason-sentinel"),
         completion=CompletionResult(
-            text='{"label":"billing","reason":"private-reason-sentinel"}',
+            text='{"label":"admin","reason":"private-reason-sentinel"}',
             identity=ModelIdentity("llama_cpp", "qwen3-1.7b-q4-k-m"),
             usage=None,
             timing=CompletionTiming(0.1, 1.2),
@@ -148,7 +148,7 @@ def test_success_is_reused_and_forced_attempt_remains_auditable(tmp_path) -> Non
         )
         assert replay.status is TriageReservationStatus.REUSED
         assert replay.decision is not None
-        assert replay.decision.label is TriageLabel.BILLING
+        assert replay.decision.label is TriageLabel.ADMIN
 
         _create_run(repository, "run-three", force=True)
         forced = repository.reserve(
@@ -419,7 +419,7 @@ def test_message_projection_deduplicates_and_preserves_success_after_later_failu
         assert len(recommendations.items) == 1
         assert page.items[0].latest_status is TriageRunItemStatus.FAILED
         assert page.items[0].latest_failure_category == "timeout"
-        assert page.items[0].label is TriageLabel.BILLING
+        assert page.items[0].label is TriageLabel.ADMIN
         assert page.items[0].reason == "private-reason-sentinel"
         assert first_stored.record_id == second_stored.record_id
         detail = repository.message_detail(first_stored.record_id)

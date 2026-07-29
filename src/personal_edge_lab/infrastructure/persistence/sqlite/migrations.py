@@ -565,6 +565,113 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version="008_email_triage_taxonomy_v2",
+        statements=(
+            """
+            ALTER TABLE email_triage_evaluations
+            ADD COLUMN decision_source TEXT NOT NULL DEFAULT 'model'
+                CHECK (decision_source IN ('model', 'rule'))
+            """,
+            """
+            ALTER TABLE email_triage_evaluations ADD COLUMN rule_id TEXT
+            """,
+            """
+            ALTER TABLE email_triage_evaluations ADD COLUMN rule_version TEXT
+            """,
+            """
+            CREATE TABLE email_triage_attempts_v2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                evaluation_id INTEGER NOT NULL,
+                run_id TEXT NOT NULL,
+                item_ordinal INTEGER NOT NULL,
+                operation_id TEXT NOT NULL UNIQUE,
+                attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
+                status TEXT NOT NULL
+                    CHECK (status IN ('reserved', 'running', 'succeeded', 'failed', 'interrupted')),
+                reserved_at_utc TEXT NOT NULL,
+                started_at_utc TEXT,
+                completed_at_utc TEXT,
+                provider TEXT,
+                model_alias TEXT,
+                queue_wait_seconds REAL NOT NULL DEFAULT 0 CHECK (queue_wait_seconds >= 0),
+                provider_seconds REAL CHECK (provider_seconds IS NULL OR provider_seconds >= 0),
+                total_seconds REAL CHECK (total_seconds IS NULL OR total_seconds >= 0),
+                provider_attempt_count INTEGER NOT NULL DEFAULT 1
+                    CHECK (provider_attempt_count >= 0),
+                retry_eligible INTEGER CHECK (retry_eligible IN (0, 1)),
+                retry_after_seconds REAL
+                    CHECK (retry_after_seconds IS NULL OR retry_after_seconds >= 0),
+                prompt_tokens INTEGER CHECK (prompt_tokens IS NULL OR prompt_tokens >= 0),
+                completion_tokens INTEGER
+                    CHECK (completion_tokens IS NULL OR completion_tokens >= 0),
+                total_tokens INTEGER CHECK (total_tokens IS NULL OR total_tokens >= 0),
+                label TEXT
+                    CHECK (
+                        label IS NULL
+                        OR label IN (
+                            'mckinsey', 'education', 'job', 'personal', 'admin',
+                            'notification', 'newsletter', 'slop', 'other',
+                            'work', 'billing'
+                        )
+                    ),
+                decision_sha256 TEXT,
+                reason_chars INTEGER CHECK (reason_chars IS NULL OR reason_chars BETWEEN 1 AND 160),
+                failure_category TEXT,
+                trace_id TEXT,
+                trace_unavailable INTEGER NOT NULL DEFAULT 1
+                    CHECK (trace_unavailable IN (0, 1)),
+                reason_text TEXT
+                    CHECK (reason_text IS NULL OR length(reason_text) BETWEEN 1 AND 160),
+                decision_source TEXT NOT NULL DEFAULT 'model'
+                    CHECK (decision_source IN ('model', 'rule')),
+                rule_id TEXT,
+                rule_version TEXT,
+                FOREIGN KEY (evaluation_id) REFERENCES email_triage_evaluations (id),
+                FOREIGN KEY (run_id, item_ordinal)
+                    REFERENCES email_triage_run_items (run_id, ordinal),
+                UNIQUE (evaluation_id, attempt_number)
+            )
+            """,
+            """
+            INSERT INTO email_triage_attempts_v2 (
+                id, evaluation_id, run_id, item_ordinal, operation_id,
+                attempt_number, status, reserved_at_utc, started_at_utc,
+                completed_at_utc, provider, model_alias, queue_wait_seconds,
+                provider_seconds, total_seconds, provider_attempt_count,
+                retry_eligible, retry_after_seconds, prompt_tokens,
+                completion_tokens, total_tokens, label, decision_sha256,
+                reason_chars, failure_category, trace_id, trace_unavailable,
+                reason_text, decision_source, rule_id, rule_version
+            )
+            SELECT
+                id, evaluation_id, run_id, item_ordinal, operation_id,
+                attempt_number, status, reserved_at_utc, started_at_utc,
+                completed_at_utc, provider, model_alias, queue_wait_seconds,
+                provider_seconds, total_seconds, provider_attempt_count,
+                retry_eligible, retry_after_seconds, prompt_tokens,
+                completion_tokens, total_tokens, label, decision_sha256,
+                reason_chars, failure_category, trace_id, trace_unavailable,
+                reason_text, 'model', NULL, NULL
+            FROM email_triage_attempts
+            """,
+            """
+            DROP TABLE email_triage_attempts
+            """,
+            """
+            ALTER TABLE email_triage_attempts_v2 RENAME TO email_triage_attempts
+            """,
+            """
+            CREATE UNIQUE INDEX idx_email_triage_one_active_attempt
+            ON email_triage_attempts (evaluation_id)
+            WHERE status IN ('reserved', 'running')
+            """,
+            """
+            CREATE INDEX idx_email_triage_attempts_run
+            ON email_triage_attempts (run_id, item_ordinal, id)
+            """,
+        ),
+    ),
 )
 
 

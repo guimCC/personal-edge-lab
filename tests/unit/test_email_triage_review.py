@@ -84,7 +84,7 @@ def _reference(document: EmailDocument) -> TriageReviewReference:
         message_id=document.message_id,
         message_fingerprint=evidence.message_fingerprint,
         item_status=TriageRunItemStatus.SUCCEEDED,
-        label=TriageLabel.WORK,
+        label=TriageLabel.JOB,
         normalized_sha256=evidence.normalized_sha256,
         model_input_sha256=evidence.model_input_sha256,
         model_message_chars=evidence.model_message_chars,

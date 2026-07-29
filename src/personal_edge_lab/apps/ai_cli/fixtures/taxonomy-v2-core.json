@@ -1,0 +1,65 @@
+[
+  {
+    "id": "mckinsey-staffing",
+    "expected_label": "mckinsey",
+    "sender": "staffing@example.test",
+    "subject": "McKinsey staffing update",
+    "message": "Your synthetic staffing assignment begins next Monday."
+  },
+  {
+    "id": "education-course",
+    "expected_label": "education",
+    "sender": "course@example.test",
+    "subject": "University course registration",
+    "message": "Registration for the synthetic autumn course is now open."
+  },
+  {
+    "id": "job-recruiting",
+    "expected_label": "job",
+    "sender": "recruiter@example.test",
+    "subject": "Interview for a product role",
+    "message": "Would you be available for a synthetic interview next week?"
+  },
+  {
+    "id": "personal-plans",
+    "expected_label": "personal",
+    "sender": "friend@example.test",
+    "subject": "Dinner on Saturday",
+    "message": "Do you want to meet for a synthetic dinner this Saturday?"
+  },
+  {
+    "id": "admin-insurance",
+    "expected_label": "admin",
+    "sender": "insurance@example.test",
+    "subject": "Policy renewal",
+    "message": "Your synthetic insurance policy renewal document is ready."
+  },
+  {
+    "id": "notification-delivery",
+    "expected_label": "notification",
+    "sender": "delivery@example.test",
+    "subject": "Package delivered",
+    "message": "Your synthetic package was delivered at 14:30."
+  },
+  {
+    "id": "newsletter-publication",
+    "expected_label": "newsletter",
+    "sender": "weekly@example.test",
+    "subject": "The Synthetic Weekly",
+    "message": "This week's publication covers local computing and privacy."
+  },
+  {
+    "id": "slop-changelog",
+    "expected_label": "slop",
+    "sender": "updates@example.test",
+    "subject": "Product updates for July",
+    "message": "See our synthetic changelog, new themes, promotions, and feature announcements."
+  },
+  {
+    "id": "other-unclassified",
+    "expected_label": "other",
+    "sender": "unknown@example.test",
+    "subject": "Synthetic note",
+    "message": "A neutral synthetic statement with no identifiable context."
+  }
+]

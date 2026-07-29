@@ -83,6 +83,9 @@ class TriageRunItemResponse(ApiModel):
     completion_tokens: int | None
     total_tokens: int | None
     attempt_id: int | None
+    decision_source: str | None
+    rule_id: str | None
+    rule_version: str | None
 
     @classmethod
     def from_domain(cls, value: TriageRunItemSummary) -> TriageRunItemResponse:
@@ -107,6 +110,11 @@ class TriageRunItemResponse(ApiModel):
             completion_tokens=value.completion_tokens,
             total_tokens=value.total_tokens,
             attempt_id=value.attempt_id,
+            decision_source=(
+                value.decision_source.value if value.decision_source is not None else None
+            ),
+            rule_id=value.rule_id,
+            rule_version=value.rule_version,
         )
 
 
@@ -136,6 +144,9 @@ class TriageMessageSummaryResponse(ApiModel):
     model_input_truncated: bool
     source_truncated: bool
     has_recommendation: bool
+    decision_source: str | None
+    rule_id: str | None
+    rule_version: str | None
 
     @classmethod
     def from_domain(cls, value: TriageMessageSummary) -> TriageMessageSummaryResponse:
@@ -152,6 +163,11 @@ class TriageMessageSummaryResponse(ApiModel):
             model_input_truncated=value.model_input_truncated,
             source_truncated=value.source_truncated,
             has_recommendation=value.has_recommendation,
+            decision_source=(
+                value.decision_source.value if value.decision_source is not None else None
+            ),
+            rule_id=value.rule_id,
+            rule_version=value.rule_version,
         )
 
 
@@ -184,6 +200,9 @@ class TriageMessageTechnicalResponse(ApiModel):
     queue_wait_seconds: float | None
     provider_seconds: float | None
     total_seconds: float | None
+    decision_source: str | None
+    rule_id: str | None
+    rule_version: str | None
 
 
 class TriageMessageDetailResponse(ApiModel):
@@ -234,5 +253,12 @@ class TriageMessageDetailResponse(ApiModel):
                 queue_wait_seconds=technical.queue_wait_seconds,
                 provider_seconds=technical.provider_seconds,
                 total_seconds=technical.total_seconds,
+                decision_source=(
+                    technical.decision_source.value
+                    if technical.decision_source is not None
+                    else None
+                ),
+                rule_id=technical.rule_id,
+                rule_version=technical.rule_version,
             ),
         )

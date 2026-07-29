@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from personal_edge_lab.domain.email_triage import (
     TriageDecision,
@@ -16,6 +16,13 @@ class _TriageDecisionPayload(BaseModel):
 
     label: TriageLabel
     reason: str = Field(min_length=1, max_length=160, pattern=r".*\S.*")
+
+    @field_validator("label")
+    @classmethod
+    def current_taxonomy_only(cls, value: TriageLabel) -> TriageLabel:
+        if value.is_legacy:
+            raise ValueError("legacy labels are not valid model output")
+        return value
 
 
 class PydanticTriageDecisionDecoder:

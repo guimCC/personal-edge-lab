@@ -116,4 +116,5 @@ def test_api_process_starts_migrates_and_stops_cleanly(tmp_path) -> None:
         ("005_notification_outbox",),
         ("006_email_triage_runs",),
         ("007_email_triage_messages",),
+        ("008_email_triage_taxonomy_v2",),
     ]

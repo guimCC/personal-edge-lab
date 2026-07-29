@@ -29,6 +29,7 @@ from personal_edge_lab.apps.email_triage_cli.config import (
     GmailFetchSettings,
     MailboxTriageSettings,
     TriageHistorySettings,
+    read_triage_rules,
 )
 from personal_edge_lab.apps.logging_config import configure_logging
 from personal_edge_lab.domain.email import EmailRetrievalRequest, EmailValidationError
@@ -106,6 +107,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="back up and delete only disposable email-triage development records",
     )
     reset_parser.add_argument("--confirm", required=True)
+    subparsers.add_parser(
+        "rules-check",
+        help="validate the optional private deterministic sender rules",
+    )
     return parser
 
 
@@ -151,6 +156,8 @@ def main(
         return _run_history(operation_id, args.limit, stdout=stdout, stderr=stderr)
     if args.command == "show":
         return _show_run(operation_id, args.run_id, stdout=stdout, stderr=stderr)
+    if args.command == "rules-check":
+        return _run_rules_check(operation_id, stdout=stdout, stderr=stderr)
     return _run_development_reset(
         operation_id,
         confirmation=args.confirm,
@@ -391,6 +398,7 @@ def _run_triage_mailbox(
                 triage_service=service,
                 repository=repository,
                 interrupted=interrupted.is_set,
+                rules=settings.rules,
             ).execute(
                 request,
                 run_id=operation_id,
@@ -420,6 +428,21 @@ def _run_triage_mailbox(
     _log_triage_result(operation_id, result)
     _print_triage_result(result, stdout=stdout)
     return 0 if result.status is TriageRunStatus.COMPLETED_WITH_RESULTS else 5
+
+
+def _run_rules_check(operation_id: str, *, stdout: TextIO, stderr: TextIO) -> int:
+    try:
+        rules = read_triage_rules()
+    except ConfigurationError as error:
+        return _configuration_failure(operation_id, error, stderr=stderr)
+    print(f"Operation: {operation_id}", file=stdout)
+    if rules is None:
+        print("Rules: disabled", file=stdout)
+        return 0
+    print("Rules: valid", file=stdout)
+    print(f"Version: {rules.version}", file=stdout)
+    print(f"Count: {len(rules.rules)}", file=stdout)
+    return 0
 
 
 def _run_history(
@@ -511,6 +534,10 @@ def _show_run(
         if item.received_at is not None:
             print(f"  Received: {item.received_at.isoformat()}", file=stdout)
         print(f"  Label: {item.label.value if item.label else 'unavailable'}", file=stdout)
+        if item.decision_source is not None:
+            print(f"  Decision source: {item.decision_source.value}", file=stdout)
+        if item.rule_id is not None:
+            print(f"  Rule: {item.rule_id}/{item.rule_version}", file=stdout)
         if item.failure_category is not None:
             print(f"  Failure: {item.failure_category}", file=stdout)
         if item.prompt_source is not None and item.prompt_version is not None:
@@ -609,8 +636,12 @@ def _print_triage_result(result: MailboxTriageResult, *, stdout: TextIO) -> None
             print(f"  Subject: {_sanitize_terminal_text(item.subject)}", file=stdout)
         if item.label is not None:
             print(f"  Proposed label: {item.label.value}", file=stdout)
+        if item.decision_source is not None:
+            print(f"  Decision source: {item.decision_source.value}", file=stdout)
         if item.reason is not None:
             print(f"  Reason: {_sanitize_terminal_text(item.reason)}", file=stdout)
+        elif item.decision_source is not None and item.decision_source.value == "rule":
+            print(f"  Rule: {item.rule_id}/{item.rule_version}", file=stdout)
         elif item.status.value == "reused":
             print("  Reason: intentionally not retained", file=stdout)
         if item.failure_category is not None:
@@ -659,7 +690,8 @@ def _log_triage_result(operation_id: str, result: MailboxTriageResult) -> None:
         LOGGER.log(
             logging.INFO if item.status.value in {"succeeded", "reused"} else logging.WARNING,
             "email_triage operation_id=%s run_id=%s command=triage "
-            "item_ordinal=%s outcome=%s category=%s provider=%s model=%s "
+            "item_ordinal=%s outcome=%s category=%s decision_source=%s rule_id=%s "
+            "provider=%s model=%s "
             "prompt_source=%s prompt_version=%s queue_wait_seconds=%s "
             "provider_seconds=%s total_seconds=%s prompt_tokens=%s "
             "completion_tokens=%s total_tokens=%s trace_unavailable=%s",
@@ -668,6 +700,8 @@ def _log_triage_result(operation_id: str, result: MailboxTriageResult) -> None:
             item.ordinal,
             item.status.value,
             item.failure_category or "none",
+            item.decision_source.value if item.decision_source else "unavailable",
+            item.rule_id or "unavailable",
             item.provider or "unavailable",
             item.model_alias or "unavailable",
             item.prompt.source.value if item.prompt else "unavailable",

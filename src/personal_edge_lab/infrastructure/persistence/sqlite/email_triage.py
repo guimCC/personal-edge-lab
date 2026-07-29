@@ -18,6 +18,7 @@ from personal_edge_lab.domain.email import (
 from personal_edge_lab.domain.email_triage import (
     PromptSourceKind,
     TriageDecision,
+    TriageDecisionSource,
     TriageLabel,
 )
 from personal_edge_lab.domain.email_triage_messages import (
@@ -427,7 +428,8 @@ class SqliteTriageRunRepository:
 
             succeeded = self._connection.execute(
                 """
-                SELECT id, label, decision_sha256, reason_chars, trace_id
+                SELECT id, label, decision_sha256, reason_chars, trace_id,
+                    decision_source, rule_id, rule_version
                 FROM email_triage_attempts
                 WHERE evaluation_id = ? AND status = 'succeeded'
                 ORDER BY id DESC LIMIT 1
@@ -439,7 +441,20 @@ class SqliteTriageRunRepository:
                 decision = StoredTriageDecision(
                     label=TriageLabel(str(succeeded["label"])),
                     decision_sha256=str(succeeded["decision_sha256"]),
-                    reason_chars=int(succeeded["reason_chars"]),
+                    reason_chars=(
+                        int(succeeded["reason_chars"])
+                        if succeeded["reason_chars"] is not None
+                        else None
+                    ),
+                    source=TriageDecisionSource(str(succeeded["decision_source"])),
+                    rule_id=(
+                        str(succeeded["rule_id"]) if succeeded["rule_id"] is not None else None
+                    ),
+                    rule_version=(
+                        str(succeeded["rule_version"])
+                        if succeeded["rule_version"] is not None
+                        else None
+                    ),
                 )
                 self._set_item(
                     run_id,
@@ -483,8 +498,9 @@ class SqliteTriageRunRepository:
                 """
                 INSERT INTO email_triage_attempts (
                     evaluation_id, run_id, item_ordinal, operation_id,
-                    attempt_number, status, reserved_at_utc
-                ) VALUES (?, ?, ?, ?, ?, 'reserved', ?)
+                    attempt_number, status, reserved_at_utc, provider_attempt_count,
+                    decision_source, rule_id, rule_version
+                ) VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?, ?, ?, ?)
                 """,
                 (
                     evaluation_id,
@@ -493,6 +509,10 @@ class SqliteTriageRunRepository:
                     operation_id,
                     next_number,
                     reserved_at.isoformat(),
+                    0 if identity.decision_source is TriageDecisionSource.RULE else 1,
+                    identity.decision_source.value,
+                    identity.rule_id,
+                    identity.rule_version,
                 ),
             )
             attempt_id = _lastrowid(cursor)
@@ -569,6 +589,8 @@ class SqliteTriageRunRepository:
         completed_at: datetime,
     ) -> None:
         usage = completion.usage
+        if decision.source is not TriageDecisionSource.MODEL or decision.reason is None:
+            raise ValueError("model completion requires a model triage decision")
         decision_sha256 = _decision_hash(decision)
         self._connection.execute("BEGIN IMMEDIATE")
         try:
@@ -599,6 +621,70 @@ class SqliteTriageRunRepository:
                     decision.reason,
                     trace_id,
                     int(trace_unavailable),
+                    attempt_id,
+                    run_id,
+                    ordinal,
+                ),
+            )
+            _require_one(cursor, "triage attempt")
+            self._set_item(
+                run_id,
+                ordinal,
+                status=TriageRunItemStatus.SUCCEEDED,
+                attempt_id=attempt_id,
+                failure_category=None,
+                completed_at=completed_at,
+            )
+            message_record_id = self._message_record_id(run_id, ordinal)
+            if message_record_id is not None:
+                self._set_message_processing(
+                    message_record_id,
+                    run_id=run_id,
+                    ordinal=ordinal,
+                    status=TriageRunItemStatus.SUCCEEDED,
+                    failure_category=None,
+                    successful_attempt_id=attempt_id,
+                    seen_at=completed_at,
+                )
+            self._connection.execute(
+                "UPDATE email_triage_runs SET updated_at_utc = ? WHERE run_id = ?",
+                (completed_at.isoformat(), run_id),
+            )
+            self._connection.commit()
+        except BaseException:
+            self._connection.rollback()
+            raise
+
+    def complete_rule_attempt(
+        self,
+        *,
+        attempt_id: int,
+        run_id: str,
+        ordinal: int,
+        decision: TriageDecision,
+        completed_at: datetime,
+    ) -> None:
+        if decision.source is not TriageDecisionSource.RULE or decision.reason is not None:
+            raise ValueError("rule completion requires a deterministic triage decision")
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = self._connection.execute(
+                """
+                UPDATE email_triage_attempts
+                SET status = 'succeeded', completed_at_utc = ?,
+                    provider_attempt_count = 0, label = ?, decision_sha256 = ?,
+                    reason_chars = NULL, reason_text = NULL, trace_id = NULL,
+                    trace_unavailable = 1, decision_source = 'rule',
+                    rule_id = ?, rule_version = ?
+                WHERE id = ? AND run_id = ? AND item_ordinal = ?
+                  AND status IN ('reserved', 'running')
+                """,
+                (
+                    completed_at.isoformat(),
+                    decision.label.value,
+                    _decision_hash(decision),
+                    decision.rule_id,
+                    decision.rule_version,
                     attempt_id,
                     run_id,
                     ordinal,
@@ -900,6 +986,7 @@ class SqliteTriageRunRepository:
             SELECT i.ordinal, i.message_fingerprint, i.received_at_utc,
                 i.status, i.failure_category, i.selected_attempt_id,
                 a.label, a.decision_sha256, a.reason_chars, a.trace_id,
+                a.decision_source, a.rule_id, a.rule_version,
                 a.queue_wait_seconds, a.provider_seconds,
                 a.total_seconds, a.prompt_tokens, a.completion_tokens, a.total_tokens,
                 e.prompt_source, e.prompt_version, e.profile_version, e.model_alias,
@@ -995,7 +1082,7 @@ class SqliteTriageRunRepository:
             SELECT m.record_id, m.received_at_utc, m.latest_status,
                 m.latest_failure_category, m.last_seen_at_utc,
                 s.sender, s.subject, s.model_input_truncated, s.source_truncated,
-                a.label, a.reason_text
+                a.label, a.reason_text, a.decision_source, a.rule_id, a.rule_version
             FROM email_triage_messages m
             JOIN email_triage_content_snapshots s
               ON s.id = m.current_content_snapshot_id
@@ -1033,6 +1120,7 @@ class SqliteTriageRunRepository:
                 a.prompt_tokens, a.completion_tokens, a.total_tokens,
                 a.queue_wait_seconds, a.provider_seconds, a.total_seconds,
                 a.label, a.reason_text, a.run_id AS successful_run_id,
+                a.decision_source, a.rule_id, a.rule_version,
                 a.item_ordinal AS successful_item_ordinal,
                 e.prompt_source, e.prompt_version, e.profile_version,
                 e.taxonomy_version, e.schema_version, e.generation_parameters_version
@@ -1110,6 +1198,13 @@ class SqliteTriageRunRepository:
             total_seconds=(
                 float(row["total_seconds"]) if row["total_seconds"] is not None else None
             ),
+            decision_source=(
+                TriageDecisionSource(str(row["decision_source"]))
+                if row["decision_source"] is not None
+                else None
+            ),
+            rule_id=str(row["rule_id"]) if row["rule_id"] is not None else None,
+            rule_version=(str(row["rule_version"]) if row["rule_version"] is not None else None),
         )
         return TriageMessageDetail(
             summary=summary,
@@ -1141,10 +1236,11 @@ class SqliteTriageRunRepository:
                 metadata_truncated, cleanup_flags_json, profile_name,
                 profile_version, taxonomy_version, schema_version,
                 generation_parameters_version, prompt_name, prompt_source,
-                prompt_version, model_alias, created_at_utc
+                prompt_version, model_alias, created_at_utc,
+                decision_source, rule_id, rule_version
             ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             ON CONFLICT(identity_sha256) DO NOTHING
             """,
@@ -1176,6 +1272,9 @@ class SqliteTriageRunRepository:
                 identity.prompt.version,
                 identity.model_alias,
                 created_at.isoformat(),
+                identity.decision_source.value,
+                identity.rule_id,
+                identity.rule_version,
             ),
         )
 
@@ -1333,6 +1432,13 @@ def _item_summary(row: sqlite3.Row) -> TriageRunItemSummary:
             int(row["selected_attempt_id"]) if row["selected_attempt_id"] is not None else None
         ),
         review_available=bool(row["review_available"]),
+        decision_source=(
+            TriageDecisionSource(str(row["decision_source"]))
+            if row["decision_source"] is not None
+            else None
+        ),
+        rule_id=str(row["rule_id"]) if row["rule_id"] is not None else None,
+        rule_version=(str(row["rule_version"]) if row["rule_version"] is not None else None),
     )
 
 
@@ -1355,7 +1461,14 @@ def _message_summary(row: sqlite3.Row) -> TriageMessageSummary:
         last_triaged_at=datetime.fromisoformat(str(row["last_seen_at_utc"])),
         model_input_truncated=bool(row["model_input_truncated"]),
         source_truncated=bool(row["source_truncated"]),
-        has_recommendation=label is not None and reason is not None,
+        has_recommendation=label is not None,
+        decision_source=(
+            TriageDecisionSource(str(row["decision_source"]))
+            if row["decision_source"] is not None
+            else None
+        ),
+        rule_id=str(row["rule_id"]) if row["rule_id"] is not None else None,
+        rule_version=(str(row["rule_version"]) if row["rule_version"] is not None else None),
     )
 
 
@@ -1368,7 +1481,13 @@ def _count_sql(status: str) -> str:
 
 def _decision_hash(decision: TriageDecision) -> str:
     value = json.dumps(
-        {"label": decision.label.value, "reason": decision.reason},
+        {
+            "label": decision.label.value,
+            "reason": decision.reason,
+            "source": decision.source.value,
+            "rule_id": decision.rule_id,
+            "rule_version": decision.rule_version,
+        },
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

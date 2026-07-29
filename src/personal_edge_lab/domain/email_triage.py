@@ -22,6 +22,7 @@ MAX_MESSAGE_CHARS = 1600
 MAX_REASON_CHARS = 160
 MAX_PROMPT_VERSION_CHARS = 64
 VERSION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+RULE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 class TriageValidationError(ValueError):
@@ -33,12 +34,28 @@ class TriageOutputError(RuntimeError):
 
 
 class TriageLabel(StrEnum):
-    WORK = "work"
-    BILLING = "billing"
+    MCKINSEY = "mckinsey"
+    JOB = "job"
+    EDUCATION = "education"
+    PERSONAL = "personal"
+    ADMIN = "admin"
     NOTIFICATION = "notification"
     NEWSLETTER = "newsletter"
-    PERSONAL = "personal"
+    SLOP = "slop"
     OTHER = "other"
+    # Read-only compatibility for taxonomy-v1 history. These values are never
+    # offered to the v2 model schema.
+    WORK = "work"
+    BILLING = "billing"
+
+    @property
+    def is_legacy(self) -> bool:
+        return self in {TriageLabel.WORK, TriageLabel.BILLING}
+
+
+class TriageDecisionSource(StrEnum):
+    MODEL = "model"
+    RULE = "rule"
 
 
 class PromptSourceKind(StrEnum):
@@ -73,17 +90,95 @@ class TriageEmail:
 @dataclass(frozen=True, slots=True)
 class TriageDecision:
     label: TriageLabel
-    reason: str
+    reason: str | None
+    source: TriageDecisionSource = TriageDecisionSource.MODEL
+    rule_id: str | None = None
+    rule_version: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.label, TriageLabel):
+        if not isinstance(self.label, TriageLabel) or self.label.is_legacy:
             raise TriageValidationError("triage label is invalid")
-        if not isinstance(self.reason, str) or not self.reason.strip():
-            raise TriageValidationError("triage reason must not be blank")
-        if len(self.reason) > MAX_REASON_CHARS:
-            raise TriageValidationError(
-                f"triage reason must not exceed {MAX_REASON_CHARS} characters"
-            )
+        if not isinstance(self.source, TriageDecisionSource):
+            raise TriageValidationError("triage decision source is invalid")
+        if self.source is TriageDecisionSource.MODEL:
+            if not isinstance(self.reason, str) or not self.reason.strip():
+                raise TriageValidationError("triage reason must not be blank")
+            if len(self.reason) > MAX_REASON_CHARS:
+                raise TriageValidationError(
+                    f"triage reason must not exceed {MAX_REASON_CHARS} characters"
+                )
+            if self.rule_id is not None or self.rule_version is not None:
+                raise TriageValidationError("model decision must not contain rule evidence")
+            return
+        if self.reason is not None:
+            raise TriageValidationError("rule decision must not contain a reason")
+        if (
+            not isinstance(self.rule_id, str)
+            or RULE_ID_PATTERN.fullmatch(self.rule_id) is None
+            or not isinstance(self.rule_version, str)
+            or VERSION_PATTERN.fullmatch(self.rule_version) is None
+        ):
+            raise TriageValidationError("rule decision evidence is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class TriageRule:
+    rule_id: str
+    priority: int
+    label: TriageLabel
+    exact_addresses: tuple[str, ...] = ()
+    domains: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if RULE_ID_PATTERN.fullmatch(self.rule_id) is None:
+            raise TriageValidationError("triage rule ID is invalid")
+        if (
+            isinstance(self.priority, bool)
+            or not isinstance(self.priority, int)
+            or not 1 <= self.priority <= 1000
+        ):
+            raise TriageValidationError("triage rule priority is invalid")
+        if not isinstance(self.label, TriageLabel) or self.label.is_legacy:
+            raise TriageValidationError("triage rule label is invalid")
+        if not self.exact_addresses and not self.domains:
+            raise TriageValidationError("triage rule must contain a sender matcher")
+
+
+@dataclass(frozen=True, slots=True)
+class TriageRuleSet:
+    version: str
+    rules: tuple[TriageRule, ...]
+
+    def __post_init__(self) -> None:
+        if VERSION_PATTERN.fullmatch(self.version) is None:
+            raise TriageValidationError("triage ruleset version is invalid")
+        if not isinstance(self.rules, tuple) or len(self.rules) > 100:
+            raise TriageValidationError("triage ruleset is invalid")
+        if not all(isinstance(rule, TriageRule) for rule in self.rules):
+            raise TriageValidationError("triage ruleset entries are invalid")
+        identifiers = [rule.rule_id for rule in self.rules]
+        priorities = [rule.priority for rule in self.rules]
+        if len(set(identifiers)) != len(identifiers):
+            raise TriageValidationError("triage rule IDs must be unique")
+        if len(set(priorities)) != len(priorities):
+            raise TriageValidationError("triage rule priorities must be unique")
+
+
+@dataclass(frozen=True, slots=True)
+class TriageRuleMatch:
+    rule_id: str
+    ruleset_version: str
+    label: TriageLabel
+    priority: int
+
+    def decision(self) -> TriageDecision:
+        return TriageDecision(
+            label=self.label,
+            reason=None,
+            source=TriageDecisionSource.RULE,
+            rule_id=self.rule_id,
+            rule_version=self.ruleset_version,
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -365,7 +365,7 @@ def test_mailbox_triage_persists_product_content_but_keeps_logs_private_and_reus
                     {
                         "message": {
                             "role": "assistant",
-                            "content": ('{"label":"billing","reason":"private-reason-sentinel"}'),
+                            "content": ('{"label":"admin","reason":"private-reason-sentinel"}'),
                         }
                     }
                 ],
@@ -397,7 +397,7 @@ def test_mailbox_triage_persists_product_content_but_keeps_logs_private_and_reus
 
     assert first == second == 0
     assert model_calls == 1
-    assert "Proposed label: billing" in first_out.getvalue()
+    assert "Proposed label: admin" in first_out.getvalue()
     assert "Reason: private-reason-sentinel" in first_out.getvalue()
     assert "Item 1: reused" in second_out.getvalue()
     assert "Reason: intentionally not retained" in second_out.getvalue()
@@ -438,7 +438,7 @@ def test_mailbox_triage_persists_product_content_but_keeps_logs_private_and_reus
         )
         == 0
     )
-    assert "Label: billing" in details.getvalue()
+    assert "Label: admin" in details.getvalue()
     assert "private-reason-sentinel" not in details.getvalue()
 
 

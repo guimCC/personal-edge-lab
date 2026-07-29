@@ -33,7 +33,7 @@ from personal_edge_lab.domain.ai import (
     ModelMessage,
     ModelRole,
 )
-from personal_edge_lab.domain.email_triage import TriageEmail, TriageOutputError
+from personal_edge_lab.domain.email_triage import TriageEmail, TriageLabel, TriageOutputError
 from personal_edge_lab.infrastructure.ai.concurrency import ConcurrencyLimitedLanguageModel
 from personal_edge_lab.infrastructure.ai.llama_cpp import (
     LlamaCppHealthProbe,
@@ -74,6 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
     complete_parser.add_argument("--text", required=True)
     triage_parser = subparsers.add_parser("triage", help="classify one synthetic email fixture")
     triage_parser.add_argument("--fixture", required=True, choices=("synthetic-invoice",))
+    evaluate_parser = subparsers.add_parser(
+        "evaluate",
+        help="run the checked-in synthetic taxonomy baseline without tracing",
+    )
+    evaluate_parser.add_argument(
+        "--fixture-set",
+        required=True,
+        choices=("taxonomy-v2-core",),
+    )
     subparsers.add_parser(
         "prompt-publish",
         help="publish the packaged email-triage prompt to Langfuse",
@@ -117,6 +126,14 @@ def main(
         return _run_triage(
             operation_id,
             args.fixture,
+            stdout=stdout,
+            stderr=stderr,
+            transport=transport,
+        )
+    if args.command == "evaluate":
+        return _run_evaluate(
+            operation_id,
+            args.fixture_set,
             stdout=stdout,
             stderr=stderr,
             transport=transport,
@@ -420,6 +437,7 @@ def _run_triage(
         usage.total_tokens if usage else "unavailable",
         result.evidence.trace_unavailable,
     )
+    assert result.decision.reason is not None
     print(f"Operation: {operation_id}", file=stdout)
     print(f"Label: {result.decision.label.value}", file=stdout)
     print(f"Reason: {_sanitize_terminal_text(result.decision.reason)}", file=stdout)
@@ -487,6 +505,89 @@ def _run_prompt_publish(operation_id: str, *, stdout: TextIO, stderr: TextIO) ->
     return 0
 
 
+def _run_evaluate(
+    operation_id: str,
+    fixture_set: str,
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    transport: Any | None,
+) -> int:
+    try:
+        settings = CompletionSettings.from_env()
+        fixtures = _load_fixture_set(fixture_set)
+    except (ConfigurationError, ValueError) as error:
+        return _configuration_failure(
+            operation_id,
+            ConfigurationError(str(error)),
+            stderr=stderr,
+        )
+    configure_logging(settings.log_level)
+    correct = 0
+    results: list[tuple[str, TriageLabel, TriageLabel]] = []
+    started = time.perf_counter()
+    try:
+        with LlamaCppLanguageModel(
+            base_url=settings.base_url,
+            api_key=settings.api_key,
+            timeout_seconds=settings.timeout_seconds,
+            transport=transport,
+        ) as adapter:
+            service = EmailTriageService(
+                model=ConcurrencyLimitedLanguageModel(
+                    adapter,
+                    max_concurrency=settings.max_concurrency,
+                    wait_timeout_seconds=settings.queue_timeout_seconds,
+                ),
+                prompt_source=LocalTriagePromptSource(load_packaged_prompt()),
+                decoder=PydanticTriageDecisionDecoder(),
+                trace_sink=NoOpTriageTraceSink(),
+                model_alias=settings.model_alias,
+            )
+            for index, (fixture_id, expected, email) in enumerate(fixtures, start=1):
+                result = service.classify(
+                    email,
+                    operation_id=f"{operation_id}-{index}",
+                )
+                results.append((fixture_id, expected, result.decision.label))
+                correct += result.decision.label is expected
+    except LanguageModelError as error:
+        return _provider_failure(
+            operation_id,
+            "evaluate",
+            error,
+            elapsed_seconds=time.perf_counter() - started,
+            stderr=stderr,
+        )
+    except TriageOutputError:
+        print(f"Operation: {operation_id}", file=stderr)
+        print("Evaluation failed: invalid_model_output", file=stderr)
+        return 5
+    elapsed = time.perf_counter() - started
+    print(f"Operation: {operation_id}", file=stdout)
+    print(f"Fixture set: {fixture_set}", file=stdout)
+    for fixture_id, expected, actual in results:
+        outcome = "match" if expected is actual else "different"
+        print(
+            f"{fixture_id}: expected={expected.value} actual={actual.value} {outcome}",
+            file=stdout,
+        )
+    print(f"Baseline: {correct}/{len(results)}", file=stdout)
+    print("Quality threshold: none", file=stdout)
+    print("Traces: none", file=stdout)
+    print(f"Elapsed: {elapsed:.3f}s", file=stdout)
+    LOGGER.info(
+        "email_triage operation_id=%s command=evaluate outcome=success "
+        "fixture_set=%s fixture_count=%d match_count=%d elapsed_seconds=%.3f",
+        operation_id,
+        fixture_set,
+        len(results),
+        correct,
+        elapsed,
+    )
+    return 0
+
+
 def _load_fixture(name: str) -> TriageEmail:
     resource = files("personal_edge_lab.apps.ai_cli.fixtures").joinpath(f"{name}.json")
     payload = json.loads(resource.read_text(encoding="utf-8"))
@@ -497,6 +598,37 @@ def _load_fixture(name: str) -> TriageEmail:
         subject=payload["subject"],
         message=payload["message"],
     )
+
+
+def _load_fixture_set(name: str) -> tuple[tuple[str, TriageLabel, TriageEmail], ...]:
+    resource = files("personal_edge_lab.apps.ai_cli.fixtures").joinpath(f"{name}.json")
+    payload = json.loads(resource.read_text(encoding="utf-8"))
+    if not isinstance(payload, list) or not 1 <= len(payload) <= 20:
+        raise ValueError("synthetic fixture set is invalid")
+    fixtures: list[tuple[str, TriageLabel, TriageEmail]] = []
+    for entry in payload:
+        if not isinstance(entry, dict) or set(entry) != {
+            "id",
+            "expected_label",
+            "sender",
+            "subject",
+            "message",
+        }:
+            raise ValueError("synthetic fixture set is invalid")
+        try:
+            expected = TriageLabel(entry["expected_label"])
+            email = TriageEmail(
+                sender=entry["sender"],
+                subject=entry["subject"],
+                message=entry["message"],
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError("synthetic fixture set is invalid") from error
+        fixture_id = entry["id"]
+        if expected.is_legacy or not isinstance(fixture_id, str) or not fixture_id:
+            raise ValueError("synthetic fixture set is invalid")
+        fixtures.append((fixture_id, expected, email))
+    return tuple(fixtures)
 
 
 def _configuration_failure(

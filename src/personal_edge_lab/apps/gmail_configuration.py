@@ -154,6 +154,12 @@ def validate_gmail_token_directory(path: Path) -> None:
         raise ConfigurationError("GMAIL_TOKEN_FILE parent must be owned by the current user")
 
 
+def read_private_json(path: Path, setting: str) -> dict[str, Any]:
+    """Read one bounded owner-only JSON object without exposing its values."""
+
+    return _read_private_json(path, setting)
+
+
 def _read_private_json(path: Path, setting: str) -> dict[str, Any]:
     _validate_absolute_path(path, setting)
     _validate_private_metadata(path, setting)

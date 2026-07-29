@@ -13,11 +13,24 @@ from personal_edge_lab.domain.email_triage import (
 )
 
 
-@pytest.mark.parametrize("label", list(TriageLabel))
+@pytest.mark.parametrize(
+    "label",
+    [
+        TriageLabel.MCKINSEY,
+        TriageLabel.JOB,
+        TriageLabel.EDUCATION,
+        TriageLabel.PERSONAL,
+        TriageLabel.ADMIN,
+        TriageLabel.NOTIFICATION,
+        TriageLabel.NEWSLETTER,
+        TriageLabel.SLOP,
+        TriageLabel.OTHER,
+    ],
+)
 def test_all_provisional_labels_are_valid(label: TriageLabel) -> None:
     decision = TriageDecision(label=label, reason="Bounded reason")
     assert decision.label is label
-    assert set(TriageDecision.__dataclass_fields__) == {"label", "reason"}
+    assert decision.source.value == "model"
 
 
 @pytest.mark.parametrize(

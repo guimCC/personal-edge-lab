@@ -14,8 +14,13 @@ from personal_edge_lab.application.ports.email_triage_runs import TriageRunRepos
 from personal_edge_lab.domain.email import EmailDocument, EmailRetrievalRequest
 from personal_edge_lab.domain.email_triage import (
     PreparedTriage,
+    PromptSourceKind,
     RedactedTriageTracePayload,
+    TriageDecisionSource,
     TriageOutputError,
+    TriagePromptIdentity,
+    TriageRuleMatch,
+    TriageRuleSet,
 )
 from personal_edge_lab.domain.email_triage_runs import (
     MailboxTriageItemResult,
@@ -27,7 +32,8 @@ from personal_edge_lab.domain.email_triage_runs import (
     TriageRunStatus,
 )
 from personal_edge_lab.modules.email_triage.input import prepare_triage_input
-from personal_edge_lab.modules.email_triage.service import EmailTriageService
+from personal_edge_lab.modules.email_triage.rules import match_rule
+from personal_edge_lab.modules.email_triage.service import DEFAULT_PROFILE, EmailTriageService
 
 STALE_WORK_SECONDS = 300
 
@@ -39,6 +45,7 @@ class TriageMailboxBatch:
         email_source: EmailSource,
         triage_service: EmailTriageService,
         repository: TriageRunRepository,
+        rules: TriageRuleSet | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.perf_counter,
         interrupted: Callable[[], bool] = lambda: False,
@@ -46,6 +53,7 @@ class TriageMailboxBatch:
         self._email_source = email_source
         self._triage_service = triage_service
         self._repository = repository
+        self._rules = rules
         self._clock = clock
         self._monotonic = monotonic
         self._interrupted = interrupted
@@ -191,6 +199,18 @@ class TriageMailboxBatch:
             model_input=email.message,
             recorded_at=self._clock(),
         )
+        rule_match = match_rule(self._rules, email)
+        if rule_match is not None:
+            return self._classify_rule(
+                document,
+                evidence=evidence,
+                run_id=run_id,
+                ordinal=ordinal,
+                force_new_attempt=force_new_attempt,
+                message_record_id=stored_message.database_id,
+                content_snapshot_id=stored_message.content_snapshot_id,
+                rule_match=rule_match,
+            )
         try:
             prepared = self._triage_service.prepare(email)
         except Exception:
@@ -232,6 +252,9 @@ class TriageMailboxBatch:
                 trace_id=reservation.trace_id,
                 prompt=prepared.prompt.identity,
                 model_alias=prepared.request.model_alias,
+                decision_source=reservation.decision.source,
+                rule_id=reservation.decision.rule_id,
+                rule_version=reservation.decision.rule_version,
             )
         if reservation.status is TriageReservationStatus.CONCURRENT:
             return _failed_item(ordinal, evidence, "concurrent_evaluation")
@@ -357,6 +380,75 @@ class TriageMailboxBatch:
             prompt_tokens=usage.prompt_tokens if usage else None,
             completion_tokens=usage.completion_tokens if usage else None,
             total_tokens=usage.total_tokens if usage else None,
+            decision_source=triage.decision.source,
+        )
+
+    def _classify_rule(
+        self,
+        document: EmailDocument,
+        *,
+        evidence: TriageInputEvidence,
+        run_id: str,
+        ordinal: int,
+        force_new_attempt: bool,
+        message_record_id: int,
+        content_snapshot_id: int,
+        rule_match: TriageRuleMatch,
+    ) -> MailboxTriageItemResult:
+        identity = _rule_evaluation_identity(evidence, rule_match)
+        item_operation_id = _sha256(f"{run_id}:{ordinal}:{identity.identity_sha256}")[:32]
+        reservation = self._repository.reserve(
+            run_id,
+            ordinal=ordinal,
+            identity=identity,
+            operation_id=item_operation_id,
+            force_new_attempt=force_new_attempt,
+            message_record_id=message_record_id,
+            content_snapshot_id=content_snapshot_id,
+            reserved_at=self._clock(),
+        )
+        if reservation.status is TriageReservationStatus.REUSED:
+            assert reservation.decision is not None
+            return MailboxTriageItemResult(
+                ordinal=ordinal,
+                message_fingerprint=evidence.message_fingerprint,
+                received_at=evidence.received_at,
+                status=TriageRunItemStatus.REUSED,
+                sender=document.sender,
+                subject=document.subject,
+                label=reservation.decision.label,
+                decision_source=reservation.decision.source,
+                rule_id=reservation.decision.rule_id,
+                rule_version=reservation.decision.rule_version,
+            )
+        if reservation.status is TriageReservationStatus.CONCURRENT:
+            return _failed_item(ordinal, evidence, "concurrent_evaluation")
+        assert reservation.attempt_id is not None
+        self._repository.mark_attempt_running(
+            attempt_id=reservation.attempt_id,
+            run_id=run_id,
+            ordinal=ordinal,
+            started_at=self._clock(),
+        )
+        decision = rule_match.decision()
+        self._repository.complete_rule_attempt(
+            attempt_id=reservation.attempt_id,
+            run_id=run_id,
+            ordinal=ordinal,
+            decision=decision,
+            completed_at=self._clock(),
+        )
+        return MailboxTriageItemResult(
+            ordinal=ordinal,
+            message_fingerprint=evidence.message_fingerprint,
+            received_at=evidence.received_at,
+            status=TriageRunItemStatus.SUCCEEDED,
+            sender=document.sender,
+            subject=document.subject,
+            label=decision.label,
+            decision_source=decision.source,
+            rule_id=decision.rule_id,
+            rule_version=decision.rule_version,
         )
 
     def _record_interrupted_documents(
@@ -438,6 +530,7 @@ def _evaluation_identity(
         "prompt_source": prepared.prompt.identity.source.value,
         "prompt_version": prepared.prompt.identity.version,
         "model_alias": prepared.request.model_alias,
+        "decision_source": TriageDecisionSource.MODEL.value,
     }
     canonical = json.dumps(values, separators=(",", ":"), sort_keys=True)
     return TriageEvaluationIdentity(
@@ -450,6 +543,49 @@ def _evaluation_identity(
         generation_parameters_version=prepared.profile.generation_parameters_version,
         prompt=prepared.prompt.identity,
         model_alias=prepared.request.model_alias,
+        decision_source=TriageDecisionSource.MODEL,
+    )
+
+
+def _rule_evaluation_identity(
+    evidence: TriageInputEvidence,
+    rule_match: TriageRuleMatch,
+) -> TriageEvaluationIdentity:
+    prompt = TriagePromptIdentity(
+        name="personal-edge-lab/email-triage-rules",
+        version=rule_match.ruleset_version,
+        source=PromptSourceKind.LOCAL_FALLBACK,
+    )
+    values = {
+        "gmail_message_id": evidence.message_id.value,
+        "model_input_sha256": evidence.model_input_sha256,
+        "profile_name": DEFAULT_PROFILE.name,
+        "profile_version": DEFAULT_PROFILE.version,
+        "taxonomy_version": DEFAULT_PROFILE.taxonomy_version,
+        "schema_version": DEFAULT_PROFILE.schema_version,
+        "generation_parameters_version": DEFAULT_PROFILE.generation_parameters_version,
+        "prompt_name": prompt.name,
+        "prompt_source": prompt.source.value,
+        "prompt_version": prompt.version,
+        "model_alias": "deterministic-rules",
+        "decision_source": TriageDecisionSource.RULE.value,
+        "rule_id": rule_match.rule_id,
+        "rule_version": rule_match.ruleset_version,
+    }
+    canonical = json.dumps(values, separators=(",", ":"), sort_keys=True)
+    return TriageEvaluationIdentity(
+        identity_sha256=_sha256(canonical),
+        input=evidence,
+        profile_name=DEFAULT_PROFILE.name,
+        profile_version=DEFAULT_PROFILE.version,
+        taxonomy_version=DEFAULT_PROFILE.taxonomy_version,
+        schema_version=DEFAULT_PROFILE.schema_version,
+        generation_parameters_version=DEFAULT_PROFILE.generation_parameters_version,
+        prompt=prompt,
+        model_alias="deterministic-rules",
+        decision_source=TriageDecisionSource.RULE,
+        rule_id=rule_match.rule_id,
+        rule_version=rule_match.ruleset_version,
     )
 
 

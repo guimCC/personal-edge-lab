@@ -30,13 +30,53 @@ from personal_edge_lab.domain.email_triage import (
 )
 
 TRIAGE_LABEL_VALUES = (
-    "work",
-    "billing",
+    "mckinsey",
+    "education",
+    "job",
+    "personal",
+    "admin",
     "notification",
     "newsletter",
-    "personal",
+    "slop",
     "other",
 )
+TRIAGE_TAXONOMY = {
+    "version": "2.0.0",
+    "precedence": list(TRIAGE_LABEL_VALUES),
+    "labels": {
+        "mckinsey": (
+            "McKinsey-specific work, recruiting, staffing, benefits, travel, events, "
+            "or administration."
+        ),
+        "education": (
+            "School, university, courses, learning programs, academic administration, "
+            "or education communities."
+        ),
+        "job": (
+            "All other current or former employment, professional recruiting, clients, "
+            "colleagues, or work."
+        ),
+        "personal": (
+            "Direct human correspondence primarily about a personal relationship or personal plans."
+        ),
+        "admin": (
+            "Bills, banking, taxes, government, contracts, insurance, healthcare "
+            "appointments, or account administration."
+        ),
+        "notification": (
+            "Transactional messages triggered by an event or account activity, such as "
+            "reservations, security alerts, or deliveries."
+        ),
+        "newsletter": (
+            "A clearly identifiable recurring newsletter or publication sent for reading."
+        ),
+        "slop": (
+            "Product changelogs, generic announcements, promotions, marketing, and "
+            "repetitive bulk noise."
+        ),
+        "other": "Use only when no other category genuinely fits.",
+    },
+}
 TRIAGE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -48,9 +88,9 @@ TRIAGE_SCHEMA = {
 }
 DEFAULT_PROFILE = TriageProfile(
     name="email-triage",
-    version="1.0.0",
-    taxonomy_version="1.0.0",
-    schema_version="1.0.0",
+    version="2.0.0",
+    taxonomy_version="2.0.0",
+    schema_version="2.0.0",
     generation_parameters_version="1.0.0",
 )
 
@@ -85,7 +125,12 @@ class EmailTriageService:
         )
         prompt = self._prompt_source.resolve(
             {
-                "taxonomy": json.dumps(TRIAGE_LABEL_VALUES, separators=(",", ":")),
+                "taxonomy": json.dumps(
+                    TRIAGE_TAXONOMY,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
                 "email_json": email_json,
             }
         )
@@ -189,9 +234,12 @@ class EmailTriageService:
                 payload=(
                     replace(
                         redacted_trace,
-                        decision_sha256=_decision_hash(decision.label.value, decision.reason),
+                        decision_sha256=_decision_hash(
+                            decision.label.value,
+                            _model_reason(decision),
+                        ),
                         label=decision.label,
-                        reason_chars=len(decision.reason),
+                        reason_chars=len(_model_reason(decision)),
                     )
                     if redacted_trace is not None
                     else SyntheticTriageTracePayload(
@@ -225,6 +273,13 @@ class EmailTriageService:
 
 def _trace_id(operation_id: str) -> str:
     return hashlib.sha256(operation_id.encode("utf-8")).hexdigest()[:32]
+
+
+def _model_reason(decision: object) -> str:
+    reason = getattr(decision, "reason", None)
+    if not isinstance(reason, str):
+        raise TriageOutputError("model decision reason is unavailable")
+    return reason
 
 
 def _decision_hash(label: str, reason: str) -> str:

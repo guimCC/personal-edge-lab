@@ -9,7 +9,11 @@ from datetime import datetime
 from enum import StrEnum
 
 from personal_edge_lab.domain.email import EmailContentSource
-from personal_edge_lab.domain.email_triage import PromptSourceKind, TriageLabel
+from personal_edge_lab.domain.email_triage import (
+    PromptSourceKind,
+    TriageDecisionSource,
+    TriageLabel,
+)
 from personal_edge_lab.domain.email_triage_runs import TriageRunItemStatus
 
 MAX_TRIAGE_MESSAGES = 100
@@ -108,6 +112,9 @@ class TriageMessageSummary:
     model_input_truncated: bool
     source_truncated: bool
     has_recommendation: bool
+    decision_source: TriageDecisionSource | None = None
+    rule_id: str | None = None
+    rule_version: str | None = None
 
     def __post_init__(self) -> None:
         _record_id(self.record_id)
@@ -123,10 +130,19 @@ class TriageMessageSummary:
             raise TriageMessageValidationError("message reason is invalid")
         if not isinstance(self.latest_status, TriageRunItemStatus):
             raise TriageMessageValidationError("message processing status is invalid")
-        if self.has_recommendation != (self.label is not None and self.reason is not None):
+        if self.has_recommendation != (self.label is not None):
             raise TriageMessageValidationError("message recommendation state is inconsistent")
         if not self.has_recommendation and (self.label is not None or self.reason is not None):
             raise TriageMessageValidationError("message recommendation is inconsistent")
+        if self.has_recommendation and not isinstance(self.decision_source, TriageDecisionSource):
+            raise TriageMessageValidationError("message decision source is invalid")
+        if self.decision_source is TriageDecisionSource.RULE:
+            if self.reason is not None or not self.rule_id or not self.rule_version:
+                raise TriageMessageValidationError("message rule evidence is invalid")
+        elif self.decision_source is TriageDecisionSource.MODEL and (
+            self.reason is None or self.rule_id is not None or self.rule_version is not None
+        ):
+            raise TriageMessageValidationError("message model evidence is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +166,9 @@ class TriageMessageTechnicalEvidence:
     queue_wait_seconds: float | None
     provider_seconds: float | None
     total_seconds: float | None
+    decision_source: TriageDecisionSource | None = None
+    rule_id: str | None = None
+    rule_version: str | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id:

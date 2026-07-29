@@ -20,6 +20,8 @@ from personal_edge_lab.domain.email import (
     EmailRetrievalRequest,
     EmailThreadId,
 )
+from personal_edge_lab.domain.email_triage import TriageLabel, TriageRule, TriageRuleSet
+from personal_edge_lab.domain.email_triage_messages import TriageMessageFilter
 from personal_edge_lab.domain.email_triage_runs import (
     TriageRunItemStatus,
     TriageRunStatus,
@@ -120,6 +122,7 @@ def _execute(
     run_id: str,
     force: bool = False,
     interrupted=lambda: False,
+    rules=None,
 ):
     with SqliteTriageRunRepository(database) as repository:
         return TriageMailboxBatch(
@@ -128,6 +131,7 @@ def _execute(
             repository=repository,
             clock=lambda: NOW,
             interrupted=interrupted,
+            rules=rules,
         ).execute(
             EmailRetrievalRequest("in:inbox", limit=3),
             run_id=run_id,
@@ -142,8 +146,8 @@ def test_successful_rerun_reuses_and_forced_run_calls_model_again(tmp_path) -> N
     source = Source(_batch((_document(1),)))
     model = Model(
         [
-            '{"label":"billing","reason":"Invoice"}',
-            '{"label":"billing","reason":"Invoice again"}',
+            '{"label":"admin","reason":"Invoice"}',
+            '{"label":"admin","reason":"Invoice again"}',
         ]
     )
     first = _execute(database, source, model, run_id="run-one")
@@ -174,7 +178,7 @@ def test_partial_source_and_model_failures_are_durable_and_processing_continues(
     )
     model = Model(
         [
-            '{"label":"billing","reason":"Invoice"}',
+            '{"label":"admin","reason":"Invoice"}',
             "not-json",
         ]
     )
@@ -231,3 +235,41 @@ def test_gmail_failure_is_recorded_before_items_and_re_raised(tmp_path) -> None:
     assert details is not None
     assert details.run.status is TriageRunStatus.FAILED_BEFORE_ITEMS
     assert details.items == ()
+
+
+def test_private_sender_rule_skips_model_trace_and_prompt_and_is_reused(tmp_path) -> None:
+    database = tmp_path / "triage.db"
+    run_migrations(database)
+    source = Source(_batch((_document(1),)))
+    model = Model([])
+    rules = TriageRuleSet(
+        version="1",
+        rules=(
+            TriageRule(
+                rule_id="known-sender",
+                priority=1,
+                label=TriageLabel.EDUCATION,
+                exact_addresses=("sender-1@example.test",),
+            ),
+        ),
+    )
+
+    first = _execute(database, source, model, run_id="rule-one", rules=rules)
+    replay = _execute(database, source, model, run_id="rule-two", rules=rules)
+
+    assert model.calls == 0
+    assert first.items[0].status is TriageRunItemStatus.SUCCEEDED
+    assert first.items[0].label is TriageLabel.EDUCATION
+    assert first.items[0].decision_source.value == "rule"
+    assert first.items[0].reason is None
+    assert first.items[0].trace_id is None
+    assert replay.items[0].status is TriageRunItemStatus.REUSED
+    with SqliteTriageRunRepository(database) as repository:
+        page = repository.message_page(
+            limit=20,
+            message_filter=TriageMessageFilter.ALL,
+            label=None,
+            cursor=None,
+        )
+    assert page.items[0].decision_source.value == "rule"
+    assert page.items[0].reason is None

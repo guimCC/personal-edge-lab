@@ -68,7 +68,7 @@ def service(model, sink=None):
 
 
 def test_service_builds_structured_request_and_versioned_evidence() -> None:
-    model = Model('{"label":"billing","reason":"The message contains an invoice"}')
+    model = Model('{"label":"admin","reason":"The message contains an invoice"}')
     sink = Sink()
     result = service(model, sink).classify(
         TriageEmail("billing@example.test", "Invoice", "Amount due"),
@@ -80,7 +80,7 @@ def test_service_builds_structured_request_and_versioned_evidence() -> None:
     assert model.request.structured_output.schema["additionalProperties"] is False
     email_payload = json.loads(model.request.messages[-1].content)
     assert email_payload["sender"] == "billing@example.test"
-    assert result.evidence.profile.taxonomy_version == "1.0.0"
+    assert result.evidence.profile.taxonomy_version == "2.0.0"
     assert result.evidence.trace_id == sink.records[0].trace_id
     assert len(result.evidence.trace_id) == 32
 
@@ -89,10 +89,10 @@ def test_trace_id_is_deterministic_for_operation() -> None:
     email = TriageEmail("billing@example.test", "Invoice", "Amount due")
     first = Sink()
     second = Sink()
-    service(Model('{"label":"billing","reason":"Invoice"}'), first).classify(
+    service(Model('{"label":"admin","reason":"Invoice"}'), first).classify(
         email, operation_id="same"
     )
-    service(Model('{"label":"billing","reason":"Invoice"}'), second).classify(
+    service(Model('{"label":"admin","reason":"Invoice"}'), second).classify(
         email, operation_id="same"
     )
     assert first.records[0].trace_id == second.records[0].trace_id
@@ -162,7 +162,7 @@ def test_gmail_classification_trace_record_never_contains_content_or_reason() ->
     reason = "private-gmail-reason-sentinel"
     sink = Sink()
     triage_service = service(
-        Model(f'{{"label":"billing","reason":"{reason}"}}'),
+        Model(f'{{"label":"admin","reason":"{reason}"}}'),
         sink,
     )
     prepared = triage_service.prepare(

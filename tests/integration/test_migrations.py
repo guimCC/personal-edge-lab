@@ -72,6 +72,7 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         ("005_notification_outbox",),
         ("006_email_triage_runs",),
         ("007_email_triage_messages",),
+        ("008_email_triage_taxonomy_v2",),
     ]
 
 
@@ -196,4 +197,5 @@ def test_concurrent_app_startup_applies_migration_once(tmp_path) -> None:
         ("005_notification_outbox", 1),
         ("006_email_triage_runs", 1),
         ("007_email_triage_messages", 1),
+        ("008_email_triage_taxonomy_v2", 1),
     ]

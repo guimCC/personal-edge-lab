@@ -148,9 +148,9 @@ def _seed(database, document: EmailDocument) -> str:
             attempt_id=reservation.attempt_id,
             run_id="run-review",
             ordinal=1,
-            decision=TriageDecision(TriageLabel.WORK, "private reason sentinel"),
+            decision=TriageDecision(TriageLabel.JOB, "private reason sentinel"),
             completion=CompletionResult(
-                text='{"label":"work","reason":"private reason sentinel"}',
+                text='{"label":"job","reason":"private reason sentinel"}',
                 identity=ModelIdentity("llama_cpp", "qwen3-1.7b-q4-k-m"),
                 usage=None,
                 timing=CompletionTiming(0.0, 1.0),
@@ -196,7 +196,7 @@ def test_message_list_and_persisted_detail_need_no_gmail_call(tmp_path) -> None:
         unauthorized = client.get("/api/v1/email-triage/messages")
         _login(client)
         listing = client.get(
-            "/api/v1/email-triage/messages?limit=20&status=recommendations&label=work"
+            "/api/v1/email-triage/messages?limit=20&status=recommendations&label=job"
         )
         detail = client.get(f"/api/v1/email-triage/messages/{record_id}")
 
@@ -206,13 +206,13 @@ def test_message_list_and_persisted_detail_need_no_gmail_call(tmp_path) -> None:
     assert listing.json()["count"] == 1
     assert listing.json()["items"][0]["sender"] == document.sender
     assert listing.json()["items"][0]["subject"] == document.subject
-    assert listing.json()["items"][0]["label"] == "work"
+    assert listing.json()["items"][0]["label"] == "job"
     assert listing.json()["items"][0]["reason_preview"] == "private reason sentinel"
     assert detail.status_code == 200
     assert detail.headers["Cache-Control"] == "no-store"
     assert detail.json()["normalized_text"] == document.text
     assert len(detail.json()["model_input"]) == 1600
-    assert detail.json()["summary"]["label"] == "work"
+    assert detail.json()["summary"]["label"] == "job"
     assert detail.json()["technical"]["trace_id"] == "4" * 32
     assert MESSAGE_ID.value not in detail.text
     assert "private-thread-id" not in detail.text

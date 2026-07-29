@@ -11,6 +11,7 @@ from enum import StrEnum
 from personal_edge_lab.domain.email import EmailContentSource, EmailMessageId, EmailThreadId
 from personal_edge_lab.domain.email_triage import (
     PromptSourceKind,
+    TriageDecisionSource,
     TriageLabel,
     TriagePromptIdentity,
 )
@@ -124,6 +125,9 @@ class TriageEvaluationIdentity:
     generation_parameters_version: str
     prompt: TriagePromptIdentity
     model_alias: str
+    decision_source: TriageDecisionSource = TriageDecisionSource.MODEL
+    rule_id: str | None = None
+    rule_version: str | None = None
 
     def __post_init__(self) -> None:
         _hash(self.identity_sha256, "triage evaluation identity")
@@ -141,24 +145,41 @@ class TriageEvaluationIdentity:
             raise TriageRunValidationError("triage evaluation version evidence is invalid")
         if not isinstance(self.prompt, TriagePromptIdentity):
             raise TriageRunValidationError("triage prompt identity is invalid")
+        if not isinstance(self.decision_source, TriageDecisionSource):
+            raise TriageRunValidationError("triage decision source is invalid")
+        if self.decision_source is TriageDecisionSource.MODEL:
+            if self.rule_id is not None or self.rule_version is not None:
+                raise TriageRunValidationError("model evaluation contains rule evidence")
+        elif not self.rule_id or not self.rule_version:
+            raise TriageRunValidationError("rule evaluation evidence is incomplete")
 
 
 @dataclass(frozen=True, slots=True)
 class StoredTriageDecision:
     label: TriageLabel
     decision_sha256: str
-    reason_chars: int
+    reason_chars: int | None
+    source: TriageDecisionSource = TriageDecisionSource.MODEL
+    rule_id: str | None = None
+    rule_version: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.label, TriageLabel):
             raise TriageRunValidationError("stored triage label is invalid")
         _hash(self.decision_sha256, "stored triage decision hash")
-        if (
-            isinstance(self.reason_chars, bool)
-            or not isinstance(self.reason_chars, int)
-            or not 1 <= self.reason_chars <= 160
-        ):
-            raise TriageRunValidationError("stored triage reason length is invalid")
+        if not isinstance(self.source, TriageDecisionSource):
+            raise TriageRunValidationError("stored triage source is invalid")
+        if self.source is TriageDecisionSource.MODEL:
+            if (
+                isinstance(self.reason_chars, bool)
+                or not isinstance(self.reason_chars, int)
+                or not 1 <= self.reason_chars <= 160
+            ):
+                raise TriageRunValidationError("stored triage reason length is invalid")
+            if self.rule_id is not None or self.rule_version is not None:
+                raise TriageRunValidationError("stored model decision contains rule evidence")
+        elif self.reason_chars is not None or not self.rule_id or not self.rule_version:
+            raise TriageRunValidationError("stored rule decision evidence is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +212,9 @@ class MailboxTriageItemResult:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    decision_source: TriageDecisionSource | None = None
+    rule_id: str | None = None
+    rule_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +290,9 @@ class TriageRunItemSummary:
     total_tokens: int | None
     attempt_id: int | None
     review_available: bool
+    decision_source: TriageDecisionSource | None = None
+    rule_id: str | None = None
+    rule_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

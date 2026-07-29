@@ -148,7 +148,7 @@ def test_missing_or_incompatible_remote_prompt_uses_packaged_fallback(prompt) ->
     FakeLangfuse.prompt = prompt
     value = runtime().resolve(variables())
     assert value.identity.source is PromptSourceKind.LOCAL_FALLBACK
-    assert value.identity.version == "1.0.0"
+    assert value.identity.version == "2.0.0"
 
 
 def test_remote_failure_uses_packaged_fallback() -> None:
@@ -201,7 +201,7 @@ def test_trace_has_exact_root_and_generation_shape_with_prompt_link() -> None:
     runtime_value = runtime()
     prompt = runtime_value.resolve(variables())
     completion = CompletionResult(
-        text='{"label":"billing","reason":"Invoice"}',
+        text='{"label":"admin","reason":"Invoice"}',
         identity=ModelIdentity(provider="llama_cpp", model_alias="qwen3-1.7b-q4-k-m"),
         usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         timing=CompletionTiming(queue_wait_seconds=0.2, provider_seconds=1.3),
@@ -226,7 +226,7 @@ def test_trace_has_exact_root_and_generation_shape_with_prompt_link() -> None:
                 email=TriageEmail("billing@example.test", "Bill", "Invoice"),
                 prompt_messages=prompt.messages,
                 raw_output=completion.text,
-                decision=TriageDecision(TriageLabel.BILLING, "Invoice"),
+                decision=TriageDecision(TriageLabel.ADMIN, "Invoice"),
             ),
             outcome="success",
         )
@@ -274,7 +274,7 @@ def test_gmail_trace_contains_only_redacted_evidence_and_prompt_link() -> None:
                 message_chars=len(sentinel),
                 source="plain_text",
                 cleanup_flags=("tracking_removed",),
-                label=TriageLabel.BILLING,
+                label=TriageLabel.ADMIN,
                 reason_chars=12,
             ),
             outcome="success",
@@ -287,7 +287,7 @@ def test_gmail_trace_contains_only_redacted_evidence_and_prompt_link() -> None:
     assert client.propagated["tags"] == ["email-triage", "gmail"]
     assert client.observations[1]["prompt"] is FakeLangfuse.prompt
     assert client.observations[1]["input"]["content_sha256"] == "a" * 64
-    assert client.observations[1]["output"]["label"] == "billing"
+    assert client.observations[1]["output"]["label"] == "admin"
 
 
 def test_close_flushes_and_shuts_down_short_lived_client() -> None:
