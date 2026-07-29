@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any, cast
+from uuid import NAMESPACE_URL, uuid5
 
 from langfuse import Langfuse, propagate_attributes
+from langfuse.api import DatasetStatus
 from langfuse.model import ChatMessageDict, ChatMessageWithPlaceholdersDict
 
 from personal_edge_lab.application.ports.email_triage import (
     TriagePromptSource,
     TriageTraceSink,
+)
+from personal_edge_lab.application.ports.email_triage_feedback import (
+    TriageFeedbackPublisher,
 )
 from personal_edge_lab.domain.ai import ModelMessage, ModelRole
 from personal_edge_lab.domain.email_triage import (
@@ -21,13 +26,22 @@ from personal_edge_lab.domain.email_triage import (
     TriagePromptManifest,
     TriageTraceRecord,
 )
+from personal_edge_lab.domain.email_triage_feedback import (
+    TriageFeedbackAction,
+    TriageFeedbackPublication,
+)
 
 PROMPT_LABEL = "production"
 REQUIRED_VARIABLES = frozenset({"taxonomy", "email_json"})
+FEEDBACK_DATASET_NAME = "personal-edge-lab/email-triage-feedback"
 
 
 class PromptPublicationError(RuntimeError):
     """Sanitized failure from explicit Langfuse prompt publication."""
+
+
+class TriageFeedbackPublishError(RuntimeError):
+    """Sanitized failure from Langfuse feedback publication."""
 
 
 class LangfuseTriageRuntime(TriagePromptSource, TriageTraceSink):
@@ -263,6 +277,121 @@ class LangfuseTriageRuntime(TriagePromptSource, TriageTraceSink):
         self._client.shutdown()
 
 
+class LangfuseTriageFeedbackPublisher(TriageFeedbackPublisher):
+    """Publish redacted owner annotations as dataset items and trace scores."""
+
+    def __init__(
+        self,
+        *,
+        public_key: str,
+        secret_key: str,
+        base_url: str,
+        timeout_seconds: float,
+        release: str,
+    ) -> None:
+        secrets = (public_key, secret_key)
+
+        def mask(*, data: Any, **_kwargs: Any) -> Any:
+            return _mask_secrets(data, secrets)
+
+        self._client = Langfuse(  # pyright: ignore[reportCallIssue]
+            public_key=public_key,
+            secret_key=secret_key,
+            base_url=base_url,
+            timeout=max(1, int(timeout_seconds)),
+            flush_at=1,
+            flush_interval=1,
+            environment="personal-edge-lab",
+            release=release,
+            mask=mask,
+        )
+        self._release = release
+        self._dataset_ready = False
+
+    def publish(self, publication: TriageFeedbackPublication) -> None:
+        feedback = publication.feedback
+        try:
+            self._ensure_dataset()
+            active = feedback.action is not TriageFeedbackAction.DISMISS
+            self._client.create_dataset_item(
+                dataset_name=FEEDBACK_DATASET_NAME,
+                id=publication.dataset_item_id,
+                input={
+                    "normalized_sha256": publication.normalized_sha256,
+                    "model_input_sha256": publication.model_input_sha256,
+                    "sender_chars": publication.sender_chars,
+                    "subject_chars": publication.subject_chars,
+                    "message_chars": publication.message_chars,
+                    "source": publication.content_source.value,
+                    "cleanup_flags": list(publication.cleanup_flags),
+                    "source_truncated": publication.source_truncated,
+                    "model_input_truncated": publication.model_input_truncated,
+                },
+                expected_output=(
+                    {"label": feedback.expected_label.value}
+                    if feedback.expected_label is not None
+                    else None
+                ),
+                metadata={
+                    "privacy": "redacted",
+                    "feedback_action": feedback.action.value,
+                    "feedback_source": feedback.source.value,
+                    "feedback_version": feedback.version,
+                    "recommendation_label": feedback.recommendation_label.value,
+                    "taxonomy_version": "2.0.0",
+                    "release": self._release,
+                },
+                source_trace_id=publication.trace_id,
+                status=DatasetStatus.ACTIVE if active else DatasetStatus.ARCHIVED,
+            )
+            if publication.trace_id is not None:
+                self._client.create_score(
+                    trace_id=publication.trace_id,
+                    score_id=_score_id(feedback.feedback_id, "verdict"),
+                    name="owner-label-verdict",
+                    value=feedback.action.value,
+                    data_type="CATEGORICAL",
+                    metadata={"source": feedback.source.value},
+                    environment="personal-edge-lab",
+                )
+                if feedback.expected_label is not None:
+                    self._client.create_score(
+                        trace_id=publication.trace_id,
+                        score_id=_score_id(feedback.feedback_id, "expected-label"),
+                        name="owner-expected-label",
+                        value=feedback.expected_label.value,
+                        data_type="CATEGORICAL",
+                        metadata={"source": feedback.source.value},
+                        environment="personal-edge-lab",
+                    )
+            self._client.flush()
+        except Exception as error:
+            raise TriageFeedbackPublishError("Langfuse feedback publication failed") from error
+
+    def close(self) -> None:
+        self._client.flush()
+        self._client.shutdown()
+
+    def _ensure_dataset(self) -> None:
+        if self._dataset_ready:
+            return
+        self._client.create_dataset(
+            name=FEEDBACK_DATASET_NAME,
+            description=(
+                "Owner-confirmed email-triage labels. Inputs remain redacted; "
+                "private content stays on RUBIK."
+            ),
+            metadata={
+                "privacy": "redacted",
+                "taxonomy_version": "2.0.0",
+                "environment": "personal-edge-lab",
+            },
+            input_schema=_feedback_input_schema(),
+            expected_output_schema=_feedback_expected_output_schema(),
+        )
+        self._dataset_ready = True
+
+
 def _validated_messages(value: Any) -> tuple[ModelMessage, ...]:
     if not isinstance(value, (list, tuple)) or not value:
         raise ValueError("remote prompt messages are invalid")
@@ -357,3 +486,69 @@ def _mask_secrets(value: Any, secrets: tuple[str, str]) -> Any:
     if isinstance(value, tuple):
         return tuple(_mask_secrets(item, secrets) for item in value)
     return value
+
+
+def _score_id(feedback_id: str, score_name: str) -> str:
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            f"personal-edge-lab/email-triage-feedback/{feedback_id}/{score_name}",
+        )
+    )
+
+
+def _feedback_input_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "normalized_sha256",
+            "model_input_sha256",
+            "sender_chars",
+            "subject_chars",
+            "message_chars",
+            "source",
+            "cleanup_flags",
+            "source_truncated",
+            "model_input_truncated",
+        ],
+        "properties": {
+            "normalized_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "model_input_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "sender_chars": {"type": "integer", "minimum": 0, "maximum": 160},
+            "subject_chars": {"type": "integer", "minimum": 0, "maximum": 256},
+            "message_chars": {"type": "integer", "minimum": 0, "maximum": 1600},
+            "source": {"enum": ["plain_text", "html", "empty"]},
+            "cleanup_flags": {"type": "array", "items": {"type": "string"}},
+            "source_truncated": {"type": "boolean"},
+            "model_input_truncated": {"type": "boolean"},
+        },
+    }
+
+
+def _feedback_expected_output_schema() -> dict[str, Any]:
+    return {
+        "anyOf": [
+            {"type": "null"},
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["label"],
+                "properties": {
+                    "label": {
+                        "enum": [
+                            "mckinsey",
+                            "education",
+                            "job",
+                            "personal",
+                            "admin",
+                            "notification",
+                            "newsletter",
+                            "slop",
+                            "other",
+                        ]
+                    }
+                },
+            },
+        ]
+    }

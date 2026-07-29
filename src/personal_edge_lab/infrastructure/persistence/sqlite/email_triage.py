@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 from personal_edge_lab.domain.ai import CompletionResult
 from personal_edge_lab.domain.email import (
@@ -20,6 +21,17 @@ from personal_edge_lab.domain.email_triage import (
     TriageDecision,
     TriageDecisionSource,
     TriageLabel,
+)
+from personal_edge_lab.domain.email_triage_feedback import (
+    TriageFeedbackAction,
+    TriageFeedbackCandidate,
+    TriageFeedbackCommand,
+    TriageFeedbackError,
+    TriageFeedbackOverview,
+    TriageFeedbackPublication,
+    TriageFeedbackRecord,
+    TriageFeedbackSource,
+    TriageFeedbackSyncStatus,
 )
 from personal_edge_lab.domain.email_triage_messages import (
     StoredTriageMessage,
@@ -1082,12 +1094,26 @@ class SqliteTriageRunRepository:
             SELECT m.record_id, m.received_at_utc, m.latest_status,
                 m.latest_failure_category, m.last_seen_at_utc,
                 s.sender, s.subject, s.model_input_truncated, s.source_truncated,
-                a.label, a.reason_text, a.decision_source, a.rule_id, a.rule_version
+                a.label, a.reason_text, a.decision_source, a.rule_id, a.rule_version,
+                f.feedback_id, f.version AS feedback_version,
+                f.recommendation_attempt_id AS feedback_attempt_id,
+                f.recommendation_label AS feedback_recommendation_label,
+                f.action AS feedback_action, f.expected_label AS feedback_expected_label,
+                f.source AS feedback_source, f.created_at_utc AS feedback_created_at_utc,
+                f.sync_status AS feedback_sync_status
             FROM email_triage_messages m
             JOIN email_triage_content_snapshots s
               ON s.id = m.current_content_snapshot_id
             LEFT JOIN email_triage_attempts a
               ON a.id = m.latest_successful_attempt_id
+            LEFT JOIN email_triage_feedback f
+              ON f.id = (
+                  SELECT latest.id
+                  FROM email_triage_feedback latest
+                  WHERE latest.message_record_id = m.id
+                  ORDER BY latest.version DESC
+                  LIMIT 1
+              )
             {where_sql}
             ORDER BY m.received_at_utc DESC, m.record_id DESC
             LIMIT ?
@@ -1123,7 +1149,13 @@ class SqliteTriageRunRepository:
                 a.decision_source, a.rule_id, a.rule_version,
                 a.item_ordinal AS successful_item_ordinal,
                 e.prompt_source, e.prompt_version, e.profile_version,
-                e.taxonomy_version, e.schema_version, e.generation_parameters_version
+                e.taxonomy_version, e.schema_version, e.generation_parameters_version,
+                f.feedback_id, f.version AS feedback_version,
+                f.recommendation_attempt_id AS feedback_attempt_id,
+                f.recommendation_label AS feedback_recommendation_label,
+                f.action AS feedback_action, f.expected_label AS feedback_expected_label,
+                f.source AS feedback_source, f.created_at_utc AS feedback_created_at_utc,
+                f.sync_status AS feedback_sync_status
             FROM email_triage_messages m
             JOIN email_triage_content_snapshots s
               ON s.id = m.current_content_snapshot_id
@@ -1131,6 +1163,14 @@ class SqliteTriageRunRepository:
               ON a.id = m.latest_successful_attempt_id
             LEFT JOIN email_triage_evaluations e
               ON e.id = a.evaluation_id
+            LEFT JOIN email_triage_feedback f
+              ON f.id = (
+                  SELECT latest.id
+                  FROM email_triage_feedback latest
+                  WHERE latest.message_record_id = m.id
+                  ORDER BY latest.version DESC
+                  LIMIT 1
+              )
             WHERE m.record_id = ?
             """,
             (record_id,),
@@ -1218,6 +1258,238 @@ class SqliteTriageRunRepository:
             metadata_truncated=bool(row["metadata_truncated"]),
             technical=technical,
         )
+
+    def feedback_candidate(self, record_id: str) -> TriageFeedbackCandidate | None:
+        row = self._feedback_candidate_row("m.record_id = ?", (record_id,))
+        return _feedback_candidate(row) if row is not None else None
+
+    def next_feedback_candidate(self) -> TriageFeedbackCandidate | None:
+        row = self._feedback_candidate_row(
+            """
+            NOT EXISTS (
+                SELECT 1 FROM email_triage_feedback reviewed
+                WHERE reviewed.message_record_id = m.id
+                  AND reviewed.recommendation_attempt_id = m.latest_successful_attempt_id
+            )
+            """,
+            (),
+            order_by="m.received_at_utc DESC, m.record_id DESC",
+        )
+        return _feedback_candidate(row) if row is not None else None
+
+    def record_feedback(self, command: TriageFeedbackCommand) -> TriageFeedbackRecord:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            replay = self._connection.execute(
+                """
+                SELECT f.*, m.record_id
+                FROM email_triage_feedback f
+                JOIN email_triage_messages m ON m.id = f.message_record_id
+                WHERE f.feedback_id = ?
+                """,
+                (command.feedback_id,),
+            ).fetchone()
+            if replay is not None:
+                self._connection.commit()
+                return _feedback_record(replay)
+            row = self._connection.execute(
+                """
+                SELECT m.id AS message_record_id, m.record_id,
+                    m.latest_successful_attempt_id, a.label,
+                    COALESCE(MAX(f.version), 0) AS feedback_version
+                FROM email_triage_messages m
+                JOIN email_triage_attempts a
+                  ON a.id = m.latest_successful_attempt_id
+                LEFT JOIN email_triage_feedback f
+                  ON f.message_record_id = m.id
+                WHERE m.record_id = ?
+                GROUP BY m.id, m.record_id, m.latest_successful_attempt_id, a.label
+                """,
+                (command.record_id,),
+            ).fetchone()
+            if row is None or row["label"] is None:
+                raise TriageFeedbackError("feedback recommendation is unavailable")
+            attempt_id = int(row["latest_successful_attempt_id"])
+            version = int(row["feedback_version"])
+            if (
+                attempt_id != command.recommendation_attempt_id
+                or version != command.expected_version
+            ):
+                raise TriageFeedbackError("feedback view is stale")
+            recommendation = TriageLabel(str(row["label"]))
+            if command.action is TriageFeedbackAction.CONFIRM:
+                expected_label = recommendation
+            elif command.action is TriageFeedbackAction.CORRECT:
+                expected_label = command.corrected_label
+                if expected_label is recommendation:
+                    raise TriageFeedbackError("corrected feedback must change the recommendation")
+            else:
+                expected_label = None
+            next_version = version + 1
+            self._connection.execute(
+                """
+                INSERT INTO email_triage_feedback (
+                    feedback_id, message_record_id, recommendation_attempt_id,
+                    version, action, recommendation_label, expected_label,
+                    source, created_at_utc, sync_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                (
+                    command.feedback_id,
+                    int(row["message_record_id"]),
+                    attempt_id,
+                    next_version,
+                    command.action.value,
+                    recommendation.value,
+                    expected_label.value if expected_label is not None else None,
+                    command.source.value,
+                    command.created_at.isoformat(),
+                ),
+            )
+            stored = self._connection.execute(
+                """
+                SELECT f.*, m.record_id
+                FROM email_triage_feedback f
+                JOIN email_triage_messages m ON m.id = f.message_record_id
+                WHERE f.feedback_id = ?
+                """,
+                (command.feedback_id,),
+            ).fetchone()
+            if stored is None:
+                raise sqlite3.DatabaseError("feedback storage failed")
+            self._connection.commit()
+            return _feedback_record(stored)
+        except BaseException:
+            self._connection.rollback()
+            raise
+
+    def pending_feedback_publications(
+        self,
+        *,
+        limit: int,
+        feedback_id: str | None = None,
+    ) -> tuple[TriageFeedbackPublication, ...]:
+        if isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise TriageFeedbackError("feedback publication limit is invalid")
+        predicates = ["f.sync_status IN ('pending', 'unavailable')"]
+        parameters: list[object] = []
+        if feedback_id is not None:
+            predicates.append("f.feedback_id = ?")
+            parameters.append(feedback_id)
+        rows = self._connection.execute(
+            f"""
+            SELECT f.*, m.record_id, a.trace_id,
+                s.sender, s.subject, s.model_input, s.normalized_sha256,
+                s.model_input_sha256, s.content_source, s.cleanup_flags_json,
+                s.source_truncated, s.model_input_truncated
+            FROM email_triage_feedback f
+            JOIN email_triage_messages m ON m.id = f.message_record_id
+            JOIN email_triage_attempts a ON a.id = f.recommendation_attempt_id
+            JOIN email_triage_evaluation_content ec
+              ON ec.evaluation_id = a.evaluation_id
+            JOIN email_triage_content_snapshots s
+              ON s.id = ec.content_snapshot_id
+            WHERE {" AND ".join(predicates)}
+            ORDER BY f.id
+            LIMIT ?
+            """,
+            (*parameters, limit),
+        ).fetchall()
+        return tuple(_feedback_publication(row) for row in rows)
+
+    def mark_feedback_synced(self, feedback_id: str) -> None:
+        cursor = self._connection.execute(
+            """
+            UPDATE email_triage_feedback
+            SET sync_status = 'synced', synced_at_utc = ?
+            WHERE feedback_id = ?
+            """,
+            (datetime.now(UTC).isoformat(), feedback_id),
+        )
+        _require_one(cursor, "triage feedback")
+        self._connection.commit()
+
+    def mark_feedback_unavailable(self, feedback_id: str) -> None:
+        cursor = self._connection.execute(
+            """
+            UPDATE email_triage_feedback
+            SET sync_status = 'unavailable', synced_at_utc = NULL
+            WHERE feedback_id = ?
+            """,
+            (feedback_id,),
+        )
+        _require_one(cursor, "triage feedback")
+        self._connection.commit()
+
+    def feedback_overview(self) -> TriageFeedbackOverview:
+        row = self._connection.execute(
+            """
+            SELECT
+                (
+                    SELECT COUNT(*)
+                    FROM email_triage_messages m
+                    WHERE m.latest_successful_attempt_id IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM email_triage_feedback f
+                          WHERE f.message_record_id = m.id
+                            AND f.recommendation_attempt_id =
+                                m.latest_successful_attempt_id
+                      )
+                ) AS pending_count,
+                (
+                    SELECT COUNT(DISTINCT message_record_id)
+                    FROM email_triage_feedback
+                ) AS reviewed_count
+            """
+        ).fetchone()
+        if row is None:
+            raise sqlite3.DatabaseError("feedback overview is unavailable")
+        return TriageFeedbackOverview(
+            pending_count=int(row["pending_count"]),
+            reviewed_count=int(row["reviewed_count"]),
+        )
+
+    def _feedback_candidate_row(
+        self,
+        predicate: str,
+        parameters: tuple[object, ...],
+        *,
+        order_by: str = "m.record_id",
+    ) -> sqlite3.Row | None:
+        return self._connection.execute(
+            f"""
+            SELECT m.record_id, m.received_at_utc,
+                m.latest_successful_attempt_id,
+                s.sender, s.subject, s.model_input, s.normalized_sha256,
+                s.model_input_sha256, s.content_source, s.cleanup_flags_json,
+                s.source_truncated, s.model_input_truncated,
+                a.label, a.reason_text, a.trace_id,
+                COALESCE(f.version, 0) AS feedback_version,
+                f.feedback_id, f.recommendation_attempt_id AS feedback_attempt_id,
+                f.recommendation_label AS feedback_recommendation_label,
+                f.action AS feedback_action, f.expected_label AS feedback_expected_label,
+                f.source AS feedback_source, f.created_at_utc AS feedback_created_at_utc,
+                f.sync_status AS feedback_sync_status
+            FROM email_triage_messages m
+            JOIN email_triage_attempts a ON a.id = m.latest_successful_attempt_id
+            JOIN email_triage_evaluation_content ec
+              ON ec.evaluation_id = a.evaluation_id
+            JOIN email_triage_content_snapshots s
+              ON s.id = ec.content_snapshot_id
+            LEFT JOIN email_triage_feedback f
+              ON f.id = (
+                  SELECT latest.id
+                  FROM email_triage_feedback latest
+                  WHERE latest.message_record_id = m.id
+                  ORDER BY latest.version DESC
+                  LIMIT 1
+              )
+            WHERE {predicate}
+            ORDER BY {order_by}
+            LIMIT 1
+            """,
+            parameters,
+        ).fetchone()
 
     def _insert_evaluation(
         self,
@@ -1445,6 +1717,7 @@ def _item_summary(row: sqlite3.Row) -> TriageRunItemSummary:
 def _message_summary(row: sqlite3.Row) -> TriageMessageSummary:
     label = TriageLabel(str(row["label"])) if row["label"] is not None else None
     reason = str(row["reason_text"]) if row["reason_text"] is not None else None
+    feedback = _latest_feedback(row)
     return TriageMessageSummary(
         record_id=str(row["record_id"]),
         received_at=datetime.fromisoformat(str(row["received_at_utc"])),
@@ -1469,6 +1742,93 @@ def _message_summary(row: sqlite3.Row) -> TriageMessageSummary:
         ),
         rule_id=str(row["rule_id"]) if row["rule_id"] is not None else None,
         rule_version=(str(row["rule_version"]) if row["rule_version"] is not None else None),
+        feedback_version=feedback.version if feedback is not None else 0,
+        latest_feedback=feedback,
+    )
+
+
+def _feedback_record(row: sqlite3.Row) -> TriageFeedbackRecord:
+    action = TriageFeedbackAction(str(row["action"]))
+    expected_label = (
+        TriageLabel(str(row["expected_label"])) if row["expected_label"] is not None else None
+    )
+    return TriageFeedbackRecord(
+        feedback_id=str(row["feedback_id"]),
+        record_id=str(row["record_id"]),
+        version=int(row["version"]),
+        recommendation_attempt_id=int(row["recommendation_attempt_id"]),
+        recommendation_label=TriageLabel(str(row["recommendation_label"])),
+        action=action,
+        expected_label=expected_label,
+        source=TriageFeedbackSource(str(row["source"])),
+        created_at=datetime.fromisoformat(str(row["created_at_utc"])),
+        sync_status=TriageFeedbackSyncStatus(str(row["sync_status"])),
+    )
+
+
+def _latest_feedback(row: sqlite3.Row) -> TriageFeedbackRecord | None:
+    if row["feedback_id"] is None:
+        return None
+    return TriageFeedbackRecord(
+        feedback_id=str(row["feedback_id"]),
+        record_id=str(row["record_id"]),
+        version=int(row["feedback_version"]),
+        recommendation_attempt_id=int(row["feedback_attempt_id"]),
+        recommendation_label=TriageLabel(str(row["feedback_recommendation_label"])),
+        action=TriageFeedbackAction(str(row["feedback_action"])),
+        expected_label=(
+            TriageLabel(str(row["feedback_expected_label"]))
+            if row["feedback_expected_label"] is not None
+            else None
+        ),
+        source=TriageFeedbackSource(str(row["feedback_source"])),
+        created_at=datetime.fromisoformat(str(row["feedback_created_at_utc"])),
+        sync_status=TriageFeedbackSyncStatus(str(row["feedback_sync_status"])),
+    )
+
+
+def _feedback_candidate(row: sqlite3.Row) -> TriageFeedbackCandidate:
+    return TriageFeedbackCandidate(
+        record_id=str(row["record_id"]),
+        feedback_version=int(row["feedback_version"]),
+        recommendation_attempt_id=int(row["latest_successful_attempt_id"]),
+        recommendation_label=TriageLabel(str(row["label"])),
+        reason=str(row["reason_text"]) if row["reason_text"] is not None else None,
+        sender=str(row["sender"]),
+        subject=str(row["subject"]),
+        received_at=datetime.fromisoformat(str(row["received_at_utc"])),
+        model_input=str(row["model_input"]),
+        normalized_sha256=str(row["normalized_sha256"]),
+        model_input_sha256=str(row["model_input_sha256"]),
+        content_source=EmailContentSource(str(row["content_source"])),
+        cleanup_flags=tuple(json.loads(str(row["cleanup_flags_json"]))),
+        source_truncated=bool(row["source_truncated"]),
+        model_input_truncated=bool(row["model_input_truncated"]),
+        trace_id=str(row["trace_id"]) if row["trace_id"] is not None else None,
+        latest_feedback=_latest_feedback(row),
+    )
+
+
+def _feedback_publication(row: sqlite3.Row) -> TriageFeedbackPublication:
+    feedback = _feedback_record(row)
+    return TriageFeedbackPublication(
+        feedback=feedback,
+        dataset_item_id=str(
+            uuid5(
+                NAMESPACE_URL,
+                f"personal-edge-lab/email-triage-feedback/{feedback.record_id}",
+            )
+        ),
+        trace_id=str(row["trace_id"]) if row["trace_id"] is not None else None,
+        normalized_sha256=str(row["normalized_sha256"]),
+        model_input_sha256=str(row["model_input_sha256"]),
+        sender_chars=len(str(row["sender"])),
+        subject_chars=len(str(row["subject"])),
+        message_chars=len(str(row["model_input"])),
+        content_source=EmailContentSource(str(row["content_source"])),
+        cleanup_flags=tuple(json.loads(str(row["cleanup_flags_json"]))),
+        source_truncated=bool(row["source_truncated"]),
+        model_input_truncated=bool(row["model_input_truncated"]),
     )
 
 

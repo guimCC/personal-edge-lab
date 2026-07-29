@@ -14,6 +14,7 @@ from personal_edge_lab.domain.email_triage import (
     TriageDecisionSource,
     TriageLabel,
 )
+from personal_edge_lab.domain.email_triage_feedback import TriageFeedbackRecord
 from personal_edge_lab.domain.email_triage_runs import TriageRunItemStatus
 
 MAX_TRIAGE_MESSAGES = 100
@@ -115,6 +116,8 @@ class TriageMessageSummary:
     decision_source: TriageDecisionSource | None = None
     rule_id: str | None = None
     rule_version: str | None = None
+    feedback_version: int = 0
+    latest_feedback: TriageFeedbackRecord | None = None
 
     def __post_init__(self) -> None:
         _record_id(self.record_id)
@@ -143,6 +146,17 @@ class TriageMessageSummary:
             self.reason is None or self.rule_id is not None or self.rule_version is not None
         ):
             raise TriageMessageValidationError("message model evidence is invalid")
+        if isinstance(self.feedback_version, bool) or self.feedback_version < 0:
+            raise TriageMessageValidationError("message feedback version is invalid")
+        if self.latest_feedback is None:
+            if self.feedback_version != 0:
+                raise TriageMessageValidationError("message feedback state is inconsistent")
+        elif (
+            not isinstance(self.latest_feedback, TriageFeedbackRecord)
+            or self.latest_feedback.record_id != self.record_id
+            or self.latest_feedback.version != self.feedback_version
+        ):
+            raise TriageMessageValidationError("message feedback state is inconsistent")
 
 
 @dataclass(frozen=True, slots=True)

@@ -672,6 +672,63 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version="009_email_triage_feedback",
+        statements=(
+            """
+            CREATE TABLE email_triage_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                feedback_id TEXT NOT NULL UNIQUE,
+                message_record_id INTEGER NOT NULL,
+                recommendation_attempt_id INTEGER NOT NULL,
+                version INTEGER NOT NULL CHECK (version >= 1),
+                action TEXT NOT NULL CHECK (action IN ('confirm', 'correct', 'dismiss')),
+                recommendation_label TEXT NOT NULL
+                    CHECK (
+                        recommendation_label IN (
+                            'mckinsey', 'education', 'job', 'personal', 'admin',
+                            'notification', 'newsletter', 'slop', 'other',
+                            'work', 'billing'
+                        )
+                    ),
+                expected_label TEXT
+                    CHECK (
+                        expected_label IS NULL
+                        OR expected_label IN (
+                            'mckinsey', 'education', 'job', 'personal', 'admin',
+                            'notification', 'newsletter', 'slop', 'other',
+                            'work', 'billing'
+                        )
+                    ),
+                source TEXT NOT NULL CHECK (source IN ('dashboard', 'telegram')),
+                created_at_utc TEXT NOT NULL,
+                sync_status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (sync_status IN ('pending', 'synced', 'unavailable')),
+                synced_at_utc TEXT,
+                CHECK (
+                    (action = 'dismiss' AND expected_label IS NULL)
+                    OR (action = 'confirm' AND expected_label = recommendation_label)
+                    OR (
+                        action = 'correct'
+                        AND expected_label IS NOT NULL
+                        AND expected_label != recommendation_label
+                    )
+                ),
+                UNIQUE (message_record_id, version),
+                FOREIGN KEY (message_record_id) REFERENCES email_triage_messages (id),
+                FOREIGN KEY (recommendation_attempt_id) REFERENCES email_triage_attempts (id)
+            )
+            """,
+            """
+            CREATE INDEX idx_email_triage_feedback_latest
+            ON email_triage_feedback (message_record_id, version DESC)
+            """,
+            """
+            CREATE INDEX idx_email_triage_feedback_sync
+            ON email_triage_feedback (sync_status, id)
+            """,
+        ),
+    ),
 )
 
 

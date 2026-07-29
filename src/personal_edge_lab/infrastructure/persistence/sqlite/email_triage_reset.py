@@ -12,6 +12,7 @@ from personal_edge_lab.infrastructure.persistence.sqlite.connection import open_
 
 RESET_CONFIRMATION = "DELETE-ALL-EMAIL-TRIAGE-DATA"
 TRIAGE_TABLES = (
+    "email_triage_feedback",
     "email_triage_evaluation_content",
     "email_triage_attempts",
     "email_triage_run_items",

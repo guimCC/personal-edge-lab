@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ from personal_edge_lab.domain.ai import (
     ModelIdentity,
     TokenUsage,
 )
+from personal_edge_lab.domain.email import EmailContentSource
 from personal_edge_lab.domain.email_triage import (
     PromptSourceKind,
     RedactedTriageTracePayload,
@@ -21,10 +23,19 @@ from personal_edge_lab.domain.email_triage import (
     TriageProfile,
     TriageTraceRecord,
 )
+from personal_edge_lab.domain.email_triage_feedback import (
+    TriageFeedbackAction,
+    TriageFeedbackPublication,
+    TriageFeedbackRecord,
+    TriageFeedbackSource,
+    TriageFeedbackSyncStatus,
+)
 from personal_edge_lab.infrastructure.observability import langfuse as adapter
 from personal_edge_lab.infrastructure.observability.langfuse import (
+    LangfuseTriageFeedbackPublisher,
     LangfuseTriageRuntime,
     PromptPublicationError,
+    TriageFeedbackPublishError,
 )
 from personal_edge_lab.modules.email_triage.prompt import load_packaged_prompt
 
@@ -65,6 +76,9 @@ class FakeLangfuse:
     def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
         self.observations = []
+        self.datasets = []
+        self.dataset_items = []
+        self.scores = []
         self.flushed = False
         self.stopped = False
         type(self).instances.append(self)
@@ -79,6 +93,15 @@ class FakeLangfuse:
     def create_prompt(self, **kwargs):
         type(self).created = kwargs
         return Prompt(version=8)
+
+    def create_dataset(self, **kwargs):
+        self.datasets.append(kwargs)
+
+    def create_dataset_item(self, **kwargs):
+        self.dataset_items.append(kwargs)
+
+    def create_score(self, **kwargs):
+        self.scores.append(kwargs)
 
     @contextmanager
     def start_as_current_observation(self, **kwargs):
@@ -309,3 +332,99 @@ def test_sdk_mask_removes_both_keys_recursively() -> None:
     assert "s" * 64 not in repr(masked)
     assert "p" * 64 not in repr(masked)
     assert repr(masked).count("[REDACTED]") == 2
+
+
+def _feedback_publication(
+    action: TriageFeedbackAction = TriageFeedbackAction.CORRECT,
+) -> TriageFeedbackPublication:
+    expected = (
+        None
+        if action is TriageFeedbackAction.DISMISS
+        else (TriageLabel.ADMIN if action is TriageFeedbackAction.CORRECT else TriageLabel.JOB)
+    )
+    return TriageFeedbackPublication(
+        feedback=TriageFeedbackRecord(
+            feedback_id="1" * 32,
+            record_id="2" * 32,
+            version=1,
+            recommendation_attempt_id=7,
+            recommendation_label=TriageLabel.JOB,
+            action=action,
+            expected_label=expected,
+            source=TriageFeedbackSource.TELEGRAM,
+            created_at=datetime(2026, 7, 29, tzinfo=UTC),
+            sync_status=TriageFeedbackSyncStatus.PENDING,
+        ),
+        dataset_item_id="3" * 36,
+        trace_id="4" * 32,
+        normalized_sha256="5" * 64,
+        model_input_sha256="6" * 64,
+        sender_chars=24,
+        subject_chars=18,
+        message_chars=800,
+        content_source=EmailContentSource.PLAIN_TEXT,
+        cleanup_flags=("signature_removed",),
+        source_truncated=False,
+        model_input_truncated=True,
+    )
+
+
+def test_feedback_publisher_upserts_redacted_dataset_item_and_trace_scores() -> None:
+    publisher = LangfuseTriageFeedbackPublisher(
+        public_key="p" * 64,
+        secret_key="s" * 64,
+        base_url="https://cloud.langfuse.com",
+        timeout_seconds=2,
+        release="0.16.0",
+    )
+    publisher.publish(_feedback_publication())
+
+    client = FakeLangfuse.instances[0]
+    assert client.datasets[0]["name"] == "personal-edge-lab/email-triage-feedback"
+    item = client.dataset_items[0]
+    assert item["id"] == "3" * 36
+    assert item["expected_output"] == {"label": "admin"}
+    assert item["source_trace_id"] == "4" * 32
+    assert item["status"].value == "ACTIVE"
+    assert item["input"]["normalized_sha256"] == "5" * 64
+    assert item["metadata"]["privacy"] == "redacted"
+    assert {score["name"] for score in client.scores} == {
+        "owner-label-verdict",
+        "owner-expected-label",
+    }
+    serialized = repr((client.datasets, client.dataset_items, client.scores))
+    assert "private sender" not in serialized
+    assert "private message" not in serialized
+
+
+def test_dismiss_archives_dataset_item_without_expected_label() -> None:
+    publisher = LangfuseTriageFeedbackPublisher(
+        public_key="p" * 64,
+        secret_key="s" * 64,
+        base_url="https://cloud.langfuse.com",
+        timeout_seconds=2,
+        release="0.16.0",
+    )
+    publisher.publish(_feedback_publication(TriageFeedbackAction.DISMISS))
+    item = FakeLangfuse.instances[0].dataset_items[0]
+    assert item["expected_output"] is None
+    assert item["status"].value == "ARCHIVED"
+
+
+def test_feedback_publication_error_is_sanitized(monkeypatch) -> None:
+    publisher = LangfuseTriageFeedbackPublisher(
+        public_key="p" * 64,
+        secret_key="s" * 64,
+        base_url="https://cloud.langfuse.com",
+        timeout_seconds=2,
+        release="0.16.0",
+    )
+
+    def fail(**_kwargs):
+        raise RuntimeError("private provider response")
+
+    monkeypatch.setattr(FakeLangfuse.instances[0], "create_dataset_item", fail)
+    with pytest.raises(TriageFeedbackPublishError) as captured:
+        publisher.publish(_feedback_publication())
+    assert str(captured.value) == "Langfuse feedback publication failed"
+    assert "private provider response" not in str(captured.value)
