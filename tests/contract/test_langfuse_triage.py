@@ -375,7 +375,7 @@ def test_feedback_publisher_upserts_redacted_dataset_item_and_trace_scores() -> 
         secret_key="s" * 64,
         base_url="https://cloud.langfuse.com",
         timeout_seconds=2,
-        release="0.16.0",
+        release="0.16.1",
     )
     publisher.publish(_feedback_publication())
 
@@ -403,7 +403,7 @@ def test_dismiss_archives_dataset_item_without_expected_label() -> None:
         secret_key="s" * 64,
         base_url="https://cloud.langfuse.com",
         timeout_seconds=2,
-        release="0.16.0",
+        release="0.16.1",
     )
     publisher.publish(_feedback_publication(TriageFeedbackAction.DISMISS))
     item = FakeLangfuse.instances[0].dataset_items[0]
@@ -417,7 +417,7 @@ def test_feedback_publication_error_is_sanitized(monkeypatch) -> None:
         secret_key="s" * 64,
         base_url="https://cloud.langfuse.com",
         timeout_seconds=2,
-        release="0.16.0",
+        release="0.16.1",
     )
 
     def fail(**_kwargs):

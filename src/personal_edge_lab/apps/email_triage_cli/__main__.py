@@ -19,11 +19,13 @@ from typing import Any, TextIO
 
 from personal_edge_lab import __version__
 from personal_edge_lab.application.ports.email import (
+    EmailSource,
     EmailSourceError,
     EmailSourceFailureCategory,
 )
 from personal_edge_lab.application.ports.email_triage import NoOpTriageTraceSink
 from personal_edge_lab.apps.email_triage_cli.config import (
+    BackfillSettings,
     ConfigurationError,
     GmailAuthorizationSettings,
     GmailFetchSettings,
@@ -33,6 +35,13 @@ from personal_edge_lab.apps.email_triage_cli.config import (
 )
 from personal_edge_lab.apps.logging_config import configure_logging
 from personal_edge_lab.domain.email import EmailRetrievalRequest, EmailValidationError
+from personal_edge_lab.domain.email_triage_backfill import (
+    BACKFILL_MONTHS,
+    TriageBackfillJob,
+    TriageBackfillStatus,
+    TriageBackfillValidationError,
+    validate_backfill_step_items,
+)
 from personal_edge_lab.domain.email_triage_runs import (
     MailboxTriageResult,
     TriageRunStatus,
@@ -52,13 +61,21 @@ from personal_edge_lab.infrastructure.observability.langfuse import LangfuseTria
 from personal_edge_lab.infrastructure.persistence.sqlite.email_triage import (
     SqliteTriageRunRepository,
 )
+from personal_edge_lab.infrastructure.persistence.sqlite.email_triage_backfill import (
+    SqliteTriageBackfillRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.email_triage_reset import (
     RESET_CONFIRMATION,
     TriageDevelopmentResetError,
     reset_triage_development_data,
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
-from personal_edge_lab.modules.email_triage import EmailTriageService, TriageMailboxBatch
+from personal_edge_lab.modules.email_triage import (
+    EmailTriageService,
+    TriageHistoricalBackfill,
+    TriageMailboxBatch,
+)
+from personal_edge_lab.modules.email_triage.backfill import backfill_segments
 from personal_edge_lab.modules.email_triage.prompt import (
     LocalTriagePromptSource,
     load_packaged_prompt,
@@ -111,6 +128,29 @@ def build_parser() -> argparse.ArgumentParser:
         "rules-check",
         help="validate the optional private deterministic sender rules",
     )
+    backfill_start = subparsers.add_parser(
+        "backfill-start",
+        help="create one fixed twelve-month historical backfill",
+    )
+    backfill_start.add_argument("--months", type=int, default=BACKFILL_MONTHS)
+    backfill_run = subparsers.add_parser(
+        "backfill-run",
+        help="discover one page and process one bounded backfill step",
+    )
+    backfill_run.add_argument("--job-id", required=True)
+    backfill_run.add_argument("--max-items", type=int, default=10)
+    backfill_run.add_argument("--retry-failures", action="store_true")
+    backfill_status = subparsers.add_parser(
+        "backfill-status",
+        help="show durable historical-backfill progress",
+    )
+    backfill_status.add_argument("--job-id")
+    backfill_status.add_argument("--limit", type=int, default=5)
+    backfill_cancel = subparsers.add_parser(
+        "backfill-cancel",
+        help="cancel one historical backfill without deleting evidence",
+    )
+    backfill_cancel.add_argument("--job-id", required=True)
     return parser
 
 
@@ -158,6 +198,38 @@ def main(
         return _show_run(operation_id, args.run_id, stdout=stdout, stderr=stderr)
     if args.command == "rules-check":
         return _run_rules_check(operation_id, stdout=stdout, stderr=stderr)
+    if args.command == "backfill-start":
+        return _run_backfill_start(
+            operation_id,
+            months=args.months,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    if args.command == "backfill-run":
+        return _run_backfill_step(
+            operation_id,
+            job_id=args.job_id,
+            max_items=args.max_items,
+            retry_failures=args.retry_failures,
+            stdout=stdout,
+            stderr=stderr,
+            transport=transport,
+        )
+    if args.command == "backfill-status":
+        return _run_backfill_status(
+            operation_id,
+            job_id=args.job_id,
+            limit=args.limit,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    if args.command == "backfill-cancel":
+        return _run_backfill_cancel(
+            operation_id,
+            job_id=args.job_id,
+            stdout=stdout,
+            stderr=stderr,
+        )
     return _run_development_reset(
         operation_id,
         confirmation=args.confirm,
@@ -428,6 +500,338 @@ def _run_triage_mailbox(
     _log_triage_result(operation_id, result)
     _print_triage_result(result, stdout=stdout)
     return 0 if result.status is TriageRunStatus.COMPLETED_WITH_RESULTS else 5
+
+
+def _run_backfill_start(
+    operation_id: str,
+    *,
+    months: int,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    try:
+        settings = BackfillSettings.from_env()
+        if months != BACKFILL_MONTHS:
+            raise TriageBackfillValidationError("historical backfill is fixed to exactly 12 months")
+    except ConfigurationError as error:
+        return _configuration_failure(operation_id, error, stderr=stderr)
+    except TriageBackfillValidationError as error:
+        return _input_failure(
+            operation_id,
+            EmailValidationError(str(error)),
+            stderr=stderr,
+        )
+    configure_logging(settings.triage.log_level)
+    cutoff = _utc_now()
+    segments = backfill_segments(cutoff)
+    try:
+        run_migrations(settings.triage.database_path)
+        with SqliteTriageBackfillRepository(settings.triage.database_path) as repository:
+            repository.create_job(
+                job_id=operation_id,
+                starts_at=segments[-1][0],
+                ends_at=cutoff,
+                max_messages=settings.max_messages,
+                segments=segments,
+                created_at=cutoff,
+            )
+            job = repository.get_job(operation_id)
+    except sqlite3.IntegrityError:
+        print(f"Operation: {operation_id}", file=stderr)
+        print("Backfill start refused: another historical backfill is active", file=stderr)
+        return 5
+    except (OSError, sqlite3.Error, ValueError):
+        return _persistence_failure(operation_id, "backfill-start", stderr=stderr)
+    assert job is not None
+    LOGGER.info(
+        "email_triage operation_id=%s job_id=%s command=backfill-start "
+        "outcome=success months=12 max_messages=%s",
+        operation_id,
+        job.job_id,
+        job.max_messages,
+    )
+    _print_backfill_job(job, stdout=stdout)
+    print("Next: run a bounded step with backfill-run", file=stdout)
+    return 0
+
+
+def _run_backfill_step(
+    operation_id: str,
+    *,
+    job_id: str,
+    max_items: int,
+    retry_failures: bool,
+    stdout: TextIO,
+    stderr: TextIO,
+    transport: Any | None,
+) -> int:
+    if not _valid_backfill_id(job_id):
+        return _input_failure(
+            operation_id,
+            EmailValidationError("backfill job ID is invalid"),
+            stderr=stderr,
+        )
+    try:
+        settings = BackfillSettings.from_env()
+        validate_backfill_step_items(max_items)
+    except ConfigurationError as error:
+        return _configuration_failure(operation_id, error, stderr=stderr)
+    except TriageBackfillValidationError as error:
+        return _input_failure(
+            operation_id,
+            EmailValidationError(str(error)),
+            stderr=stderr,
+        )
+    configure_logging(settings.triage.log_level)
+    try:
+        run_migrations(settings.triage.database_path)
+    except (OSError, sqlite3.Error):
+        return _persistence_failure(operation_id, "backfill-run", stderr=stderr)
+
+    interrupted = Event()
+    prior_handlers: dict[int, Any] = {}
+
+    def request_interruption(_signum: int, _frame: object) -> None:
+        interrupted.set()
+
+    for signal_number in (signal.SIGINT, signal.SIGTERM):
+        prior_handlers[signal_number] = signal.getsignal(signal_number)
+        signal.signal(signal_number, request_interruption)
+
+    runtime: LangfuseTriageRuntime | None = None
+    manifest = load_packaged_prompt()
+    prompt_source: Any = LocalTriagePromptSource(manifest)
+    trace_sink: Any = NoOpTriageTraceSink()
+    if settings.triage.langfuse.enabled:
+        assert settings.triage.langfuse.public_key is not None
+        assert settings.triage.langfuse.secret_key is not None
+        try:
+            runtime = LangfuseTriageRuntime(
+                public_key=settings.triage.langfuse.public_key,
+                secret_key=settings.triage.langfuse.secret_key,
+                base_url=settings.triage.langfuse.base_url,
+                timeout_seconds=settings.triage.langfuse.timeout_seconds,
+                release=__version__,
+                manifest=manifest,
+            )
+        except Exception:
+            LOGGER.warning(
+                "email_triage operation_id=%s job_id=%s command=backfill-run "
+                "trace_unavailable=true",
+                operation_id,
+                job_id,
+            )
+        else:
+            prompt_source = runtime
+            trace_sink = runtime
+
+    started = time.perf_counter()
+    try:
+        credentials = GoogleOAuthCredentialStore(
+            token_file=settings.triage.gmail.token_file,
+            timeout_seconds=settings.triage.gmail.timeout_seconds,
+        )
+        with (
+            GmailEmailSource(
+                credentials=credentials,
+                timeout_seconds=settings.triage.gmail.timeout_seconds,
+                max_message_bytes=settings.triage.gmail.max_message_bytes,
+                max_normalized_chars=settings.triage.gmail.max_normalized_chars,
+                transport=transport,
+            ) as source,
+            LlamaCppLanguageModel(
+                base_url=settings.triage.completion.base_url,
+                api_key=settings.triage.completion.api_key,
+                timeout_seconds=settings.triage.completion.timeout_seconds,
+                transport=transport,
+            ) as adapter,
+            SqliteTriageRunRepository(settings.triage.database_path) as run_repository,
+            SqliteTriageBackfillRepository(settings.triage.database_path) as backfill_repository,
+        ):
+            model = ConcurrencyLimitedLanguageModel(
+                adapter,
+                max_concurrency=settings.triage.completion.max_concurrency,
+                wait_timeout_seconds=settings.triage.completion.queue_timeout_seconds,
+            )
+            service = EmailTriageService(
+                model=model,
+                prompt_source=prompt_source,
+                decoder=PydanticTriageDecisionDecoder(),
+                trace_sink=trace_sink,
+                model_alias=settings.triage.completion.model_alias,
+            )
+
+            def batch_factory(email_source: EmailSource) -> TriageMailboxBatch:
+                return TriageMailboxBatch(
+                    email_source=email_source,
+                    triage_service=service,
+                    repository=run_repository,
+                    interrupted=interrupted.is_set,
+                    rules=settings.triage.rules,
+                )
+
+            result = TriageHistoricalBackfill(
+                email_source=source,
+                repository=backfill_repository,
+                batch_factory=batch_factory,
+                interrupted=interrupted.is_set,
+            ).step(
+                job_id=job_id,
+                max_items=max_items,
+                retry_failures=retry_failures,
+            )
+    except EmailSourceError as error:
+        return _source_failure(
+            operation_id,
+            "backfill-run",
+            error,
+            elapsed_seconds=time.perf_counter() - started,
+            stderr=stderr,
+        )
+    except LookupError:
+        print(f"Operation: {operation_id}", file=stderr)
+        print("Historical backfill not found", file=stderr)
+        return 5
+    except (OSError, sqlite3.Error):
+        return _persistence_failure(operation_id, "backfill-run", stderr=stderr)
+    except (TriageRunValidationError, TriageBackfillValidationError, ValueError):
+        return _triage_protocol_failure(operation_id, stderr=stderr)
+    finally:
+        for signal_number, handler in prior_handlers.items():
+            signal.signal(signal_number, handler)
+        if runtime is not None:
+            with suppress(Exception):
+                runtime.close()
+
+    LOGGER.log(
+        logging.WARNING if result.job.failed_count or interrupted.is_set() else logging.INFO,
+        "email_triage operation_id=%s job_id=%s command=backfill-run outcome=%s "
+        "discovered_now=%s processed_now=%s discovered_total=%s pending=%s "
+        "succeeded=%s reused=%s failed=%s interrupted=%s active_segment=%s "
+        "api_call_count=%s elapsed_seconds=%.3f",
+        operation_id,
+        job_id,
+        result.job.status.value,
+        result.discovered_now,
+        result.processed_now,
+        result.job.discovered_count,
+        result.job.pending_count,
+        result.job.succeeded_count,
+        result.job.reused_count,
+        result.job.failed_count,
+        result.job.interrupted_count,
+        result.job.active_segment or "none",
+        result.api_call_count,
+        result.elapsed_seconds,
+    )
+    print(f"Operation: {operation_id}", file=stdout)
+    print(f"Discovered this step: {result.discovered_now}", file=stdout)
+    print(f"Processed this step: {result.processed_now}", file=stdout)
+    print(f"Gmail API calls: {result.api_call_count}", file=stdout)
+    print(f"Child runs: {len(result.child_run_ids)}", file=stdout)
+    print(f"Elapsed: {result.elapsed_seconds:.3f}s", file=stdout)
+    _print_backfill_job(result.job, stdout=stdout)
+    print("Gmail changes: none", file=stdout)
+    return (
+        5
+        if interrupted.is_set() or result.job.status is TriageBackfillStatus.COMPLETED_WITH_FAILURES
+        else 0
+    )
+
+
+def _run_backfill_status(
+    operation_id: str,
+    *,
+    job_id: str | None,
+    limit: int,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    if job_id is not None and not _valid_backfill_id(job_id):
+        return _input_failure(
+            operation_id,
+            EmailValidationError("backfill job ID is invalid"),
+            stderr=stderr,
+        )
+    if not 1 <= limit <= 100:
+        return _input_failure(
+            operation_id,
+            EmailValidationError("backfill status limit must be from 1 through 100"),
+            stderr=stderr,
+        )
+    try:
+        settings = TriageHistorySettings.from_env()
+        configure_logging(settings.log_level)
+        run_migrations(settings.database_path)
+        with SqliteTriageBackfillRepository(settings.database_path) as repository:
+            jobs = (
+                ([value] if (value := repository.get_job(job_id)) is not None else [])
+                if job_id is not None
+                else repository.recent_jobs(limit=limit)
+            )
+    except ConfigurationError as error:
+        return _configuration_failure(operation_id, error, stderr=stderr)
+    except (OSError, sqlite3.Error, ValueError):
+        return _persistence_failure(operation_id, "backfill-status", stderr=stderr)
+    print(f"Operation: {operation_id}", file=stdout)
+    print(f"Backfills: {len(jobs)}", file=stdout)
+    for job in jobs:
+        _print_backfill_job(job, stdout=stdout)
+    return 0 if jobs or job_id is None else 5
+
+
+def _run_backfill_cancel(
+    operation_id: str,
+    *,
+    job_id: str,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    if not _valid_backfill_id(job_id):
+        return _input_failure(
+            operation_id,
+            EmailValidationError("backfill job ID is invalid"),
+            stderr=stderr,
+        )
+    try:
+        settings = BackfillSettings.from_env()
+        configure_logging(settings.triage.log_level)
+        run_migrations(settings.triage.database_path)
+        with SqliteTriageBackfillRepository(settings.triage.database_path) as repository:
+            repository.cancel_job(job_id, updated_at=_utc_now())
+            job = repository.get_job(job_id)
+    except ConfigurationError as error:
+        return _configuration_failure(operation_id, error, stderr=stderr)
+    except LookupError:
+        print(f"Operation: {operation_id}\nBackfill cancellation refused", file=stderr)
+        return 5
+    except (OSError, sqlite3.Error):
+        return _persistence_failure(operation_id, "backfill-cancel", stderr=stderr)
+    assert job is not None
+    LOGGER.warning(
+        "email_triage operation_id=%s job_id=%s command=backfill-cancel outcome=success",
+        operation_id,
+        job_id,
+    )
+    _print_backfill_job(job, stdout=stdout)
+    return 0
+
+
+def _print_backfill_job(job: TriageBackfillJob, *, stdout: TextIO) -> None:
+    print(f"Backfill: {job.job_id}", file=stdout)
+    print(f"Status: {job.status.value}", file=stdout)
+    print(f"Range: {job.starts_at.isoformat()} to {job.ends_at.isoformat()}", file=stdout)
+    print(f"Discovered: {job.discovered_count}/{job.max_messages}", file=stdout)
+    print(f"Pending: {job.pending_count}", file=stdout)
+    print(f"Succeeded: {job.succeeded_count}", file=stdout)
+    print(f"Reused: {job.reused_count}", file=stdout)
+    print(f"Failed: {job.failed_count}", file=stdout)
+    print(f"Interrupted: {job.interrupted_count}", file=stdout)
+    print(f"Segments exhausted: {job.segments_exhausted}/12", file=stdout)
+    print(
+        f"Active segment: {job.active_segment if job.active_segment is not None else 'none'}",
+        file=stdout,
+    )
 
 
 def _run_rules_check(operation_id: str, *, stdout: TextIO, stderr: TextIO) -> int:
@@ -821,6 +1225,10 @@ def _stale_delta() -> timedelta:
 
 def _valid_run_id(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,64}", value))
+
+
+def _valid_backfill_id(value: str) -> bool:
+    return bool(re.fullmatch(r"[0-9a-f]{32}", value))
 
 
 if __name__ == "__main__":

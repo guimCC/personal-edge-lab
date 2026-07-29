@@ -77,6 +77,33 @@
   gap: 20px;
 }
 
+.triage-backfills {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  background: var(--paper-raised);
+}
+
+.triage-backfills article {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.8rem;
+  border-left: 3px solid var(--module-accent);
+  background: var(--paper-muted);
+}
+
+.triage-backfills article header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.triage-backfills article p,
+.triage-backfills article small {
+  margin: 0;
+}
+
 .triage-filters {
   display: flex;
   flex-wrap: wrap;

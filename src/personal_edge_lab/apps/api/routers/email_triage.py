@@ -18,6 +18,8 @@ from personal_edge_lab.application.ports.email_triage_feedback import (
 )
 from personal_edge_lab.apps.api.context import ApiContext
 from personal_edge_lab.apps.api.schemas.email_triage import (
+    TriageBackfillListResponse,
+    TriageBackfillResponse,
     TriageFeedbackRequest,
     TriageFeedbackResponse,
     TriageMessageDetailResponse,
@@ -41,6 +43,9 @@ from personal_edge_lab.domain.email_triage_messages import (
 from personal_edge_lab.domain.email_triage_review import TriageRunFilter
 from personal_edge_lab.infrastructure.persistence.sqlite.email_triage import (
     SqliteTriageRunRepository,
+)
+from personal_edge_lab.infrastructure.persistence.sqlite.email_triage_backfill import (
+    SqliteTriageBackfillRepository,
 )
 from personal_edge_lab.modules.email_triage.feedback import RecordTriageFeedback
 
@@ -163,6 +168,29 @@ def create_email_triage_router(
             status=status,
             items=[TriageRunSummaryResponse.from_domain(value) for value in values],
         )
+
+    @router.get("/backfills", response_model=TriageBackfillListResponse)
+    def recent_backfills(
+        response: Response,
+        limit: Annotated[int, Query(ge=1, le=100)] = 5,
+    ) -> TriageBackfillListResponse:
+        response.headers.update(NO_STORE_HEADERS)
+        with SqliteTriageBackfillRepository(settings.database_path) as repository:
+            values = repository.recent_jobs(limit=limit)
+        return TriageBackfillListResponse(
+            count=len(values),
+            limit=limit,
+            items=[TriageBackfillResponse.from_domain(value) for value in values],
+        )
+
+    @router.get("/backfills/{job_id}", response_model=TriageBackfillResponse)
+    def backfill_detail(job_id: str, response: Response) -> TriageBackfillResponse:
+        response.headers.update(NO_STORE_HEADERS)
+        with SqliteTriageBackfillRepository(settings.database_path) as repository:
+            value = repository.get_job(job_id)
+        if value is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return TriageBackfillResponse.from_domain(value)
 
     @router.get("/runs/{run_id}", response_model=TriageRunDetailResponse)
     def run_detail(

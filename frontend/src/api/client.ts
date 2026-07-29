@@ -12,6 +12,7 @@ import {
   triageMessageListSchema,
   triageFeedbackSchema,
   triageRunDetailSchema,
+  triageBackfillListSchema,
   triageRunListSchema,
   type BrowserCommand,
   type Reading,
@@ -119,6 +120,13 @@ export const getTriageRun = (runId: string) =>
   request(
     `/api/v1/email-triage/runs/${encodeURIComponent(runId)}`,
     triageRunDetailSchema,
+    { cache: "no-store" },
+  );
+
+export const getTriageBackfills = (limit = 5) =>
+  request(
+    `/api/v1/email-triage/backfills?limit=${limit}`,
+    triageBackfillListSchema,
     { cache: "no-store" },
   );
 

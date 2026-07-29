@@ -324,6 +324,35 @@ manual queue:
 Telegram may transiently display the private email and recommendation in the owner's private chat.
 It sends no automatic notification in this release and never changes Gmail.
 
+## Run the resumable twelve-month historical backfill
+
+Release `0.16.1` adds an owner-operated historical pass over received mail from the previous twelve
+months. The range is frozen when the job starts. Inbox and archived received mail are included;
+Sent, Drafts, Spam, Trash, and Chats are excluded. The job never modifies Gmail and has no service,
+timer, or automatic retry.
+
+```dotenv
+GMAIL_TRIAGE_BACKFILL_ENABLED=true
+GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES=5000
+```
+
+The normal Gmail-read, Gmail-triage, and local-model gates must also be enabled. Start one job and
+copy its identifier into subsequent bounded commands:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli backfill-start --months 12
+python -m personal_edge_lab.apps.email_triage_cli backfill-run \
+  --job-id <job-id> --max-items 10
+python -m personal_edge_lab.apps.email_triage_cli backfill-status --job-id <job-id>
+```
+
+Each `backfill-run` lists at most one Gmail page and classifies at most ten messages sequentially.
+Run it again when convenient. `SIGINT`/`SIGTERM` preserves completed work, and rerunning reuses an
+accepted evaluation without another UNO Q call or Langfuse trace. Failed or interrupted items are
+retried only with `--retry-failures`. `backfill-cancel --job-id <job-id>` is final and retains all
+evidence. Aggregate progress is visible under dashboard **Diagnostics**; processed messages appear
+normally in **Emails** and the feedback queue.
+
 The accepted development-only records can be removed once, explicitly and with a protected backup:
 
 ```bash
@@ -372,7 +401,8 @@ snapshots, evaluation/content links, private query text, and retained recommenda
 `008_email_triage_taxonomy_v2` adds model-versus-rule evidence, private rule identity, and the
 taxonomy-v2 labels while preserving legacy `work` and `billing` rows as read-only history.
 `009_email_triage_feedback` adds append-only owner annotations and their redacted Langfuse
-publication state.
+publication state. `010_email_triage_backfill` adds private parent jobs, monthly discovery
+segments, opaque Gmail cursors, and resumable item lifecycles without duplicating message content.
 Existing telemetry and audit rows stay in place. SQLite uses one `data/telemetry.db`; there is no
 ORM or second database process.
 

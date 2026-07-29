@@ -12,6 +12,9 @@ from personal_edge_lab.infrastructure.persistence.sqlite.connection import open_
 
 RESET_CONFIRMATION = "DELETE-ALL-EMAIL-TRIAGE-DATA"
 TRIAGE_TABLES = (
+    "email_triage_backfill_items",
+    "email_triage_backfill_segments",
+    "email_triage_backfill_jobs",
     "email_triage_feedback",
     "email_triage_evaluation_content",
     "email_triage_attempts",
@@ -57,7 +60,15 @@ def reset_triage_development_data(
                 """
             ).fetchone()[0]
         )
-        if unfinished:
+        active_backfills = int(
+            source.execute(
+                """
+                SELECT COUNT(*) FROM email_triage_backfill_jobs
+                WHERE status IN ('ready', 'running', 'paused', 'limit_reached')
+                """
+            ).fetchone()[0]
+        )
+        if unfinished or active_backfills:
             raise TriageDevelopmentResetError("unfinished triage work prevents reset")
         backup_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(backup_directory, 0o700)
@@ -76,6 +87,16 @@ def reset_triage_development_data(
                 ).fetchone()[0]
             )
             if unfinished:
+                raise TriageDevelopmentResetError("unfinished triage work prevents reset")
+            active_backfills = int(
+                source.execute(
+                    """
+                    SELECT COUNT(*) FROM email_triage_backfill_jobs
+                    WHERE status IN ('ready', 'running', 'paused', 'limit_reached')
+                    """
+                ).fetchone()[0]
+            )
+            if active_backfills:
                 raise TriageDevelopmentResetError("unfinished triage work prevents reset")
             deleted_counts = {
                 table: int(source.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])

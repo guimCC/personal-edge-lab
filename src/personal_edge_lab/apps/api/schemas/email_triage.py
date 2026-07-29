@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import ConfigDict, Field
 
 from personal_edge_lab.apps.api.schemas.common import ApiModel
+from personal_edge_lab.domain.email_triage_backfill import TriageBackfillJob
 from personal_edge_lab.domain.email_triage_feedback import (
     TriageFeedbackRecord,
 )
@@ -65,6 +66,50 @@ class TriageRunListResponse(ApiModel):
     limit: int
     status: TriageRunFilter
     items: list[TriageRunSummaryResponse]
+
+
+class TriageBackfillResponse(ApiModel):
+    job_id: str
+    status: str
+    starts_at_utc: datetime
+    ends_at_utc: datetime
+    max_messages: int
+    created_at_utc: datetime
+    updated_at_utc: datetime
+    discovered_count: int
+    pending_count: int
+    succeeded_count: int
+    reused_count: int
+    failed_count: int
+    interrupted_count: int
+    segments_exhausted: int
+    active_segment: int | None
+
+    @classmethod
+    def from_domain(cls, value: TriageBackfillJob) -> TriageBackfillResponse:
+        return cls(
+            job_id=value.job_id,
+            status=value.status.value,
+            starts_at_utc=value.starts_at,
+            ends_at_utc=value.ends_at,
+            max_messages=value.max_messages,
+            created_at_utc=value.created_at,
+            updated_at_utc=value.updated_at,
+            discovered_count=value.discovered_count,
+            pending_count=value.pending_count,
+            succeeded_count=value.succeeded_count,
+            reused_count=value.reused_count,
+            failed_count=value.failed_count,
+            interrupted_count=value.interrupted_count,
+            segments_exhausted=value.segments_exhausted,
+            active_segment=value.active_segment,
+        )
+
+
+class TriageBackfillListResponse(ApiModel):
+    count: int
+    limit: int
+    items: list[TriageBackfillResponse]
 
 
 class TriageRunItemResponse(ApiModel):

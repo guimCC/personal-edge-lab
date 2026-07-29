@@ -60,6 +60,9 @@ must be planned and accepted separately before it changes the active roadmap.
 - Release `0.16.0` also mirrors redacted hashes/lengths and expected labels into a Langfuse dataset.
   Future evaluation must decide whether private-content export is ever useful; it is not authorized
   by this release.
+- Release `0.16.1` implements the first bounded historical-backlog mode: one frozen twelve-month
+  parent job, resumable manual steps, explicit failure retries, and dashboard progress. Ongoing new
+  mail and scheduling remain WP9.
 - Explore a scheduled Codex-assisted prompt-improvement workflow. It could review negative or
   corrected examples, propose prompt changes, and compare candidates against prior and held-out
   examples while preventing train/test leakage. Whether any change may be published automatically
@@ -1161,3 +1164,28 @@ changed, how it was verified, decisions made, and what remains.
 - Audit the Langfuse dataset and trace scores for exact redaction before accepting the release.
 - Use the resulting labels as evaluation evidence in a later package; do not automatically optimize
   or publish prompts from the training examples.
+
+### 2026-07-29 — Resumable twelve-month historical backfill
+
+**Stage:** 6A, Work Package 8.4
+**Status:** Implemented locally as release `0.16.1`; RUBIK acceptance pending
+
+**Delivered**
+
+- Added migration `010_email_triage_backfill` for one private parent job, twelve newest-first
+  discovery segments, opaque cursors, item lifecycles, and child-run links.
+- Added an ID-only one-page Gmail discovery operation and exact one-message retrieval before each
+  existing triage child run.
+- Added owner CLI commands to start, advance, inspect, retry failures, and cancel the frozen
+  twelve-month pass. Every step processes at most ten messages and performs no automatic retry.
+- Reused existing taxonomy-v2 rules, prompt/model path, message deduplication, inference identity,
+  redacted real-Gmail traces, dashboard message records, and feedback queue.
+- Added protected aggregate progress under dashboard Diagnostics. Gmail identifiers and page tokens
+  remain absent from APIs and logs.
+
+**Next**
+
+- Deploy `0.16.1` disabled, verify migration 010 and SQLite integrity, then enable the backfill gate.
+- Start one twelve-month job and accept interruption, resume, reuse, explicit failure retry, and
+  redaction with small steps before allowing the owner-controlled full pass to continue.
+- Keep polling/scheduling and automatic new-mail processing in WP9.

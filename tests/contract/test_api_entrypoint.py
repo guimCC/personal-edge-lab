@@ -120,4 +120,5 @@ def test_api_process_starts_migrates_and_stops_cleanly(tmp_path) -> None:
         ("007_email_triage_messages",),
         ("008_email_triage_taxonomy_v2",),
         ("009_email_triage_feedback",),
+        ("010_email_triage_backfill",),
     ]

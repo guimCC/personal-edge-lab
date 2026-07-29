@@ -466,6 +466,80 @@ def test_mailbox_triage_limit_is_rejected_before_http(
     assert calls == 0
 
 
+def test_disabled_historical_backfill_performs_zero_http_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_triage(monkeypatch, tmp_path)
+    monkeypatch.setenv("GMAIL_TRIAGE_BACKFILL_ENABLED", "false")
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    stderr = StringIO()
+    exit_code = main(
+        ["backfill-start", "--months", "12"],
+        stdout=StringIO(),
+        stderr=stderr,
+        transport=httpx.MockTransport(handler),
+        operation_id_factory=lambda: "a" * 32,
+    )
+
+    assert exit_code == 2
+    assert calls == 0
+    assert "GMAIL_TRIAGE_BACKFILL_ENABLED" in stderr.getvalue()
+
+
+def test_backfill_status_requires_only_database_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "triage.db"
+    monkeypatch.setenv("DATABASE_PATH", str(database))
+
+    stdout = StringIO()
+    exit_code = main(
+        ["backfill-status"],
+        stdout=stdout,
+        stderr=StringIO(),
+        operation_id_factory=lambda: "status-operation",
+    )
+
+    assert exit_code == 0
+    assert "Backfills: 0" in stdout.getvalue()
+
+
+def test_backfill_start_freezes_twelve_month_job_without_http(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_triage(monkeypatch, tmp_path)
+    monkeypatch.setenv("GMAIL_TRIAGE_BACKFILL_ENABLED", "true")
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    stdout = StringIO()
+    exit_code = main(
+        ["backfill-start", "--months", "12"],
+        stdout=stdout,
+        stderr=StringIO(),
+        transport=httpx.MockTransport(handler),
+        operation_id_factory=lambda: "a" * 32,
+    )
+
+    assert exit_code == 0
+    assert calls == 0
+    assert "Backfill: " + "a" * 32 in stdout.getvalue()
+    assert "Segments exhausted: 0/12" in stdout.getvalue()
+
+
 def test_development_reset_cli_requires_exact_confirmation_and_reports_backup(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -14,6 +14,7 @@ from personal_edge_lab.apps.configuration import (
     read_bool,
     read_file_path,
     read_log_level,
+    read_positive_int,
 )
 from personal_edge_lab.apps.gmail_configuration import (
     GmailAuthorizationSettings as GmailAuthorizationSettings,
@@ -77,4 +78,24 @@ class TriageHistorySettings:
         return cls(
             database_path=read_file_path("DATABASE_PATH", "./data/telemetry.db"),
             log_level=level,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BackfillSettings:
+    triage: MailboxTriageSettings
+    max_messages: int
+
+    @classmethod
+    def from_env(cls) -> BackfillSettings:
+        if not read_bool("GMAIL_TRIAGE_BACKFILL_ENABLED", "false"):
+            raise ConfigurationError(
+                "GMAIL_TRIAGE_BACKFILL_ENABLED must be true for historical backfill"
+            )
+        max_messages = read_positive_int("GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES", "5000")
+        if max_messages > 10_000:
+            raise ConfigurationError("GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES must not exceed 10000")
+        return cls(
+            triage=MailboxTriageSettings.from_env(),
+            max_messages=max_messages,
         )

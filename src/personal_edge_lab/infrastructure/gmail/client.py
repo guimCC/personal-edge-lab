@@ -28,6 +28,7 @@ from personal_edge_lab.domain.email import (
     EmailRetrievalRequest,
     EmailThreadId,
 )
+from personal_edge_lab.domain.email_triage_backfill import TriageBackfillDiscoveryBatch
 from personal_edge_lab.infrastructure.gmail.normalization import (
     GmailMessageNormalizationError,
     decode_header_value,
@@ -135,16 +136,37 @@ class GmailEmailSource:
                 api_call_count=self._api_call_count,
             ) from error
 
+    def discover(self, request: EmailRetrievalRequest) -> TriageBackfillDiscoveryBatch:
+        """List one bounded page of message IDs without downloading message content."""
+
+        if self._closed:
+            raise RuntimeError("Gmail email source is closed")
+        started = time.perf_counter()
+        self._api_call_count = 0
+        access_token = self._credentials.access_token()
+        message_ids, next_cursor, _pages_fetched = self._list_message_ids(
+            request,
+            access_token=access_token,
+            maximum_pages=1,
+        )
+        return TriageBackfillDiscoveryBatch(
+            message_ids=tuple(message_ids),
+            next_cursor=next_cursor,
+            api_call_count=self._api_call_count,
+            elapsed_seconds=time.perf_counter() - started,
+        )
+
     def _list_message_ids(
         self,
         request: EmailRetrievalRequest,
         *,
         access_token: str,
+        maximum_pages: int = MAX_EMAIL_PAGES,
     ) -> tuple[list[EmailMessageId], EmailRetrievalCursor | None, int]:
         message_ids: list[EmailMessageId] = []
         next_page_token = request.cursor.value if request.cursor is not None else None
         pages_fetched = 0
-        while len(message_ids) < request.limit and pages_fetched < MAX_EMAIL_PAGES:
+        while len(message_ids) < request.limit and pages_fetched < maximum_pages:
             params: dict[str, str | int] = {
                 "q": request.query,
                 "maxResults": request.limit - len(message_ids),

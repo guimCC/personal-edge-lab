@@ -64,6 +64,12 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         "email_triage_feedback",
         "idx_email_triage_feedback_latest",
         "idx_email_triage_feedback_sync",
+        "email_triage_backfill_jobs",
+        "idx_email_triage_one_active_backfill",
+        "idx_email_triage_backfill_jobs_recent",
+        "email_triage_backfill_segments",
+        "email_triage_backfill_items",
+        "idx_email_triage_backfill_items_pending",
     } <= object_names(database)
     with sqlite3.connect(database) as connection:
         versions = list(connection.execute("SELECT version FROM schema_migrations"))
@@ -77,6 +83,7 @@ def test_migration_builds_complete_schema_on_empty_database(tmp_path) -> None:
         ("007_email_triage_messages",),
         ("008_email_triage_taxonomy_v2",),
         ("009_email_triage_feedback",),
+        ("010_email_triage_backfill",),
     ]
 
 
@@ -203,4 +210,5 @@ def test_concurrent_app_startup_applies_migration_once(tmp_path) -> None:
         ("007_email_triage_messages", 1),
         ("008_email_triage_taxonomy_v2", 1),
         ("009_email_triage_feedback", 1),
+        ("010_email_triage_backfill", 1),
     ]

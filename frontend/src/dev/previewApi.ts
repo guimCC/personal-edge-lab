@@ -183,10 +183,35 @@ export function installPreviewApi(): void {
         items: [previewRun],
       });
     }
+    if (url.includes("/email-triage/backfills?")) {
+      return json({
+        count: 1,
+        limit: 5,
+        items: [
+          {
+            job_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            status: "paused",
+            starts_at_utc: "2025-07-29T12:00:00+00:00",
+            ends_at_utc: "2026-07-29T12:00:00+00:00",
+            max_messages: 5000,
+            created_at_utc: "2026-07-29T12:00:00+00:00",
+            updated_at_utc: "2026-07-29T12:05:00+00:00",
+            discovered_count: 25,
+            pending_count: 22,
+            succeeded_count: 2,
+            reused_count: 1,
+            failed_count: 0,
+            interrupted_count: 0,
+            segments_exhausted: 0,
+            active_segment: 1,
+          },
+        ],
+      });
+    }
     if (url === "/health") {
       return json({
         status: "healthy",
-        version: "0.16.0",
+        version: "0.16.1",
         checked_at_utc: NOW.toISOString(),
         database: { status: "healthy" },
         telemetry: {

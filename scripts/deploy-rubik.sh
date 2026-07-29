@@ -156,6 +156,8 @@ LOCAL_LLM_ENABLED_VALUE="${LOCAL_LLM_ENABLED:-false}"
 LANGFUSE_ENABLED_VALUE="${LANGFUSE_ENABLED:-false}"
 GMAIL_READ_ENABLED_VALUE="${GMAIL_READ_ENABLED:-false}"
 GMAIL_TRIAGE_ENABLED_VALUE="${GMAIL_TRIAGE_ENABLED:-false}"
+GMAIL_TRIAGE_BACKFILL_ENABLED_VALUE="${GMAIL_TRIAGE_BACKFILL_ENABLED:-false}"
+GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES_VALUE="${GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES:-5000}"
 EMAIL_TRIAGE_WORKSPACE_ENABLED_VALUE="${EMAIL_TRIAGE_WORKSPACE_ENABLED:-${GMAIL_TRIAGE_REVIEW_ENABLED:-false}}"
 EMAIL_TRIAGE_FEEDBACK_ENABLED_VALUE="${EMAIL_TRIAGE_FEEDBACK_ENABLED:-false}"
 if [[ "$GMAIL_TRIAGE_ENABLED_VALUE" == "true" ]]; then
@@ -164,6 +166,18 @@ if [[ "$GMAIL_TRIAGE_ENABLED_VALUE" == "true" ]]; then
     }
     [[ "$LOCAL_LLM_ENABLED_VALUE" == "true" ]] || {
         fail "Gmail triage requires LOCAL_LLM_ENABLED=true"
+    }
+fi
+if [[ "$GMAIL_TRIAGE_BACKFILL_ENABLED_VALUE" == "true" ]]; then
+    [[ "$GMAIL_TRIAGE_ENABLED_VALUE" == "true" ]] || {
+        fail "historical backfill requires GMAIL_TRIAGE_ENABLED=true"
+    }
+    [[ "$GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES_VALUE" =~ ^[0-9]+$ ]] || {
+        fail "GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES must be an integer"
+    }
+    (( GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES_VALUE > 0 \
+        && GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES_VALUE <= 10000 )) || {
+        fail "GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES must be from 1 through 10000"
     }
 fi
 if [[ -n "${EMAIL_TRIAGE_RULES_FILE:-}" ]]; then
@@ -511,6 +525,18 @@ if [[ -f "$DATABASE_FILE" ]]; then
         | grep -qx '1'; then
         sqlite_live \
             'SELECT "email_triage_feedback", COUNT(*) FROM email_triage_feedback;' \
+            >>"$DEPLOY_BACKUP/row-counts.txt"
+    fi
+    if sqlite_live \
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_triage_backfill_jobs';" \
+        | grep -qx '1'; then
+        sqlite_live \
+            'SELECT "email_triage_backfill_jobs", COUNT(*)
+             FROM email_triage_backfill_jobs
+             UNION ALL SELECT "email_triage_backfill_segments", COUNT(*)
+             FROM email_triage_backfill_segments
+             UNION ALL SELECT "email_triage_backfill_items", COUNT(*)
+             FROM email_triage_backfill_items;' \
             >>"$DEPLOY_BACKUP/row-counts.txt"
     fi
 fi

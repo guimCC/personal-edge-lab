@@ -729,6 +729,88 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version="010_email_triage_backfill",
+        statements=(
+            """
+            CREATE TABLE email_triage_backfill_jobs (
+                job_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL
+                    CHECK (
+                        status IN (
+                            'ready', 'running', 'paused', 'completed',
+                            'completed_with_failures', 'limit_reached', 'cancelled'
+                        )
+                    ),
+                scope_version TEXT NOT NULL,
+                starts_at_utc TEXT NOT NULL,
+                ends_at_utc TEXT NOT NULL,
+                months INTEGER NOT NULL CHECK (months = 12),
+                max_messages INTEGER NOT NULL CHECK (max_messages BETWEEN 1 AND 10000),
+                created_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL,
+                completed_at_utc TEXT,
+                CHECK (starts_at_utc < ends_at_utc)
+            )
+            """,
+            """
+            CREATE UNIQUE INDEX idx_email_triage_one_active_backfill
+            ON email_triage_backfill_jobs ((1))
+            WHERE status IN ('ready', 'running', 'paused', 'limit_reached')
+            """,
+            """
+            CREATE INDEX idx_email_triage_backfill_jobs_recent
+            ON email_triage_backfill_jobs (created_at_utc DESC, job_id DESC)
+            """,
+            """
+            CREATE TABLE email_triage_backfill_segments (
+                job_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 1 AND 12),
+                starts_at_utc TEXT NOT NULL,
+                ends_at_utc TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK (status IN ('pending', 'discovering', 'exhausted')),
+                page_cursor TEXT,
+                discovered_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (discovered_count >= 0),
+                updated_at_utc TEXT NOT NULL,
+                PRIMARY KEY (job_id, ordinal),
+                FOREIGN KEY (job_id) REFERENCES email_triage_backfill_jobs (job_id),
+                CHECK (starts_at_utc < ends_at_utc)
+            )
+            """,
+            """
+            CREATE TABLE email_triage_backfill_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL,
+                segment_ordinal INTEGER NOT NULL,
+                gmail_message_id TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK (
+                        status IN (
+                            'pending', 'processing', 'succeeded',
+                            'reused', 'failed', 'interrupted'
+                        )
+                    ),
+                process_attempts INTEGER NOT NULL DEFAULT 0
+                    CHECK (process_attempts >= 0),
+                child_run_id TEXT,
+                failure_category TEXT,
+                discovered_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL,
+                completed_at_utc TEXT,
+                UNIQUE (job_id, gmail_message_id),
+                FOREIGN KEY (job_id, segment_ordinal)
+                    REFERENCES email_triage_backfill_segments (job_id, ordinal),
+                FOREIGN KEY (child_run_id) REFERENCES email_triage_runs (run_id)
+            )
+            """,
+            """
+            CREATE INDEX idx_email_triage_backfill_items_pending
+            ON email_triage_backfill_items (job_id, status, segment_ordinal, id)
+            """,
+        ),
+    ),
 )
 
 

@@ -121,6 +121,39 @@ def test_review_exact_get_never_lists_or_mutates_gmail() -> None:
     assert dict(requests[0].url.params) == {"format": "full"}
 
 
+def test_backfill_discovery_lists_one_page_without_downloading_content() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "messages": [
+                    {"id": "m1", "threadId": "thread-m1"},
+                    {"id": "m2", "threadId": "thread-m2"},
+                ],
+                "nextPageToken": "private-page-token",
+            },
+        )
+
+    with _source(handler) as source:
+        batch = source.discover(
+            EmailRetrievalRequest(
+                query="after:1 before:2 -in:sent",
+                limit=25,
+            )
+        )
+
+    assert [value.value for value in batch.message_ids] == ["m1", "m2"]
+    assert batch.next_cursor is not None
+    assert batch.next_cursor.value == "private-page-token"
+    assert batch.api_call_count == 1
+    assert len(requests) == 1
+    assert requests[0].method == "GET"
+    assert requests[0].url.path == "/gmail/v1/users/me/messages"
+
+
 def test_review_deleted_message_is_sanitized_and_not_retried() -> None:
     attempts = 0
 

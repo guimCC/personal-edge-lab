@@ -7,6 +7,7 @@ import pytest
 
 from personal_edge_lab.apps import gmail_configuration as config
 from personal_edge_lab.apps.email_triage_cli.config import (
+    BackfillSettings,
     ConfigurationError,
     GmailAuthorizationSettings,
     GmailFetchSettings,
@@ -98,6 +99,14 @@ def test_mailbox_triage_requires_its_own_gate_before_other_secrets(
     monkeypatch.setenv("GMAIL_TRIAGE_ENABLED", "false")
     with pytest.raises(ConfigurationError, match="GMAIL_TRIAGE_ENABLED"):
         MailboxTriageSettings.from_env()
+
+
+def test_historical_backfill_requires_its_own_gate_before_other_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GMAIL_TRIAGE_BACKFILL_ENABLED", "false")
+    with pytest.raises(ConfigurationError, match="GMAIL_TRIAGE_BACKFILL_ENABLED"):
+        BackfillSettings.from_env()
 
 
 def test_history_requires_only_database_configuration(

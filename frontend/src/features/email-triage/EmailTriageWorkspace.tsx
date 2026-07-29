@@ -9,6 +9,7 @@ import {
 import {
   getTriageMessage,
   getTriageMessages,
+  getTriageBackfills,
   getTriageRun,
   getTriageRuns,
   recordTriageFeedback,
@@ -540,6 +541,12 @@ function TriageDiagnostics() {
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
+  const backfills = useQuery({
+    queryKey: ["email-triage-backfills"],
+    queryFn: () => getTriageBackfills(5),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
   const selectedId = selectedRunId ?? runs.data?.items[0]?.run_id ?? null;
   const detail = useQuery({
     queryKey: ["email-triage-run", selectedId],
@@ -581,6 +588,33 @@ function TriageDiagnostics() {
           ))}
         </div>
       </header>
+
+      <section className="triage-backfills" aria-label="Historical backfill progress">
+        <div className="triage-section-title">
+          <h3>Historical backfill</h3>
+          <span>operator-controlled · no schedule</span>
+        </div>
+        {backfills.data?.items.length === 0 && (
+          <p className="triage-muted">No historical backfill has been created.</p>
+        )}
+        {backfills.data?.items.map((job) => (
+          <article key={job.job_id}>
+            <header>
+              <strong>{job.status.replaceAll("_", " ")}</strong>
+              <span>{job.segments_exhausted}/12 months scanned</span>
+            </header>
+            <p>
+              {job.discovered_count} discovered · {job.succeeded_count} new ·{" "}
+              {job.reused_count} reused · {job.pending_count} pending ·{" "}
+              {job.failed_count + job.interrupted_count} issues
+            </p>
+            <small>
+              Frozen range {formatDateTime(job.starts_at_utc)} to{" "}
+              {formatDateTime(job.ends_at_utc)}
+            </small>
+          </article>
+        ))}
+      </section>
 
       <div className="triage-layout">
         <section className="triage-runs" aria-label="Recent diagnostic runs">

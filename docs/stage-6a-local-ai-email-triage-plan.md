@@ -1509,3 +1509,13 @@ Release `0.16.0` adds the first owner-feedback loop:
 
 The implementation and pending RUBIK acceptance record is
 [`stage-6a-wp8-3-handoff.md`](stage-6a-wp8-3-handoff.md).
+
+## Work Package 8.4 implementation handoff
+
+Release `0.16.1` adds the accepted twelve-month historical mode. It uses a frozen received-mail
+range, twelve newest-first segments, one-page discovery, at most ten sequential items per operator
+step, explicit failure retry, and ordinary child triage runs. It introduces no scheduler, Gmail
+mutation, automatic notification, or prompt change.
+
+The implementation and pending RUBIK acceptance record is
+[`stage-6a-wp8-4-handoff.md`](stage-6a-wp8-4-handoff.md).

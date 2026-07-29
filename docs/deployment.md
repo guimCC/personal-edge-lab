@@ -1400,3 +1400,38 @@ publication problem must never reverse valid local feedback.
 Rollback sets `EMAIL_TRIAGE_FEEDBACK_ENABLED=false` and reinstalls `0.15.1`. Migration 009 and
 retained feedback remain inert. Do not delete the local dataset or remote Langfuse dataset during
 rollback.
+
+## WP8.4 resumable twelve-month backfill (`0.16.1`)
+
+Deploy first with the historical pass disabled:
+
+```dotenv
+GMAIL_TRIAGE_BACKFILL_ENABLED=false
+GMAIL_TRIAGE_BACKFILL_MAX_MESSAGES=5000
+```
+
+Verify the additive migration and database:
+
+```bash
+sqlite3 data/telemetry.db \
+  "SELECT version FROM schema_migrations WHERE version='010_email_triage_backfill';"
+sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
+```
+
+Then enable `GMAIL_READ_ENABLED`, `GMAIL_TRIAGE_ENABLED`, `LOCAL_LLM_ENABLED`, and
+`GMAIL_TRIAGE_BACKFILL_ENABLED`, redeploy so the guard validates the combination, and create the
+frozen job:
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli backfill-start --months 12
+python -m personal_edge_lab.apps.email_triage_cli backfill-run \
+  --job-id <job-id> --max-items 3
+python -m personal_edge_lab.apps.email_triage_cli backfill-status --job-id <job-id>
+```
+
+Advance it only with explicit bounded `backfill-run` commands. Use `--retry-failures` only after
+reviewing durable failures. `backfill-cancel` is final and preserves all evidence. Dashboard
+Diagnostics presents aggregate progress without Gmail IDs or private cursors.
+
+Rollback sets `GMAIL_TRIAGE_BACKFILL_ENABLED=false` and reinstalls `0.16.0`. Migration 010 remains
+inert and no Gmail, database, prompt, trace, or mailbox downgrade is required.

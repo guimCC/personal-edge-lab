@@ -200,6 +200,9 @@ function installWorkspaceApi(enabled = true, feedbackEnabled = false) {
         response({ count: 1, limit: 20, status: "all", items: [run] }),
       );
     }
+    if (url.includes("/email-triage/backfills?")) {
+      return Promise.resolve(response({ count: 0, limit: 5, items: [] }));
+    }
     if (url.includes("/latest")) return Promise.resolve(response(latestReading));
     if (url.includes("/alerts")) return Promise.resolve(response(healthyAlerts));
     if (url.includes("/series")) return Promise.resolve(response(emptySeries));

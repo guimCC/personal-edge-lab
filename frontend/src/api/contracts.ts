@@ -78,6 +78,30 @@ export const triageRunDetailSchema = z.object({
   gmail_changes: z.literal("none"),
 });
 
+export const triageBackfillSchema = z.object({
+  job_id: z.string(),
+  status: z.string(),
+  starts_at_utc: z.string().datetime(),
+  ends_at_utc: z.string().datetime(),
+  max_messages: z.number().int().positive(),
+  created_at_utc: z.string().datetime(),
+  updated_at_utc: z.string().datetime(),
+  discovered_count: z.number().int().nonnegative(),
+  pending_count: z.number().int().nonnegative(),
+  succeeded_count: z.number().int().nonnegative(),
+  reused_count: z.number().int().nonnegative(),
+  failed_count: z.number().int().nonnegative(),
+  interrupted_count: z.number().int().nonnegative(),
+  segments_exhausted: z.number().int().min(0).max(12),
+  active_segment: z.number().int().min(1).max(12).nullable(),
+});
+
+export const triageBackfillListSchema = z.object({
+  count: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  items: z.array(triageBackfillSchema),
+});
+
 export const triageMessageStatusFilterSchema = z.enum([
   "all",
   "recommendations",
@@ -337,6 +361,7 @@ export type TriageRunSummary = z.infer<typeof triageRunSummarySchema>;
 export type TriageRunList = z.infer<typeof triageRunListSchema>;
 export type TriageRunItem = z.infer<typeof triageRunItemSchema>;
 export type TriageRunDetail = z.infer<typeof triageRunDetailSchema>;
+export type TriageBackfill = z.infer<typeof triageBackfillSchema>;
 export type TriageMessageStatusFilter = z.infer<typeof triageMessageStatusFilterSchema>;
 export type TriageLabel = z.infer<typeof triageLabelSchema>;
 export type TriageMessageSummary = z.infer<typeof triageMessageSummarySchema>;

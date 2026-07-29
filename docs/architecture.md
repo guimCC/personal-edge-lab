@@ -334,6 +334,15 @@ expected label, while dismiss archives it. Langfuse receives hashes, lengths, no
 evidence, labels, and source metadata only. Publication failure leaves local feedback intact and
 retriable. Neither surface modifies Gmail or automatically changes prompts.
 
+WP8.4 adds an operator-controlled parent lifecycle above the existing run/evaluation model.
+Migration `010_email_triage_backfill` freezes a twelve-month UTC range, divides it into twelve
+newest-first segments, persists private Gmail page cursors and message identifiers, and links each
+processed item to an ordinary child triage run. Discovery is ID-only; normalized content is fetched
+only when an item is claimed. Existing evaluation identity and message deduplication remain the
+source of truth, so recovery may create another child run but cannot repeat an accepted inference
+or create another message projection. No scheduler, cross-process worker, or Gmail mutation is
+introduced.
+
 ## Adding capability
 
 ### Add a domain model

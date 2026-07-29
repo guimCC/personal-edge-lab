@@ -17,6 +17,7 @@ diagnostic responses. Rule results have a label with no reason; model results re
 reason. Legacy `work` and `billing` values remain readable for existing records only.
 Release `0.16.0` adds append-only owner feedback and its local-first Langfuse synchronization
 status.
+Release `0.16.1` adds protected aggregate progress for the manual twelve-month backfill.
 
 ## Authentication
 
@@ -56,6 +57,8 @@ These routes return HTTP 401 without a valid owner session:
 | `GET /api/v1/email-triage/messages/{record_id}` | Stored normalized content, recommendation, and collapsed technical evidence |
 | `GET /api/v1/email-triage/runs` | Diagnostics-only bounded run summaries; `limit` 1–100 and status filter |
 | `GET /api/v1/email-triage/runs/{run_id}` | Exact run and item evidence without Gmail IDs or reason text |
+| `GET /api/v1/email-triage/backfills` | Bounded aggregate historical-backfill progress |
+| `GET /api/v1/email-triage/backfills/{job_id}` | Exact aggregate progress without Gmail IDs or cursors |
 
 `POST /api/v1/email-triage/messages/{record_id}/feedback` requires the normal owner-session CSRF
 headers and `EMAIL_TRIAGE_FEEDBACK_ENABLED=true`. Its exact body is:

@@ -102,7 +102,7 @@ def test_health_reports_fresh_telemetry(tmp_path) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "healthy",
-        "version": "0.16.0",
+        "version": "0.16.1",
         "checked_at_utc": "2026-07-25T14:00:00Z",
         "database": {"status": "healthy"},
         "telemetry": {
@@ -501,6 +501,8 @@ def test_docs_and_openapi_expose_auth_and_read_routes_when_controls_disabled(
         "/api/v1/email-triage/messages",
         "/api/v1/email-triage/messages/{record_id}",
         "/api/v1/email-triage/messages/{record_id}/feedback",
+        "/api/v1/email-triage/backfills",
+        "/api/v1/email-triage/backfills/{job_id}",
     }
     assert set(schema["paths"]["/api/v1/auth/session"]) == {"get"}
     assert set(schema["paths"]["/api/v1/auth/login"]) == {"post"}

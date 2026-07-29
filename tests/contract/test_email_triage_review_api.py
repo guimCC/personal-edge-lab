@@ -29,7 +29,11 @@ from personal_edge_lab.domain.email_triage_runs import (
 from personal_edge_lab.infrastructure.persistence.sqlite.email_triage import (
     SqliteTriageRunRepository,
 )
+from personal_edge_lab.infrastructure.persistence.sqlite.email_triage_backfill import (
+    SqliteTriageBackfillRepository,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
+from personal_edge_lab.modules.email_triage.backfill import backfill_segments
 from personal_edge_lab.modules.email_triage.input import prepare_triage_input
 
 NOW = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
@@ -236,6 +240,38 @@ def test_message_filters_cursor_and_missing_detail_are_bounded(tmp_path) -> None
     assert bad_cursor.status_code == 422
     assert missing.status_code == 404
     assert existing.status_code == 200
+
+
+def test_backfill_progress_is_protected_no_store_and_excludes_private_cursors(
+    tmp_path,
+) -> None:
+    settings = _settings(tmp_path)
+    run_migrations(settings.database_path)
+    segments = backfill_segments(NOW)
+    with SqliteTriageBackfillRepository(settings.database_path) as repository:
+        repository.create_job(
+            job_id="a" * 32,
+            starts_at=segments[-1][0],
+            ends_at=NOW,
+            max_messages=5000,
+            segments=segments,
+            created_at=NOW,
+        )
+
+    with TestClient(create_app(settings), base_url=ORIGIN) as client:
+        unauthorized = client.get("/api/v1/email-triage/backfills")
+        _login(client)
+        listing = client.get("/api/v1/email-triage/backfills?limit=5")
+        detail = client.get("/api/v1/email-triage/backfills/" + "a" * 32)
+
+    assert unauthorized.status_code == 401
+    assert listing.status_code == 200
+    assert listing.headers["Cache-Control"] == "no-store"
+    assert listing.json()["items"][0]["status"] == "ready"
+    assert detail.status_code == 200
+    assert detail.headers["Pragma"] == "no-cache"
+    assert "page_cursor" not in detail.text
+    assert "gmail_message_id" not in detail.text
 
 
 def test_dashboard_feedback_is_csrf_protected_append_only_and_local_first(tmp_path) -> None:
