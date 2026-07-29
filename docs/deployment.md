@@ -1346,3 +1346,57 @@ redacted trace.
 Rollback unsets `EMAIL_TRIAGE_RULES_FILE`, disables active triage, and reinstalls `0.15.0`.
 Migration 008 remains inert. If prompt v2 was promoted in Langfuse, explicitly re-promote the
 retained v1 prompt only when model inference must also be rolled back.
+
+## WP8.3 owner feedback and redacted Langfuse dataset (`0.16.0`)
+
+Deploy first with feedback disabled:
+
+```dotenv
+EMAIL_TRIAGE_FEEDBACK_ENABLED=false
+```
+
+Verify the additive migration and database:
+
+```bash
+sqlite3 data/telemetry.db \
+  "SELECT version FROM schema_migrations WHERE version='009_email_triage_feedback';"
+sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
+```
+
+Then retain the accepted authentication, workspace, Telegram, and Langfuse settings and enable:
+
+```dotenv
+API_AUTH_ENABLED=true
+EMAIL_TRIAGE_WORKSPACE_ENABLED=true
+EMAIL_TRIAGE_FEEDBACK_ENABLED=true
+TELEGRAM_BOT_ENABLED=true
+LANGFUSE_ENABLED=true
+```
+
+Deploy again. In the dashboard, open one current taxonomy-v2 model recommendation and confirm it;
+correct another; dismiss a third. Refreshing must retain the latest feedback and show whether
+Langfuse synchronization completed. A stale browser view must be rejected rather than overwriting
+a newer annotation.
+
+In the private owner chat, run:
+
+```text
+/triage_review
+```
+
+Review one item with the inline controls. This release has no automatic email notification; the
+queue advances only when requested. Gmail must remain unchanged.
+
+In Langfuse Cloud EU, inspect dataset `personal-edge-lab/email-triage-feedback`. Confirm/correct
+items must be active with the expected label; dismissed items must be archived. When the original
+model attempt has a trace, categorical `owner-label-verdict` and `owner-expected-label` scores are
+attached to it. Dataset input must contain only hashes, lengths, source/cleanup and truncation
+evidence—never sender, subject, body, model input, or reason.
+
+If Langfuse is temporarily unavailable, feedback must remain present locally with unavailable or
+pending synchronization, and the Telegram process retries it before later polling cycles. A
+publication problem must never reverse valid local feedback.
+
+Rollback sets `EMAIL_TRIAGE_FEEDBACK_ENABLED=false` and reinstalls `0.15.1`. Migration 009 and
+retained feedback remain inert. Do not delete the local dataset or remote Langfuse dataset during
+rollback.

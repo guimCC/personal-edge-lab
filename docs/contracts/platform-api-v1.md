@@ -15,6 +15,8 @@ locally persisted content. It cannot start triage or modify Gmail.
 Release `0.15.1` adds `decision_source`, `rule_id`, and `rule_version` evidence to message and
 diagnostic responses. Rule results have a label with no reason; model results retain their English
 reason. Legacy `work` and `billing` values remain readable for existing records only.
+Release `0.16.0` adds append-only owner feedback and its local-first Langfuse synchronization
+status.
 
 ## Authentication
 
@@ -55,6 +57,23 @@ These routes return HTTP 401 without a valid owner session:
 | `GET /api/v1/email-triage/runs` | Diagnostics-only bounded run summaries; `limit` 1–100 and status filter |
 | `GET /api/v1/email-triage/runs/{run_id}` | Exact run and item evidence without Gmail IDs or reason text |
 
+`POST /api/v1/email-triage/messages/{record_id}/feedback` requires the normal owner-session CSRF
+headers and `EMAIL_TRIAGE_FEEDBACK_ENABLED=true`. Its exact body is:
+
+```json
+{
+  "recommendation_attempt_id": 42,
+  "expected_version": 0,
+  "action": "confirm",
+  "corrected_label": null
+}
+```
+
+Actions are `confirm`, `correct`, and `dismiss`. `correct` requires one current taxonomy-v2 label;
+the others require `null`. The attempt and version make stale screens fail with HTTP 409. A valid
+annotation is committed locally before optional Langfuse publication, so a Langfuse failure still
+returns the retained record with `sync_status` `pending` or `unavailable`.
+
 Operational degradation still returns HTTP 200 from `/health`; only SQLite failure returns 503.
 Audit items include nullable `actor_id`, `idempotency_key`, and `request_source` (`dashboard` or
 `local_cli`). Audit history is never evidence of the AC's physical current state.
@@ -86,8 +105,9 @@ Viewing requires only authentication and SQLite—not Gmail, triage, the model, 
 
 The message-list `status` accepts `all`, `recommendations`, or `issues`; `label` accepts `all` or one
 provisional taxonomy value; `limit` is 1–100. Pagination uses an opaque receipt-time cursor.
-Responses contain an opaque local record ID, sender, subject, latest successful label/reason, and
-latest processing state. They never expose Gmail message or thread IDs.
+Responses contain an opaque local record ID, sender, subject, latest successful label/reason,
+latest processing state, and latest owner-feedback projection. They never expose Gmail message or
+thread IDs.
 
 Message detail returns the locally stored normalized body, exact model input, cleanup/truncation
 evidence, and technical prompt/model/usage/timing/trace evidence. It performs no Gmail request.

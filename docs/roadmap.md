@@ -55,12 +55,11 @@ must be planned and accepted separately before it changes the active roadmap.
 - The first owner-chosen taxonomy, precedence rules, prompt, and deterministic routing baseline were
   accepted in `0.15.1`. Refine them from explicit owner feedback and evaluation evidence rather than
   treating the initial taxonomy-v2 prompt as final.
-- Explore a Telegram human-review loop for newly classified messages. A notification could present
-  the recommendation and allow the owner to confirm or correct it during an initial annotation
-  period. A dashboard review surface may complement the same workflow.
-- Retain owner feedback as a private labelled dataset that can support evaluation and later prompt
-  improvement. The permitted content, storage location, retention, redaction, and deletion policy
-  remain open decisions.
+- Release `0.16.0` implements the first manual Telegram/dashboard feedback loop and an authoritative
+  private SQLite annotation history. Automatic Telegram notification remains a later decision.
+- Release `0.16.0` also mirrors redacted hashes/lengths and expected labels into a Langfuse dataset.
+  Future evaluation must decide whether private-content export is ever useful; it is not authorized
+  by this release.
 - Explore a scheduled Codex-assisted prompt-improvement workflow. It could review negative or
   corrected examples, propose prompt changes, and compare candidates against prior and held-out
   examples while preventing train/test leakage. Whether any change may be published automatically
@@ -1136,3 +1135,29 @@ changed, how it was verified, decisions made, and what remains.
   Dataset export, held-out evaluation, and prompt publication remain later explicit decisions.
 - Keep historical backfill, prompt-improvement experiments, scheduling, Telegram notification, and
   Gmail label application as separate packages.
+
+### 2026-07-29 — Owner feedback and redacted dataset implemented
+
+**Stage:** 6A, Work Package 8.3
+**Status:** Implemented locally as release `0.16.0`; RUBIK acceptance pending
+
+**Delivered**
+
+- Added migration `009_email_triage_feedback` with append-only, per-message versioned annotations
+  tied to the exact reviewed successful attempt.
+- Added one shared confirm/correct/dismiss use case for the protected dashboard and owner-only
+  Telegram bot, including stale-view rejection and current-taxonomy enforcement.
+- Kept SQLite authoritative and private while publishing stable redacted Langfuse dataset items and
+  categorical scores linked to existing traces when available.
+- Added local-first failure behavior: Langfuse publication can remain pending/unavailable and is
+  retried without losing or invalidating local feedback.
+- Added only a manual `/triage_review` Telegram queue. No automatic notification, Gmail mutation,
+  prompt update, evaluation threshold, scheduler, or model invocation was introduced.
+
+**Next**
+
+- Deploy `0.16.0` disabled, verify migration 009 and SQLite integrity, then enable feedback and
+  validate one confirm, correction, and dismissal across dashboard and Telegram.
+- Audit the Langfuse dataset and trace scores for exact redaction before accepting the release.
+- Use the resulting labels as evaluation evidence in a later package; do not automatically optimize
+  or publish prompts from the training examples.

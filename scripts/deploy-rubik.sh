@@ -157,6 +157,7 @@ LANGFUSE_ENABLED_VALUE="${LANGFUSE_ENABLED:-false}"
 GMAIL_READ_ENABLED_VALUE="${GMAIL_READ_ENABLED:-false}"
 GMAIL_TRIAGE_ENABLED_VALUE="${GMAIL_TRIAGE_ENABLED:-false}"
 EMAIL_TRIAGE_WORKSPACE_ENABLED_VALUE="${EMAIL_TRIAGE_WORKSPACE_ENABLED:-${GMAIL_TRIAGE_REVIEW_ENABLED:-false}}"
+EMAIL_TRIAGE_FEEDBACK_ENABLED_VALUE="${EMAIL_TRIAGE_FEEDBACK_ENABLED:-false}"
 if [[ "$GMAIL_TRIAGE_ENABLED_VALUE" == "true" ]]; then
     [[ "$GMAIL_READ_ENABLED_VALUE" == "true" ]] || {
         fail "Gmail triage requires GMAIL_READ_ENABLED=true"
@@ -197,6 +198,11 @@ fi
 if [[ "$EMAIL_TRIAGE_WORKSPACE_ENABLED_VALUE" == "true" ]]; then
     [[ "$AUTH_ENABLED" == "true" ]] || {
         fail "email triage workspace requires API_AUTH_ENABLED=true"
+    }
+fi
+if [[ "$EMAIL_TRIAGE_FEEDBACK_ENABLED_VALUE" == "true" ]]; then
+    [[ "$EMAIL_TRIAGE_WORKSPACE_ENABLED_VALUE" == "true" ]] || {
+        fail "email triage feedback requires EMAIL_TRIAGE_WORKSPACE_ENABLED=true"
     }
 fi
 if [[ "$AUTH_ENABLED" == "true" ]]; then
@@ -498,6 +504,13 @@ if [[ -f "$DATABASE_FILE" ]]; then
              FROM email_triage_content_snapshots
              UNION ALL SELECT "email_triage_evaluation_content", COUNT(*)
              FROM email_triage_evaluation_content;' \
+            >>"$DEPLOY_BACKUP/row-counts.txt"
+    fi
+    if sqlite_live \
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_triage_feedback';" \
+        | grep -qx '1'; then
+        sqlite_live \
+            'SELECT "email_triage_feedback", COUNT(*) FROM email_triage_feedback;' \
             >>"$DEPLOY_BACKUP/row-counts.txt"
     fi
 fi

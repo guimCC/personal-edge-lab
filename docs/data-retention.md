@@ -9,11 +9,12 @@ At the current 15-second cadence this is approximately 2.1 million rows per devi
 Command audit, authentication throttle state, collector runtime status, alert incidents, and alert
 transitions are not included in automatic telemetry retention.
 
-Email-triage migration-006 records retain evidence only: internal Gmail identifiers, hashes,
-lengths, versions, proposed label, usage, timing, trace availability, and categorized outcomes.
-They do not retain query text, sender, subject, body, prompt, model output, or reason text. WP8
-private review content is fetched on demand, held only in browser component memory, and is not a
-retained data class.
+Email-triage migration-006 execution records began as evidence-only. Migrations 007–009 now retain
+the owner-authorized product dataset locally: query text, sender, subject, normalized content, exact
+model input, successful reason text, and append-only confirm/correct/dismiss feedback. Raw MIME,
+attachments, OAuth credentials, authorization headers, and provider error bodies remain excluded.
+These records currently have indefinite retention and are included in owner-only SQLite deployment
+backups. Real-email Langfuse traces and feedback dataset items remain redacted.
 
 ## Enforcement
 

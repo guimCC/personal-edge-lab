@@ -1495,3 +1495,17 @@ Release `0.15.1` establishes the owner-defined taxonomy and deterministic baseli
 
 The implementation and accepted RUBIK evidence are recorded in
 [`stage-6a-wp8-2-handoff.md`](stage-6a-wp8-2-handoff.md).
+
+## Work Package 8.3 implementation handoff
+
+Release `0.16.0` adds the first owner-feedback loop:
+
+- append-only confirm/correct/dismiss annotations tied to the reviewed attempt;
+- one shared feature use case used by the protected dashboard and manual Telegram queue;
+- SQLite as the complete private authority;
+- stable redacted Langfuse dataset items and trace-linked categorical scores;
+- local-first publication failure with retryable synchronization state;
+- no Gmail mutation, automatic notification, prompt update, quality claim, or scheduler.
+
+The implementation and pending RUBIK acceptance record is
+[`stage-6a-wp8-3-handoff.md`](stage-6a-wp8-3-handoff.md).

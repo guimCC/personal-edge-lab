@@ -289,11 +289,40 @@ usage, timing, traces, and interruption evidence remain available under **Diagno
 Opening an email reads its stored normalized body and exact model input from SQLite; it makes no
 Gmail request. Content is rendered only as text, never prefetched, never written to browser storage,
 and cleared from query/component memory when closed or when authentication/workspace state changes.
-The workspace cannot start triage, record feedback, schedule work, or modify Gmail.
+The workspace cannot start triage, schedule work, or modify Gmail.
 
 Set `API_AUTH_ENABLED=true` and `EMAIL_TRIAGE_WORKSPACE_ENABLED=true`. Gmail, the model, triage, and
 Langfuse may all be disabled while viewing persisted messages. `GMAIL_TRIAGE_REVIEW_ENABLED` is a
 deprecated compatibility fallback for release `0.15.0`.
+
+## Review recommendations and build the private dataset
+
+Release `0.16.0` adds one append-only owner-feedback path shared by the dashboard and Telegram.
+Each current recommendation can be confirmed, corrected to one taxonomy-v2 label, or dismissed.
+SQLite remains the authoritative private dataset and retains the complete message, recommendation,
+and feedback history.
+
+Enable the workspace feedback controls with:
+
+```dotenv
+EMAIL_TRIAGE_FEEDBACK_ENABLED=true
+```
+
+If `LANGFUSE_ENABLED=true`, each annotation is also upserted into the
+`personal-edge-lab/email-triage-feedback` dataset using only content hashes, lengths, cleanup
+evidence, and the expected label. Real sender, subject, body, reason, and model input stay on RUBIK.
+The annotation is linked to its existing redacted trace when one exists. Langfuse failure never
+loses local feedback; it remains visibly pending and is retried by the Telegram process.
+
+The dashboard exposes the controls in each email detail. The owner-only Telegram bot exposes a
+manual queue:
+
+```text
+/triage_review
+```
+
+Telegram may transiently display the private email and recommendation in the owner's private chat.
+It sends no automatic notification in this release and never changes Gmail.
 
 The accepted development-only records can be removed once, explicitly and with a protected backup:
 
@@ -342,6 +371,8 @@ identities, run items, and separately auditable inference attempts.
 snapshots, evaluation/content links, private query text, and retained recommendation reasons.
 `008_email_triage_taxonomy_v2` adds model-versus-rule evidence, private rule identity, and the
 taxonomy-v2 labels while preserving legacy `work` and `billing` rows as read-only history.
+`009_email_triage_feedback` adds append-only owner annotations and their redacted Langfuse
+publication state.
 Existing telemetry and audit rows stay in place. SQLite uses one `data/telemetry.db`; there is no
 ORM or second database process.
 

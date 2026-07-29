@@ -33,7 +33,8 @@ apps -> application/ports <- infrastructure
   `label` and `reason`, and returns versioned evidence. Its durable batch use case coordinates
   `EmailSource`, prepared prompt identity, transactional evaluation reservation, sequential
   inference, partial failures, reuse, and interruption without knowing Gmail, SQLite, llama.cpp,
-  Pydantic, Langfuse, or OpenTelemetry.
+  Pydantic, Langfuse, or OpenTelemetry. Its owner-feedback use case records append-only annotations
+  through ports and treats external publication as best-effort.
 - `infrastructure/esp32` implements the HTTP contracts. AC always uses a single attempt.
 - `infrastructure/telegram` implements the narrow Bot API transport and never exposes the bot
   token through its public errors.
@@ -46,7 +47,8 @@ apps -> application/ports <- infrastructure
   OpenTelemetry imports are confined there; a prompt outage selects the packaged fallback and a
   trace outage cannot invalidate inference. Synthetic traces carry authorized fixture content;
   Gmail traces accept a separate redacted payload containing only hashes, lengths, cleanup,
-  label, version, usage, and timing evidence.
+  label, version, usage, and timing evidence. The feedback publisher upserts similarly redacted
+  dataset items and categorical trace scores without receiving private content.
 - `infrastructure/gmail` implements the bounded `EmailSource` port. It owns Google OAuth refresh,
   Gmail IDs and pagination, GET-only wire structures, nested MIME decoding, and conservative
   HTML/text normalization. Raw Gmail payloads and OAuth objects never cross that boundary.
@@ -66,8 +68,9 @@ apps -> application/ports <- infrastructure
 - `apps/alert_evaluator` is the one-shot composition root scheduled by systemd every 30 seconds.
   It has no network adapter and records evaluator health independently from the collector and API.
 - `apps/telegram_bot` is an independent long-polling owner interface. `OwnerBot` centralizes
-  authorization and routes to explicitly registered status, AC, and notification-policy
-  capabilities. The same process drains proactive deliveries before each long poll.
+  authorization and routes to explicitly registered status, AC, notification-policy, and manual
+  email-feedback capabilities. The same process drains proactive deliveries and pending redacted
+  feedback publication before each long poll.
 - `apps/telegram_cli` validates and stores the bot token and discovers the numeric owner identity
   without placing either operation in the dashboard.
 - `apps/ai_cli` is a packaged RUBIK diagnostic composition root. Public `health` proves process
@@ -314,6 +317,22 @@ matching use only standard-library/domain types under `modules/email_triage`; SQ
 stable rule ID/version and never the private address/domain matcher. Migration
 `008_email_triage_taxonomy_v2` expands label persistence and adds explicit `model`/`rule` source
 evidence. Legacy taxonomy-v1 labels remain readable but are excluded from all new schemas.
+
+WP8.3 adds one shared feedback use case above the message projection:
+
+```text
+dashboard or private Telegram
+          -> confirm / correct / dismiss
+          -> append-only SQLite feedback (authoritative, private)
+          -> best-effort redacted Langfuse dataset item + trace scores
+```
+
+Migration `009_email_triage_feedback` versions feedback per message and ties every annotation to
+the exact successful attempt being reviewed. `BEGIN IMMEDIATE` rejects stale dashboard or Telegram
+views. The stable Langfuse dataset item is upserted per message: confirm/correct is active with an
+expected label, while dismiss archives it. Langfuse receives hashes, lengths, normalization
+evidence, labels, and source metadata only. Publication failure leaves local feedback intact and
+retriable. Neither surface modifies Gmail or automatically changes prompts.
 
 ## Adding capability
 
