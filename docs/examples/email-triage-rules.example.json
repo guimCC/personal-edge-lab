@@ -1,0 +1,23 @@
+{
+  "version": "1",
+  "rules": [
+    {
+      "id": "example-education-domain",
+      "priority": 10,
+      "label": "education",
+      "exact_addresses": [],
+      "domains": [
+        "university.example.test"
+      ]
+    },
+    {
+      "id": "example-job-sender",
+      "priority": 20,
+      "label": "job",
+      "exact_addresses": [
+        "recruiter@example.test"
+      ],
+      "domains": []
+    }
+  ]
+}

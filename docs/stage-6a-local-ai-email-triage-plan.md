@@ -1477,3 +1477,21 @@ Release `0.15.0` refactors the protected surface around individual triaged email
 
 The implementation and pending RUBIK acceptance record is
 [`stage-6a-wp8-1-handoff.md`](stage-6a-wp8-1-handoff.md).
+
+## Work Package 8.2 implementation handoff
+
+Release `0.15.1` establishes the owner-defined taxonomy and deterministic baseline:
+
+- prompt/profile/taxonomy/schema v2 uses `mckinsey`, `education`, `job`, `personal`, `admin`,
+  `notification`, `newsletter`, `slop`, and `other` with explicit contextual precedence;
+- optional private exact-address/domain rules skip prompt resolution, UNO Q, and Langfuse and
+  retain stable rule identity without a fabricated reason;
+- migration `008_email_triage_taxonomy_v2` preserves legacy history and adds Rule-versus-AI
+  evidence to persistence, API, CLI, and dashboard views;
+- a checked-in nine-case synthetic baseline reports observed differences without setting a quality
+  threshold;
+- feedback, historical ingestion, scheduling, Telegram notifications, and Gmail mutation remain
+  separate work packages.
+
+The implementation and pending RUBIK acceptance record is
+[`stage-6a-wp8-2-handoff.md`](stage-6a-wp8-2-handoff.md).

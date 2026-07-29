@@ -165,6 +165,35 @@ if [[ "$GMAIL_TRIAGE_ENABLED_VALUE" == "true" ]]; then
         fail "Gmail triage requires LOCAL_LLM_ENABLED=true"
     }
 fi
+if [[ -n "${EMAIL_TRIAGE_RULES_FILE:-}" ]]; then
+    [[ "$EMAIL_TRIAGE_RULES_FILE" = /* ]] || {
+        fail "EMAIL_TRIAGE_RULES_FILE must be absolute"
+    }
+    [[ ! -L "$EMAIL_TRIAGE_RULES_FILE" ]] || {
+        fail "email triage rules must not be a symbolic link"
+    }
+    [[ -f "$EMAIL_TRIAGE_RULES_FILE" && -r "$EMAIL_TRIAGE_RULES_FILE" ]] || {
+        fail "email triage rules must be a readable regular file"
+    }
+    [[ "$(stat -c '%a' "$EMAIL_TRIAGE_RULES_FILE")" == "600" ]] || {
+        fail "email triage rules must have mode 600"
+    }
+    [[ "$(stat -c '%U' "$EMAIL_TRIAGE_RULES_FILE")" == "$(id -un)" ]] || {
+        fail "email triage rules must be owned by the deployment user"
+    }
+    python3 - "$EMAIL_TRIAGE_RULES_FILE" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    value = json.load(handle)
+if not isinstance(value, dict) or set(value) != {"version", "rules"}:
+    raise SystemExit("email triage rules have an invalid shape")
+if not isinstance(value["version"], str) or not isinstance(value["rules"], list):
+    raise SystemExit("email triage rules have an invalid shape")
+PY
+fi
 if [[ "$EMAIL_TRIAGE_WORKSPACE_ENABLED_VALUE" == "true" ]]; then
     [[ "$AUTH_ENABLED" == "true" ]] || {
         fail "email triage workspace requires API_AUTH_ENABLED=true"
@@ -490,6 +519,10 @@ if [[ "$LANGFUSE_ENABLED_VALUE" == "true" ]]; then
         "$DEPLOY_BACKUP/langfuse-public.key"
     cp --preserve=all "$LANGFUSE_SECRET_KEY_FILE" \
         "$DEPLOY_BACKUP/langfuse-secret.key"
+fi
+if [[ -n "${EMAIL_TRIAGE_RULES_FILE:-}" ]]; then
+    cp --preserve=all "$EMAIL_TRIAGE_RULES_FILE" \
+        "$DEPLOY_BACKUP/email-triage-rules.json"
 fi
 if [[ "$GMAIL_READ_ENABLED_VALUE" == "true" ]]; then
     cp --preserve=all "$GMAIL_CLIENT_SECRET_FILE" \

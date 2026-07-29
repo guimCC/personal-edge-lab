@@ -298,6 +298,23 @@ exact model input, query text, label, and reason are authorized local data; raw 
 credentials, provider bodies, and GGUF paths remain excluded. Real-Gmail Langfuse traces remain
 redacted even though owner-only SQLite and backups retain product content.
 
+WP8.2 adds a pure deterministic routing layer before prompt resolution:
+
+```text
+normalized TriageEmail
+        |
+        +-- private exact sender/domain rule -> durable rule decision (no reason)
+        |                                   -> no prompt, UNO Q, or Langfuse
+        |
+        +-- no rule -> prompt/taxonomy v2 -> queued model -> English reason
+```
+
+Private JSON parsing and file-permission validation remain in composition code. Rule parsing and
+matching use only standard-library/domain types under `modules/email_triage`; SQLite stores only the
+stable rule ID/version and never the private address/domain matcher. Migration
+`008_email_triage_taxonomy_v2` expands label persistence and adds explicit `model`/`rule` source
+evidence. Legacy taxonomy-v1 labels remain readable but are excluded from all new schemas.
+
 ## Adding capability
 
 ### Add a domain model

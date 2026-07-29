@@ -12,6 +12,9 @@ return HTTP 422. SQLite failures return a sanitized HTTP 503.
 
 Release `0.15.0` adds an authenticated, feature-gated message-centric email-triage workspace over
 locally persisted content. It cannot start triage or modify Gmail.
+Release `0.15.1` adds `decision_source`, `rule_id`, and `rule_version` evidence to message and
+diagnostic responses. Rule results have a label with no reason; model results retain their English
+reason. Legacy `work` and `billing` values remain readable for existing records only.
 
 ## Authentication
 

@@ -1098,3 +1098,25 @@ changed, how it was verified, decisions made, and what remains.
   triage.
 - Continue to keep taxonomy/quality, historical ingestion, review feedback, scheduling, Telegram,
   and Gmail writes in separate future work packages.
+
+### 2026-07-29 — Personal taxonomy and deterministic baseline implemented
+
+**Stage:** 6A, Work Package 8.2
+**Status:** Implemented locally as release `0.15.1`; RUBIK acceptance pending
+
+**Delivered**
+
+- Replaced the provisional model taxonomy with the owner-defined nine-label taxonomy and explicit
+  precedence `mckinsey > education > job > personal > admin > notification > newsletter > slop >
+  other`.
+- Added private exact-address/domain rules that skip prompt lookup, UNO Q, and Langfuse while
+  retaining stable source/rule evidence and no fabricated reason.
+- Added prompt/taxonomy/profile v2, migration 008, Rule-versus-AI dashboard evidence, owner-side
+  rules validation/backup, and a nine-case synthetic baseline with no quality threshold.
+
+**Next**
+
+- Accept `0.15.1` on RUBIK and begin collecting real corrected examples only after the separate
+  feedback workflow exists.
+- Keep historical backfill, prompt-improvement experiments, scheduling, Telegram notification, and
+  Gmail label application as separate packages.

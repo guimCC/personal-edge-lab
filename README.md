@@ -302,6 +302,32 @@ python -m personal_edge_lab.apps.email_triage_cli reset-development-data \
   --confirm DELETE-ALL-EMAIL-TRIAGE-DATA
 ```
 
+## Personal taxonomy and private sender rules
+
+Release `0.15.1` uses `mckinsey`, `education`, `job`, `personal`, `admin`, `notification`,
+`newsletter`, `slop`, and `other`. That order is the explicit precedence: contextual McKinsey,
+education, and job evidence wins over broader message types. Model recommendations retain a
+concise English reason.
+
+An optional owner-only rules file can classify known senders before the model:
+
+```dotenv
+EMAIL_TRIAGE_RULES_FILE=/home/ubuntu/personal-edge-lab/secrets/email-triage-rules.json
+```
+
+Copy [the synthetic example](docs/examples/email-triage-rules.example.json), replace its example
+addresses/domains only on RUBIK, and set mode `0600`. Rules support exact addresses and
+domain/subdomain matches with explicit priorities—no regex or arbitrary substring matching.
+
+```bash
+python -m personal_edge_lab.apps.email_triage_cli rules-check
+python -m personal_edge_lab.apps.ai_cli evaluate --fixture-set taxonomy-v2-core
+```
+
+A rule match records its stable rule identity and label, but performs no prompt lookup, UNO Q call,
+or Langfuse trace and has no fabricated reason. Non-matches use prompt/taxonomy v2. The checked-in
+synthetic baseline reports differences without imposing a quality threshold.
+
 ## Data and migrations
 
 All applications run the same standard-library migration runner before opening a repository.
@@ -314,6 +340,8 @@ delivery runtime. `006_email_triage_runs` adds durable dry-run lifecycles, uniqu
 identities, run items, and separately auditable inference attempts.
 `007_email_triage_messages` adds deduplicated message projections, immutable normalized-content
 snapshots, evaluation/content links, private query text, and retained recommendation reasons.
+`008_email_triage_taxonomy_v2` adds model-versus-rule evidence, private rule identity, and the
+taxonomy-v2 labels while preserving legacy `work` and `billing` rows as read-only history.
 Existing telemetry and audit rows stay in place. SQLite uses one `data/telemetry.db`; there is no
 ORM or second database process.
 

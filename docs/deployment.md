@@ -1296,3 +1296,53 @@ must remain unchanged.
 
 Set `EMAIL_TRIAGE_WORKSPACE_ENABLED=false`, reinstall `0.14.0`, and restore its API unit.
 Migration 007 and its content remain inert. Do not delete or downgrade the new tables.
+
+## WP8.2 personal taxonomy and deterministic rules (`0.15.1`)
+
+Deploy first without private rules:
+
+```dotenv
+EMAIL_TRIAGE_RULES_FILE=
+```
+
+Then verify:
+
+```bash
+sqlite3 data/telemetry.db \
+  "SELECT version FROM schema_migrations WHERE version='008_email_triage_taxonomy_v2';"
+sqlite3 data/telemetry.db 'PRAGMA integrity_check;'
+python -m personal_edge_lab.apps.ai_cli prompt-publish
+python -m personal_edge_lab.apps.ai_cli evaluate --fixture-set taxonomy-v2-core
+```
+
+The evaluation is a baseline report, not a release threshold. It uses nine synthetic messages,
+makes one model request per case, and creates no Langfuse traces.
+
+To enable private deterministic routing, copy the checked-in synthetic example to the secrets
+directory, replace its example matchers locally, and protect it:
+
+```bash
+install -m 0600 docs/examples/email-triage-rules.example.json \
+  /home/ubuntu/personal-edge-lab/secrets/email-triage-rules.json
+chmod 0600 /home/ubuntu/personal-edge-lab/secrets/email-triage-rules.json
+```
+
+Set:
+
+```dotenv
+EMAIL_TRIAGE_RULES_FILE=/home/ubuntu/personal-edge-lab/secrets/email-triage-rules.json
+```
+
+Run `python -m personal_edge_lab.apps.email_triage_cli rules-check`, then deploy again. The guard
+requires an absolute, non-symlinked, owner-owned mode-`0600` regular file, validates its outer JSON
+shape, and copies it into the owner-only deployment backup. The application performs complete
+semantic validation.
+
+Run a bounded query with one known match and one non-match. A rule result must show `Decision
+source: rule`, its stable rule ID/version, no reason, no model timing/tokens, and no trace. A model
+result must show `Decision source: model`, an English reason, prompt v2, model timing/tokens, and its
+redacted trace.
+
+Rollback unsets `EMAIL_TRIAGE_RULES_FILE`, disables active triage, and reinstalls `0.15.0`.
+Migration 008 remains inert. If prompt v2 was promoted in Langfuse, explicitly re-promote the
+retained v1 prompt only when model inference must also be rolled back.
