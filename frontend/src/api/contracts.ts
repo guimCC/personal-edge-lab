@@ -66,6 +66,9 @@ export const triageRunItemSchema = z.object({
   completion_tokens: z.number().int().nonnegative().nullable(),
   total_tokens: z.number().int().nonnegative().nullable(),
   attempt_id: z.number().int().positive().nullable(),
+  decision_source: z.enum(["model", "rule"]).nullable(),
+  rule_id: z.string().nullable(),
+  rule_version: z.string().nullable(),
 });
 
 export const triageRunDetailSchema = z.object({
@@ -81,12 +84,18 @@ export const triageMessageStatusFilterSchema = z.enum([
 ]);
 
 export const triageLabelSchema = z.enum([
-  "work",
-  "billing",
+  "mckinsey",
+  "education",
+  "job",
+  "personal",
+  "admin",
   "notification",
   "newsletter",
-  "personal",
+  "slop",
   "other",
+  // Read-only compatibility for taxonomy-v1 history.
+  "work",
+  "billing",
 ]);
 
 export const triageMessageSummarySchema = z.object({
@@ -102,6 +111,9 @@ export const triageMessageSummarySchema = z.object({
   model_input_truncated: z.boolean(),
   source_truncated: z.boolean(),
   has_recommendation: z.boolean(),
+  decision_source: z.enum(["model", "rule"]).nullable(),
+  rule_id: z.string().nullable(),
+  rule_version: z.string().nullable(),
 });
 
 export const triageMessageListSchema = z.object({
@@ -133,6 +145,9 @@ export const triageMessageTechnicalSchema = z.object({
   queue_wait_seconds: z.number().nonnegative().nullable(),
   provider_seconds: z.number().nonnegative().nullable(),
   total_seconds: z.number().nonnegative().nullable(),
+  decision_source: z.enum(["model", "rule"]).nullable(),
+  rule_id: z.string().nullable(),
+  rule_version: z.string().nullable(),
 });
 
 export const triageMessageDetailSchema = z.object({

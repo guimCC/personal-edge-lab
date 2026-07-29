@@ -19,11 +19,14 @@ type DiagnosticItemFilter = "recommendations" | "reused" | "failures";
 
 const LABELS: Array<TriageLabel | "all"> = [
   "all",
-  "work",
-  "billing",
+  "mckinsey",
+  "education",
+  "job",
+  "personal",
+  "admin",
   "notification",
   "newsletter",
-  "personal",
+  "slop",
   "other",
 ];
 
@@ -228,7 +231,10 @@ export function EmailTriageWorkspace() {
                   </span>
                   <span className="triage-message-recommendation">
                     {message.label ? (
-                      <mark>Recommendation · {message.label}</mark>
+                      <mark>
+                        {message.decision_source === "rule" ? "Rule" : "AI"} ·{" "}
+                        {message.label}
+                      </mark>
                     ) : (
                       <em>No recommendation</em>
                     )}
@@ -289,7 +295,9 @@ export function EmailTriageWorkspace() {
                     <strong>{detail.data.summary.label ?? "Unavailable"}</strong>
                     <p>
                       {detail.data.summary.reason_preview ??
-                        "The latest attempt did not produce a recommendation."}
+                        (detail.data.summary.decision_source === "rule"
+                          ? "Matched a private deterministic sender rule."
+                          : "The latest attempt did not produce a recommendation.")}
                     </p>
                     {detail.data.summary.latest_failure_category && (
                       <p className="triage-failure">
@@ -300,7 +308,11 @@ export function EmailTriageWorkspace() {
                   </section>
 
                   <section className="triage-content">
-                    <h3>Content seen by the model</h3>
+                    <h3>
+                      {detail.data.summary.decision_source === "rule"
+                        ? "Stored normalized content"
+                        : "Content seen by the model"}
+                    </h3>
                     <pre>{detail.data.model_input}</pre>
                     {detail.data.normalized_text.length > detail.data.model_input.length && (
                       <details>
@@ -319,6 +331,14 @@ export function EmailTriageWorkspace() {
                   <details className="triage-technical">
                     <summary>Technical details</summary>
                     <dl>
+                      <div>
+                        <dt>Decision source</dt>
+                        <dd>
+                          {detail.data.technical.decision_source === "rule"
+                            ? `Rule · ${detail.data.technical.rule_id ?? "private"}`
+                            : "AI model"}
+                        </dd>
+                      </div>
                       <div>
                         <dt>Model</dt>
                         <dd>{detail.data.technical.model_alias ?? "unavailable"}</dd>

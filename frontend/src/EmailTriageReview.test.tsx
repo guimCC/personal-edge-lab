@@ -39,6 +39,9 @@ const message = {
   model_input_truncated: true,
   source_truncated: false,
   has_recommendation: true,
+  decision_source: "model",
+  rule_id: null,
+  rule_version: null,
 };
 
 const messageDetail = {
@@ -71,6 +74,9 @@ const messageDetail = {
     queue_wait_seconds: 0,
     provider_seconds: 10.2,
     total_seconds: 10.2,
+    decision_source: "model",
+    rule_id: null,
+    rule_version: null,
   },
   gmail_changes: "none",
 };
@@ -112,6 +118,9 @@ const item = {
   completion_tokens: 30,
   total_tokens: 130,
   attempt_id: 1,
+  decision_source: "model",
+  rule_id: null,
+  rule_version: null,
 };
 
 function installWorkspaceApi(enabled = true) {
@@ -181,7 +190,7 @@ describe("message-centric email-triage workspace", () => {
       within(mobileNavigation).getByRole("link", { name: /Email triage/ }),
     ).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("Gmail labels applied: none")).toBeVisible();
-    expect(await screen.findByText("Recommendation · work")).toBeVisible();
+    expect(await screen.findByText("AI · work")).toBeVisible();
     expect(
       fetchMock.mock.calls.some(([input]) =>
         String(input).endsWith(`/messages/${message.record_id}`),

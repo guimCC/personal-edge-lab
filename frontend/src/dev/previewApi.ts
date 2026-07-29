@@ -55,6 +55,9 @@ export function installPreviewApi(): void {
       model_input_truncated: true,
       source_truncated: false,
       has_recommendation: true,
+      decision_source: "model",
+      rule_id: null,
+      rule_version: null,
     };
     if (url.endsWith(`/email-triage/messages/${previewMessage.record_id}`)) {
       const modelInput =
@@ -92,6 +95,9 @@ export function installPreviewApi(): void {
           queue_wait_seconds: 0,
           provider_seconds: 112.941,
           total_seconds: 112.942,
+          decision_source: "model",
+          rule_id: null,
+          rule_version: null,
         },
         gmail_changes: "none",
       });
@@ -136,6 +142,9 @@ export function installPreviewApi(): void {
             completion_tokens: 40,
             total_tokens: 509,
             attempt_id: 14,
+            decision_source: "model",
+            rule_id: null,
+            rule_version: null,
           },
           {
             ordinal: 2,
@@ -158,6 +167,9 @@ export function installPreviewApi(): void {
             completion_tokens: null,
             total_tokens: null,
             attempt_id: null,
+            decision_source: null,
+            rule_id: null,
+            rule_version: null,
           },
         ],
       });
@@ -174,7 +186,7 @@ export function installPreviewApi(): void {
     if (url === "/health") {
       return json({
         status: "healthy",
-        version: "0.15.0",
+        version: "0.15.1",
         checked_at_utc: NOW.toISOString(),
         database: { status: "healthy" },
         telemetry: {
