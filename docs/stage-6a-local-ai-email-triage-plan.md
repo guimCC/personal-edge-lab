@@ -1493,5 +1493,5 @@ Release `0.15.1` establishes the owner-defined taxonomy and deterministic baseli
 - feedback, historical ingestion, scheduling, Telegram notifications, and Gmail mutation remain
   separate work packages.
 
-The implementation and pending RUBIK acceptance record is
+The implementation and accepted RUBIK evidence are recorded in
 [`stage-6a-wp8-2-handoff.md`](stage-6a-wp8-2-handoff.md).

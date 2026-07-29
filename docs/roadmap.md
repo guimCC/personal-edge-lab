@@ -52,9 +52,9 @@ must be planned and accepted separately before it changes the active roadmap.
 - Turn manual triage into an eventual job with two distinct operating modes:
   - a bounded historical-backlog pass for annotating existing mail;
   - ongoing processing when new mail arrives.
-- Before either mode becomes operational, replace the provisional taxonomy with owner-chosen labels,
-  definitions, precedence rules, examples, and an improved prompt. Allow time for deliberate
-  taxonomy design rather than treating the current generic labels as final.
+- The first owner-chosen taxonomy, precedence rules, prompt, and deterministic routing baseline were
+  accepted in `0.15.1`. Refine them from explicit owner feedback and evaluation evidence rather than
+  treating the initial taxonomy-v2 prompt as final.
 - Explore a Telegram human-review loop for newly classified messages. A notification could present
   the recommendation and allow the owner to confirm or correct it during an initial annotation
   period. A dashboard review surface may complement the same workflow.
@@ -1102,7 +1102,7 @@ changed, how it was verified, decisions made, and what remains.
 ### 2026-07-29 — Personal taxonomy and deterministic baseline implemented
 
 **Stage:** 6A, Work Package 8.2
-**Status:** Implemented locally as release `0.15.1`; RUBIK acceptance pending
+**Status:** Accepted on RUBIK as release `0.15.1`
 
 **Delivered**
 
@@ -1114,9 +1114,25 @@ changed, how it was verified, decisions made, and what remains.
 - Added prompt/taxonomy/profile v2, migration 008, Rule-versus-AI dashboard evidence, owner-side
   rules validation/backup, and a nine-case synthetic baseline with no quality threshold.
 
+**Verification**
+
+- RUBIK deployed commit `8436220` as package `0.15.1`; migration 008 and SQLite integrity passed.
+- The synthetic taxonomy baseline recorded seven matches from nine without acting as a release
+  gate. Its two differences are retained in the WP8.2 handoff as future evaluation evidence.
+- A private real-email rule match completed with no reason, provider attempt, or trace. Direct
+  SQLite inspection confirmed the deterministic evidence shape.
+- Prompt version 2 was current in Langfuse, and a non-rule synthetic triage completed through
+  `llama_cpp` with an English decision and linked trace.
+- A final guarded deployment validated and backed up the private rules file and passed the complete
+  Python/frontend/build checks. Collector, API, evaluator, Telegram, dashboard, AI probes, and
+  SQLite checks remained healthy.
+
 **Next**
 
-- Accept `0.15.1` on RUBIK and begin collecting real corrected examples only after the separate
-  feedback workflow exists.
+- Plan a separate owner-feedback package around the message-centric workspace. Its narrow product
+  outcome is to confirm a recommendation, correct it to one taxonomy-v2 label, or dismiss it, while
+  preserving append-only annotation history and a latest-feedback projection.
+- Keep feedback local and private, perform no Gmail mutation, and make no automatic prompt changes.
+  Dataset export, held-out evaluation, and prompt publication remain later explicit decisions.
 - Keep historical backfill, prompt-improvement experiments, scheduling, Telegram notification, and
   Gmail label application as separate packages.

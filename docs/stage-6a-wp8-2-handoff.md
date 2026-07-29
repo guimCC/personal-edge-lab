@@ -1,7 +1,7 @@
 # Stage 6A WP8.2 handoff
 
 **Release:** `0.15.1`
-**Status:** Implemented locally; RUBIK acceptance pending
+**Status:** Accepted on RUBIK on 2026-07-29
 
 ## Delivered
 
@@ -27,19 +27,31 @@
 
 ## RUBIK acceptance
 
-1. Deploy `0.15.1` with `EMAIL_TRIAGE_RULES_FILE` unset and verify migration 008 plus SQLite
-   integrity.
-2. Publish prompt v2 explicitly with `ai_cli prompt-publish`.
-3. Run `ai_cli evaluate --fixture-set taxonomy-v2-core`; record the baseline without treating any
-   score as a release threshold.
-4. Create the private rules file from the synthetic example, set mode `0600`, run `rules-check`,
-   and deploy again so it is validated and backed up.
-5. Run one bounded triage containing a known rule match and one non-match. Confirm the first has
-   source `rule`, no reason, no UNO Q call, and no Langfuse trace; confirm the second has source
-   `model`, an English reason, and the exact v2 prompt link.
-6. Confirm the dashboard distinguishes Rule from AI and legacy rows remain viewable.
-7. Re-run the existing Gmail, AI, tracing, API, dashboard, platform, SQLite, UNO Q, and firewall
-   checks.
+- Deployed commit `8436220` as package `0.15.1`. Migration `008_email_triage_taxonomy_v2` was
+  present and SQLite returned `ok` from `PRAGMA integrity_check`.
+- Published prompt v2 explicitly. Langfuse reported the production prompt was already unchanged at
+  version `2`.
+- Ran `taxonomy-v2-core` as an observational baseline: seven of nine cases matched. The recruiting
+  case resolved to `notification` instead of `job`, and the deliberately unclassified case resolved
+  to `slop` instead of `other`. No quality threshold was applied.
+- Installed and validated one private domain rule without exposing its matcher. A bounded real-email
+  triage completed in about half a second with source `rule`, no retained reason, no provider
+  attempt, and no trace.
+- Audited the resulting SQLite evidence directly: the attempt was successful, the decision source
+  and rule identity were retained, and provider-attempt, provider-identity, reason, and trace
+  evidence were absent as required.
+- Ran the non-rule synthetic invoice through prompt v2. It completed through `llama_cpp`, returned
+  an English `admin` decision, linked Langfuse prompt version `2`, and exported a trace.
+- Re-ran the guarded deployment after installing the private rules file. The complete Python and
+  frontend suites passed, the wheel was rebuilt, and the owner-only deployment backup contained the
+  rules file with mode `0600`.
+- Post-deployment checks confirmed the collector, API, alert-evaluator timer, Telegram bot, Avahi,
+  and Nginx active; the evaluator result was successful; API liveness and the dashboard returned
+  HTTP `200`; AI liveness/readiness succeeded; and SQLite integrity remained `ok`.
+
+The release establishes technical routing behavior only. The seven-of-nine baseline is evidence for
+the next feedback and evaluation work, not a claim that the taxonomy or prompt is sufficiently
+accurate.
 
 ## Rollback
 
