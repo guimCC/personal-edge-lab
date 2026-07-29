@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import json
+import logging
+from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
+from personal_edge_lab.application.ports.email_triage_feedback import (
+    TriageFeedbackPublisher,
+)
 from personal_edge_lab.apps.api.context import ApiContext
 from personal_edge_lab.apps.api.schemas.email_triage import (
+    TriageFeedbackRequest,
+    TriageFeedbackResponse,
     TriageMessageDetailResponse,
     TriageMessageListResponse,
     TriageMessageSummaryResponse,
@@ -20,6 +28,11 @@ from personal_edge_lab.apps.api.schemas.email_triage import (
     TriageRunSummaryResponse,
 )
 from personal_edge_lab.domain.email_triage import TriageLabel
+from personal_edge_lab.domain.email_triage_feedback import (
+    TriageFeedbackAction,
+    TriageFeedbackError,
+    TriageFeedbackSource,
+)
 from personal_edge_lab.domain.email_triage_messages import (
     TriageMessageCursor,
     TriageMessageFilter,
@@ -29,11 +42,17 @@ from personal_edge_lab.domain.email_triage_review import TriageRunFilter
 from personal_edge_lab.infrastructure.persistence.sqlite.email_triage import (
     SqliteTriageRunRepository,
 )
+from personal_edge_lab.modules.email_triage.feedback import RecordTriageFeedback
 
 NO_STORE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+LOGGER = logging.getLogger(__name__)
 
 
-def create_email_triage_router(context: ApiContext) -> APIRouter:
+def create_email_triage_router(
+    context: ApiContext,
+    *,
+    feedback_publisher_factory: Callable[[], TriageFeedbackPublisher | None],
+) -> APIRouter:
     router = APIRouter(
         prefix="/api/v1/email-triage",
         tags=["email-triage"],
@@ -76,6 +95,58 @@ def create_email_triage_router(context: ApiContext) -> APIRouter:
         if value is None:
             raise HTTPException(status_code=404, detail="not found")
         return TriageMessageDetailResponse.from_domain(value)
+
+    @router.post(
+        "/messages/{record_id}/feedback",
+        response_model=TriageFeedbackResponse,
+        status_code=201,
+        dependencies=[Depends(context.require_triage_feedback_csrf)],
+    )
+    def record_feedback(
+        record_id: str,
+        body: TriageFeedbackRequest,
+        response: Response,
+    ) -> TriageFeedbackResponse:
+        response.headers.update(NO_STORE_HEADERS)
+        try:
+            action = TriageFeedbackAction(body.action)
+            corrected_label = (
+                TriageLabel(body.corrected_label) if body.corrected_label is not None else None
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="invalid feedback") from error
+        try:
+            publisher = feedback_publisher_factory()
+        except Exception:
+            LOGGER.warning("email_triage_feedback source=dashboard outcome=publisher_unavailable")
+            publisher = None
+        try:
+            with SqliteTriageRunRepository(settings.database_path) as repository:
+                result = RecordTriageFeedback(
+                    repository,
+                    publisher=publisher,
+                    clock=context.clock,
+                ).record(
+                    record_id=record_id,
+                    recommendation_attempt_id=body.recommendation_attempt_id,
+                    expected_version=body.expected_version,
+                    action=action,
+                    corrected_label=corrected_label,
+                    source=TriageFeedbackSource.DASHBOARD,
+                )
+        except TriageFeedbackError as error:
+            status = 409 if "stale" in str(error) else 422
+            raise HTTPException(status_code=status, detail="feedback rejected") from error
+        finally:
+            if publisher is not None:
+                with contextlib.suppress(Exception):
+                    publisher.close()
+        LOGGER.info(
+            "email_triage_feedback feedback_id=%s source=dashboard outcome=recorded sync_status=%s",
+            result.feedback_id,
+            result.sync_status.value,
+        )
+        return TriageFeedbackResponse.from_domain(result)
 
     @router.get("/runs", response_model=TriageRunListResponse)
     def recent_runs(

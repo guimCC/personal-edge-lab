@@ -13,6 +13,7 @@ class SessionResponse(ApiModel):
     controls_enabled: bool
     email_triage_workspace_enabled: bool = False
     email_triage_review_enabled: bool = False
+    email_triage_feedback_enabled: bool = False
     actor_id: str | None = None
     csrf_token: str | None = None
     idle_expires_at_utc: datetime | None = None

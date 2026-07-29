@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import signal
 import sqlite3
@@ -17,6 +18,9 @@ from personal_edge_lab.apps.telegram_bot.capabilities.ac import (
     PanelState,
     latest_requested_state,
 )
+from personal_edge_lab.apps.telegram_bot.capabilities.email_triage import (
+    EmailTriageCapability,
+)
 from personal_edge_lab.apps.telegram_bot.capabilities.notifications import (
     NotificationsCapability,
 )
@@ -29,7 +33,15 @@ from personal_edge_lab.apps.telegram_bot.delivery import TelegramNotificationSen
 from personal_edge_lab.apps.telegram_bot.owner_bot import OwnerBot
 from personal_edge_lab.apps.telegram_bot.polling import TelegramPollingLoop
 from personal_edge_lab.domain.ac import CommandExecution, CommandRequestContext
+from personal_edge_lab.domain.email_triage import TriageLabel
+from personal_edge_lab.domain.email_triage_feedback import (
+    TriageFeedbackAction,
+    TriageFeedbackSource,
+)
 from personal_edge_lab.infrastructure.esp32.ac_controller import AcCommandClient
+from personal_edge_lab.infrastructure.observability.langfuse import (
+    LangfuseTriageFeedbackPublisher,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.alert_queries import (
     SqliteAlertQueryRepository,
 )
@@ -38,6 +50,9 @@ from personal_edge_lab.infrastructure.persistence.sqlite.collector_status import
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.command_audit import (
     SqliteCommandAuditRepository,
+)
+from personal_edge_lab.infrastructure.persistence.sqlite.email_triage import (
+    SqliteTriageRunRepository,
 )
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
 from personal_edge_lab.infrastructure.persistence.sqlite.notifications import (
@@ -51,6 +66,7 @@ from personal_edge_lab.infrastructure.telegram.bot_api import (
     TelegramBotClient,
 )
 from personal_edge_lab.modules.ac_control import CommandService, ExecuteCoolOnlyCommand
+from personal_edge_lab.modules.email_triage.feedback import RecordTriageFeedback
 from personal_edge_lab.modules.notifications import (
     DrainNotificationOutbox,
     ManageNotificationPolicy,
@@ -138,6 +154,25 @@ def main(*, stop_event: threading.Event | None = None) -> int:
             ),
         )
 
+    feedback_publisher = None
+    if (
+        settings.email_triage_feedback_enabled
+        and settings.langfuse is not None
+        and settings.langfuse.enabled
+        and settings.langfuse.public_key is not None
+        and settings.langfuse.secret_key is not None
+    ):
+        try:
+            feedback_publisher = LangfuseTriageFeedbackPublisher(
+                public_key=settings.langfuse.public_key,
+                secret_key=settings.langfuse.secret_key,
+                base_url=settings.langfuse.base_url,
+                timeout_seconds=settings.langfuse.timeout_seconds,
+                release=__version__,
+            )
+        except Exception:
+            LOGGER.warning("email_triage_feedback outcome=publisher_unavailable")
+
     try:
         run_migrations(settings.database_path)
         with TelegramBotClient(
@@ -176,17 +211,56 @@ def main(*, stop_event: threading.Event | None = None) -> int:
                 command_rate_limit=settings.command_rate_limit_per_minute,
                 command_timeout_seconds=settings.command_timeout_seconds,
             )
+            capabilities = [
+                status_capability,
+                ac_capability,
+                notifications_capability,
+            ]
+            if settings.email_triage_feedback_enabled:
+
+                def next_feedback_candidate():
+                    with SqliteTriageRunRepository(settings.database_path) as repository:
+                        return RecordTriageFeedback(repository).next_candidate()
+
+                def feedback_candidate(record_id: str):
+                    with SqliteTriageRunRepository(settings.database_path) as repository:
+                        return RecordTriageFeedback(repository).candidate(record_id)
+
+                def record_feedback(
+                    record_id: str,
+                    attempt_id: int,
+                    version: int,
+                    action: TriageFeedbackAction,
+                    corrected_label: TriageLabel | None,
+                ):
+                    with SqliteTriageRunRepository(settings.database_path) as repository:
+                        return RecordTriageFeedback(
+                            repository,
+                            publisher=feedback_publisher,
+                        ).record(
+                            record_id=record_id,
+                            recommendation_attempt_id=attempt_id,
+                            expected_version=version,
+                            action=action,
+                            corrected_label=corrected_label,
+                            source=TriageFeedbackSource.TELEGRAM,
+                        )
+
+                capabilities.append(
+                    EmailTriageCapability(
+                        gateway=telegram,
+                        next_candidate=next_feedback_candidate,
+                        candidate=feedback_candidate,
+                        record_feedback=record_feedback,
+                    )
+                )
             owner_bot = OwnerBot(
                 gateway=telegram,
                 owner_user_id=settings.owner_user_id,
-                capabilities=(
-                    status_capability,
-                    ac_capability,
-                    notifications_capability,
-                ),
+                capabilities=tuple(capabilities),
             )
             telegram.set_commands([command.as_api_payload() for command in owner_bot.commands])
-            before_poll = None
+            before_poll_actions = []
             if settings.notification_delivery_enabled:
                 drain_notifications = DrainNotificationOutbox(
                     lambda: SqliteNotificationRepository(settings.database_path),
@@ -202,17 +276,36 @@ def main(*, stop_event: threading.Event | None = None) -> int:
                 def deliver_notifications() -> None:
                     drain_notifications.execute()
 
-                before_poll = deliver_notifications
+                before_poll_actions.append(deliver_notifications)
+            if settings.email_triage_feedback_enabled and feedback_publisher is not None:
+
+                def sync_feedback() -> None:
+                    with SqliteTriageRunRepository(settings.database_path) as repository:
+                        RecordTriageFeedback(
+                            repository,
+                            publisher=feedback_publisher,
+                        ).sync_pending(limit=1)
+
+                before_poll_actions.append(sync_feedback)
+
+            def before_poll() -> None:
+                for action in before_poll_actions:
+                    action()
+
             TelegramPollingLoop(
                 source=telegram,
                 handle_update=owner_bot.handle_update,
                 stop_event=shutdown,
                 poll_timeout_seconds=settings.poll_timeout_seconds,
-                before_poll=before_poll,
+                before_poll=before_poll if before_poll_actions else None,
             ).run()
     except (OSError, sqlite3.Error, TelegramApiError) as error:
         LOGGER.error("Telegram bot stopped after an operational failure: %s", error)
         return 1
+    finally:
+        if feedback_publisher is not None:
+            with contextlib.suppress(Exception):
+                feedback_publisher.close()
     return 0
 
 

@@ -52,7 +52,13 @@ API_VARIABLES = (
     "API_AUTH_ENABLED",
     "API_AC_CONTROL_ENABLED",
     "EMAIL_TRIAGE_WORKSPACE_ENABLED",
+    "EMAIL_TRIAGE_FEEDBACK_ENABLED",
     "GMAIL_TRIAGE_REVIEW_ENABLED",
+    "LANGFUSE_ENABLED",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY_FILE",
+    "LANGFUSE_SECRET_KEY_FILE",
+    "LANGFUSE_TIMEOUT_SECONDS",
     "GMAIL_READ_ENABLED",
     "GMAIL_CLIENT_SECRET_FILE",
     "GMAIL_TOKEN_FILE",
@@ -93,6 +99,12 @@ TELEGRAM_VARIABLES = (
     "TELEGRAM_NOTIFICATION_LEASE_SECONDS",
     "TELEGRAM_NOTIFICATION_MAX_AGE_SECONDS",
     "TELEGRAM_NOTIFICATION_RUNTIME_STALE_AFTER_SECONDS",
+    "EMAIL_TRIAGE_FEEDBACK_ENABLED",
+    "LANGFUSE_ENABLED",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY_FILE",
+    "LANGFUSE_SECRET_KEY_FILE",
+    "LANGFUSE_TIMEOUT_SECONDS",
     "OWNER_TIMEZONE",
     "API_PORT",
     "API_TELEMETRY_STALE_AFTER_SECONDS",
@@ -177,6 +189,7 @@ def test_api_environment_defaults(monkeypatch) -> None:
     assert settings.ac_control_enabled is False
     assert settings.email_triage_workspace_enabled is False
     assert settings.gmail_triage_review_enabled is False
+    assert settings.email_triage_feedback_enabled is False
     assert settings.public_origin == "https://rubik-edge-01.local"
     assert str(settings.database_path) == "data/telemetry.db"
     assert settings.device_id == "ac-controller-01"
@@ -189,6 +202,14 @@ def test_email_triage_workspace_requires_authentication(monkeypatch) -> None:
     monkeypatch.setenv("EMAIL_TRIAGE_WORKSPACE_ENABLED", "true")
 
     with pytest.raises(ApiConfigurationError, match="API_AUTH_ENABLED"):
+        ApiSettings.from_env()
+
+
+def test_email_triage_feedback_requires_workspace(monkeypatch) -> None:
+    clear(monkeypatch, API_VARIABLES)
+    monkeypatch.setenv("EMAIL_TRIAGE_FEEDBACK_ENABLED", "true")
+
+    with pytest.raises(ApiConfigurationError, match="EMAIL_TRIAGE_WORKSPACE_ENABLED"):
         ApiSettings.from_env()
 
 

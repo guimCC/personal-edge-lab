@@ -15,6 +15,9 @@ from fastapi.staticfiles import StaticFiles
 
 from personal_edge_lab import __version__
 from personal_edge_lab.application.ports.ac import AcController
+from personal_edge_lab.application.ports.email_triage_feedback import (
+    TriageFeedbackPublisher,
+)
 from personal_edge_lab.apps.api.config import Settings
 from personal_edge_lab.apps.api.context import ApiContext
 from personal_edge_lab.apps.api.routers.ac import create_ac_router
@@ -24,6 +27,9 @@ from personal_edge_lab.apps.api.routers.email_triage import create_email_triage_
 from personal_edge_lab.apps.api.routers.operations import create_operations_router
 from personal_edge_lab.apps.api.routers.telemetry import create_telemetry_router
 from personal_edge_lab.apps.api.schemas.common import StoredDataError
+from personal_edge_lab.infrastructure.observability.langfuse import (
+    LangfuseTriageFeedbackPublisher,
+)
 from personal_edge_lab.infrastructure.persistence.sqlite.migrations import run_migrations
 
 LOGGER = logging.getLogger(__name__)
@@ -36,6 +42,7 @@ def create_app(
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     token_generator: Callable[[], str] | None = None,
     ac_controller_factory: Callable[[], AcController] | None = None,
+    triage_feedback_publisher_factory: (Callable[[], TriageFeedbackPublisher | None] | None) = None,
 ) -> FastAPI:
     context = ApiContext(
         settings,
@@ -64,7 +71,17 @@ def create_app(
     app.include_router(create_operations_router(context))
     app.include_router(create_telemetry_router(context))
     app.include_router(create_ac_router(context))
-    app.include_router(create_email_triage_router(context))
+    feedback_publisher_factory = (
+        triage_feedback_publisher_factory
+        if triage_feedback_publisher_factory is not None
+        else lambda: _triage_feedback_publisher(settings)
+    )
+    app.include_router(
+        create_email_triage_router(
+            context,
+            feedback_publisher_factory=feedback_publisher_factory,
+        )
+    )
     app.include_router(create_dashboard_router(DASHBOARD_DIRECTORY))
     return app
 
@@ -115,3 +132,21 @@ def _mount_dashboard_assets(app: FastAPI) -> None:
             StaticFiles(directory=assets_directory),
             name="dashboard-assets",
         )
+
+
+def _triage_feedback_publisher(settings: Settings) -> TriageFeedbackPublisher | None:
+    langfuse = settings.langfuse
+    if (
+        langfuse is None
+        or not langfuse.enabled
+        or langfuse.public_key is None
+        or langfuse.secret_key is None
+    ):
+        return None
+    return LangfuseTriageFeedbackPublisher(
+        public_key=langfuse.public_key,
+        secret_key=langfuse.secret_key,
+        base_url=langfuse.base_url,
+        timeout_seconds=langfuse.timeout_seconds,
+        release=__version__,
+    )

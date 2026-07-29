@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from personal_edge_lab.apps.ai_cli.config import LangfuseSettings
 from personal_edge_lab.apps.configuration import (
     ConfigurationError as ConfigurationError,
 )
@@ -43,6 +44,8 @@ class Settings:
     notification_runtime_stale_after_seconds: float
     owner_timezone: ZoneInfo
     log_level: int
+    email_triage_feedback_enabled: bool
+    langfuse: LangfuseSettings | None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -105,6 +108,11 @@ class Settings:
             "TELEGRAM_NOTIFICATION_RUNTIME_STALE_AFTER_SECONDS",
             "90",
         )
+        email_triage_feedback_enabled = read_bool(
+            "EMAIL_TRIAGE_FEEDBACK_ENABLED",
+            "false",
+        )
+        langfuse = LangfuseSettings.from_env() if email_triage_feedback_enabled else None
         timezone_name = read_nonblank("OWNER_TIMEZONE", "Europe/Madrid")
         try:
             owner_timezone = ZoneInfo(timezone_name)
@@ -140,6 +148,8 @@ class Settings:
             notification_runtime_stale_after_seconds=(notification_runtime_stale_after_seconds),
             owner_timezone=owner_timezone,
             log_level=log_level,
+            email_triage_feedback_enabled=email_triage_feedback_enabled,
+            langfuse=langfuse,
         )
 
     def read_token(self) -> str:

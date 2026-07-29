@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from personal_edge_lab.apps.ai_cli.config import LangfuseSettings
 from personal_edge_lab.apps.configuration import (
     ConfigurationError,
     read_bool,
@@ -47,6 +48,8 @@ class Settings:
     ac_command_timeout_seconds: float = 5.0
     email_triage_workspace_enabled: bool = False
     gmail_triage_review_enabled: bool = False
+    email_triage_feedback_enabled: bool = False
+    langfuse: LangfuseSettings | None = None
 
     @property
     def triage_workspace_enabled(self) -> bool:
@@ -104,6 +107,10 @@ class Settings:
                 "GMAIL_TRIAGE_REVIEW_ENABLED",
                 "false",
             )
+        email_triage_feedback_enabled = read_bool(
+            "EMAIL_TRIAGE_FEEDBACK_ENABLED",
+            "false",
+        )
 
         if session_idle_seconds > session_absolute_seconds:
             raise ConfigurationError(
@@ -129,6 +136,11 @@ class Settings:
                 raise ConfigurationError("AC controls require API_DOCS_ENABLED=false")
         if email_triage_workspace_enabled and not auth_enabled:
             raise ConfigurationError("email triage workspace requires API_AUTH_ENABLED=true")
+        if email_triage_feedback_enabled and not email_triage_workspace_enabled:
+            raise ConfigurationError(
+                "email triage feedback requires EMAIL_TRIAGE_WORKSPACE_ENABLED=true"
+            )
+        langfuse = LangfuseSettings.from_env() if email_triage_feedback_enabled else None
 
         database_path = read_file_path("DATABASE_PATH", "./data/telemetry.db")
         device_id = read_nonblank("DEVICE_ID", "ac-controller-01")
@@ -160,4 +172,6 @@ class Settings:
             ac_command_timeout_seconds=ac_command_timeout_seconds,
             email_triage_workspace_enabled=email_triage_workspace_enabled,
             gmail_triage_review_enabled=email_triage_workspace_enabled,
+            email_triage_feedback_enabled=email_triage_feedback_enabled,
+            langfuse=langfuse,
         )

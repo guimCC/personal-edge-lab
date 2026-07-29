@@ -288,6 +288,52 @@
   line-height: 1.55;
 }
 
+.triage-feedback-state {
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--module-accent) 24%, transparent);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+}
+
+.triage-feedback {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--module-accent) 24%, transparent);
+}
+
+.triage-feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.triage-feedback button,
+.triage-feedback select {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--module-accent);
+  background: var(--paper-raised);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.triage-feedback button:disabled,
+.triage-feedback select:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.triage-feedback label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+}
+
 .triage-failure {
   padding: 8px 10px;
   background: var(--bad-soft);

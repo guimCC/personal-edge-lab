@@ -22,6 +22,7 @@ def test_entrypoint_starts_single_worker_without_reload(monkeypatch, tmp_path) -
     monkeypatch.setenv("API_AUTH_ENABLED", "false")
     monkeypatch.setenv("API_AC_CONTROL_ENABLED", "false")
     monkeypatch.setenv("EMAIL_TRIAGE_WORKSPACE_ENABLED", "false")
+    monkeypatch.setenv("EMAIL_TRIAGE_FEEDBACK_ENABLED", "false")
     monkeypatch.setenv("GMAIL_TRIAGE_REVIEW_ENABLED", "false")
     monkeypatch.setenv("API_DOCS_ENABLED", "true")
     captured: dict[str, object] = {}
@@ -82,6 +83,7 @@ def test_api_process_starts_migrates_and_stops_cleanly(tmp_path) -> None:
         "API_AUTH_ENABLED": "false",
         "API_AC_CONTROL_ENABLED": "false",
         "EMAIL_TRIAGE_WORKSPACE_ENABLED": "false",
+        "EMAIL_TRIAGE_FEEDBACK_ENABLED": "false",
         "GMAIL_TRIAGE_REVIEW_ENABLED": "false",
         "API_DOCS_ENABLED": "true",
         "LOG_LEVEL": "INFO",
@@ -117,4 +119,5 @@ def test_api_process_starts_migrates_and_stops_cleanly(tmp_path) -> None:
         ("006_email_triage_runs",),
         ("007_email_triage_messages",),
         ("008_email_triage_taxonomy_v2",),
+        ("009_email_triage_feedback",),
     ]

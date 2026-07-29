@@ -181,7 +181,10 @@ export default function Dashboard({ session, onLogout }: DashboardProps) {
           />
         </>
       ) : (
-        <EmailTriageWorkspace />
+        <EmailTriageWorkspace
+          feedbackEnabled={session.email_triage_feedback_enabled}
+          csrfToken={session.csrf_token ?? null}
+        />
       )}
     </LabShell>
   );

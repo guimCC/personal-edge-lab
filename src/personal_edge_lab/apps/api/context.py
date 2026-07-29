@@ -125,3 +125,8 @@ class ApiContext:
         if not self.settings.ac_control_enabled:
             raise HTTPException(status_code=404, detail="not found")
         return self.validate_csrf(request, self.require_session(request))
+
+    def require_triage_feedback_csrf(self, request: Request) -> AuthenticatedSession:
+        if not self.settings.email_triage_feedback_enabled:
+            raise HTTPException(status_code=404, detail="not found")
+        return self.validate_csrf(request, self.require_session(request))

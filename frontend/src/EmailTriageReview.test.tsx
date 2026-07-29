@@ -20,6 +20,7 @@ const session = {
   controls_enabled: false,
   email_triage_workspace_enabled: true,
   email_triage_review_enabled: true,
+  email_triage_feedback_enabled: false,
   actor_id: "owner",
   csrf_token: "csrf",
   idle_expires_at_utc: "2026-07-29T12:00:00Z",
@@ -31,7 +32,7 @@ const message = {
   received_at_utc: "2026-07-28T11:59:00Z",
   sender: "Private Sender <sender@example.test>",
   subject: "<script>subject stays text</script>",
-  label: "work",
+  label: "job",
   reason_preview: "The message concerns a work task.",
   latest_status: "succeeded",
   latest_failure_category: null,
@@ -123,7 +124,9 @@ const item = {
   rule_version: null,
 };
 
-function installWorkspaceApi(enabled = true) {
+function installWorkspaceApi(enabled = true, feedbackEnabled = false) {
+  let feedbackVersion = 0;
+  let latestFeedback: Record<string, unknown> | null = null;
   return vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/auth/session")) {
@@ -132,13 +135,49 @@ function installWorkspaceApi(enabled = true) {
           ...session,
           email_triage_workspace_enabled: enabled,
           email_triage_review_enabled: enabled,
+          email_triage_feedback_enabled: feedbackEnabled,
         }),
       );
     }
     if (url === "/health") return Promise.resolve(response(healthyPlatform));
+    if (
+      url.endsWith(`/email-triage/messages/${message.record_id}/feedback`) &&
+      init?.method === "POST"
+    ) {
+      expect(init.headers).toMatchObject({ "X-CSRF-Token": "csrf" });
+      const request = JSON.parse(String(init.body));
+      expect(request).toEqual({
+        recommendation_attempt_id: 1,
+        expected_version: feedbackVersion,
+        action: "confirm",
+        corrected_label: null,
+      });
+      feedbackVersion += 1;
+      latestFeedback = {
+        feedback_id: "f".repeat(32),
+        version: feedbackVersion,
+        recommendation_attempt_id: 1,
+        recommendation_label: "job",
+        action: "confirm",
+        expected_label: "job",
+        source: "dashboard",
+        created_at_utc: "2026-07-29T12:00:00Z",
+        sync_status: "synced",
+      };
+      return Promise.resolve(response(latestFeedback, 201));
+    }
     if (url.endsWith(`/email-triage/messages/${message.record_id}`)) {
       expect(init?.cache).toBe("no-store");
-      return Promise.resolve(response(messageDetail));
+      return Promise.resolve(
+        response({
+          ...messageDetail,
+          summary: {
+            ...messageDetail.summary,
+            feedback_version: feedbackVersion,
+            latest_feedback: latestFeedback,
+          },
+        }),
+      );
     }
     if (url.includes("/email-triage/messages?")) {
       expect(init?.cache).toBe("no-store");
@@ -190,7 +229,7 @@ describe("message-centric email-triage workspace", () => {
       within(mobileNavigation).getByRole("link", { name: /Email triage/ }),
     ).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("Gmail labels applied: none")).toBeVisible();
-    expect(await screen.findByText("AI · work")).toBeVisible();
+    expect(await screen.findByText("AI · job")).toBeVisible();
     expect(
       fetchMock.mock.calls.some(([input]) =>
         String(input).endsWith(`/messages/${message.record_id}`),
@@ -264,5 +303,29 @@ describe("message-centric email-triage workspace", () => {
 
     expect(await screen.findByRole("heading", { name: "Room climate" })).toBeVisible();
     expect(screen.queryByRole("link", { name: "Email triage" })).not.toBeInTheDocument();
+  });
+
+  it("records owner feedback only after an explicit protected action", async () => {
+    window.history.replaceState(null, "", "#email-triage");
+    const fetchMock = installWorkspaceApi(true, true);
+    vi.stubGlobal("fetch", fetchMock);
+    renderApp();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /subject stays text/ }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Confirm" }),
+    );
+
+    expect(await screen.findByText(/Owner feedback:/)).toBeVisible();
+    expect(screen.getByText(/linked to Langfuse/)).toBeVisible();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          String(input).endsWith(`/${message.record_id}/feedback`) &&
+          init?.method === "POST",
+      ),
+    ).toBe(true);
   });
 });

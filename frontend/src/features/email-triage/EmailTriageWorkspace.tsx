@@ -1,11 +1,17 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import {
   getTriageMessage,
   getTriageMessages,
   getTriageRun,
   getTriageRuns,
+  recordTriageFeedback,
 } from "../../api/client";
 import type {
   TriageLabel,
@@ -29,6 +35,15 @@ const LABELS: Array<TriageLabel | "all"> = [
   "slop",
   "other",
 ];
+const CURRENT_LABELS: TriageLabel[] = LABELS.filter(
+  (label): label is TriageLabel =>
+    label !== "all" && label !== "work" && label !== "billing",
+);
+
+interface EmailTriageWorkspaceProps {
+  feedbackEnabled: boolean;
+  csrfToken: string | null;
+}
 
 function timing(value: number | null): string {
   return value == null ? "unavailable" : `${value.toFixed(3)}s`;
@@ -38,13 +53,17 @@ function shortFingerprint(value: string | null): string {
   return value ? value.slice(0, 16) : "unavailable";
 }
 
-export function EmailTriageWorkspace() {
+export function EmailTriageWorkspace({
+  feedbackEnabled,
+  csrfToken,
+}: EmailTriageWorkspaceProps) {
   const queryClient = useQueryClient();
   const [view, setView] = useState<WorkspaceView>("emails");
   const [statusFilter, setStatusFilter] = useState<TriageMessageStatusFilter>("all");
   const [labelFilter, setLabelFilter] = useState<TriageLabel | "all">("all");
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [pendingDetailHeight, setPendingDetailHeight] = useState<number | null>(null);
+  const [correctionLabel, setCorrectionLabel] = useState<TriageLabel>("other");
   const messageListRef = useRef<HTMLElement | null>(null);
   const messageDetailRef = useRef<HTMLElement | null>(null);
   const pendingScrollRef = useRef<{
@@ -74,6 +93,39 @@ export function EmailTriageWorkspace() {
     staleTime: 0,
     gcTime: 0,
     refetchOnWindowFocus: false,
+  });
+  const feedback = useMutation({
+    mutationFn: ({
+      action,
+      correctedLabel,
+    }: {
+      action: "confirm" | "correct" | "dismiss";
+      correctedLabel: TriageLabel | null;
+    }) => {
+      const current = detail.data;
+      const attemptId = current?.technical.attempt_id;
+      if (!current || attemptId == null || !csrfToken) {
+        throw new Error("Feedback is unavailable");
+      }
+      return recordTriageFeedback(
+        current.summary.record_id,
+        {
+          recommendation_attempt_id: attemptId,
+          expected_version: current.summary.feedback_version,
+          action,
+          corrected_label: correctedLabel,
+        },
+        csrfToken,
+      );
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["email-triage-messages"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["email-triage-message", selectedId],
+        }),
+      ]);
+    },
   });
 
   const clearPrivateDetail = () => {
@@ -305,6 +357,94 @@ export function EmailTriageWorkspace() {
                         {detail.data.summary.latest_failure_category}
                       </p>
                     )}
+                    {detail.data.summary.latest_feedback && (
+                      <p className="triage-feedback-state">
+                        Owner feedback:{" "}
+                        <strong>
+                          {detail.data.summary.latest_feedback.action === "dismiss"
+                            ? "dismissed"
+                            : detail.data.summary.latest_feedback.expected_label}
+                        </strong>
+                        {" · "}
+                        {detail.data.summary.latest_feedback.sync_status === "synced"
+                          ? "linked to Langfuse"
+                          : "Langfuse sync pending"}
+                      </p>
+                    )}
+                    {feedbackEnabled &&
+                      csrfToken &&
+                      detail.data.summary.label &&
+                      detail.data.technical.attempt_id && (
+                        <div className="triage-feedback" aria-label="Owner feedback">
+                          <div className="triage-feedback-actions">
+                            <button
+                              disabled={
+                                feedback.isPending ||
+                                detail.data.summary.label === "work" ||
+                                detail.data.summary.label === "billing"
+                              }
+                              onClick={() =>
+                                feedback.mutate({
+                                  action: "confirm",
+                                  correctedLabel: null,
+                                })
+                              }
+                              type="button"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              disabled={feedback.isPending}
+                              onClick={() =>
+                                feedback.mutate({
+                                  action: "dismiss",
+                                  correctedLabel: null,
+                                })
+                              }
+                              type="button"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                          <label>
+                            Correct label
+                            <select
+                              aria-label="Correct recommendation label"
+                              disabled={feedback.isPending}
+                              onChange={(event) =>
+                                setCorrectionLabel(event.target.value as TriageLabel)
+                              }
+                              value={correctionLabel}
+                            >
+                              {CURRENT_LABELS.map((label) => (
+                                <option key={label} value={label}>
+                                  {label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button
+                            disabled={
+                              feedback.isPending ||
+                              correctionLabel === detail.data.summary.label
+                            }
+                            onClick={() =>
+                              feedback.mutate({
+                                action: "correct",
+                                correctedLabel: correctionLabel,
+                              })
+                            }
+                            type="button"
+                          >
+                            Save correction
+                          </button>
+                          {feedback.isError && (
+                            <p role="alert">
+                              Feedback could not be saved. Refresh this email and try again.
+                            </p>
+                          )}
+                        </div>
+                      )}
                   </section>
 
                   <section className="triage-content">

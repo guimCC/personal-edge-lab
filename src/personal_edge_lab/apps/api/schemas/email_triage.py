@@ -5,7 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+from pydantic import ConfigDict, Field
+
 from personal_edge_lab.apps.api.schemas.common import ApiModel
+from personal_edge_lab.domain.email_triage_feedback import (
+    TriageFeedbackRecord,
+)
 from personal_edge_lab.domain.email_triage_messages import (
     TriageMessageDetail,
     TriageMessageFilter,
@@ -147,6 +152,8 @@ class TriageMessageSummaryResponse(ApiModel):
     decision_source: str | None
     rule_id: str | None
     rule_version: str | None
+    feedback_version: int
+    latest_feedback: TriageFeedbackResponse | None
 
     @classmethod
     def from_domain(cls, value: TriageMessageSummary) -> TriageMessageSummaryResponse:
@@ -168,7 +175,50 @@ class TriageMessageSummaryResponse(ApiModel):
             ),
             rule_id=value.rule_id,
             rule_version=value.rule_version,
+            feedback_version=value.feedback_version,
+            latest_feedback=(
+                TriageFeedbackResponse.from_domain(value.latest_feedback)
+                if value.latest_feedback is not None
+                else None
+            ),
         )
+
+
+class TriageFeedbackResponse(ApiModel):
+    feedback_id: str
+    version: int
+    recommendation_attempt_id: int
+    recommendation_label: str
+    action: str
+    expected_label: str | None
+    source: str
+    created_at_utc: datetime
+    sync_status: str
+
+    @classmethod
+    def from_domain(cls, value: TriageFeedbackRecord) -> TriageFeedbackResponse:
+        return cls(
+            feedback_id=value.feedback_id,
+            version=value.version,
+            recommendation_attempt_id=value.recommendation_attempt_id,
+            recommendation_label=value.recommendation_label.value,
+            action=value.action.value,
+            expected_label=(
+                value.expected_label.value if value.expected_label is not None else None
+            ),
+            source=value.source.value,
+            created_at_utc=value.created_at,
+            sync_status=value.sync_status.value,
+        )
+
+
+class TriageFeedbackRequest(ApiModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    recommendation_attempt_id: int = Field(ge=1)
+    expected_version: int = Field(ge=0)
+    action: Literal["confirm", "correct", "dismiss"]
+    corrected_label: str | None = None
 
 
 class TriageMessageListResponse(ApiModel):

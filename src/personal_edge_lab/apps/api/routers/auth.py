@@ -24,6 +24,7 @@ def create_auth_router(context: ApiContext) -> APIRouter:
                 controls_enabled=False,
                 email_triage_workspace_enabled=False,
                 email_triage_review_enabled=False,
+                email_triage_feedback_enabled=False,
             )
         session = context.current_session(request)
         if session is None:
@@ -34,11 +35,13 @@ def create_auth_router(context: ApiContext) -> APIRouter:
                 controls_enabled=settings.ac_control_enabled,
                 email_triage_workspace_enabled=False,
                 email_triage_review_enabled=False,
+                email_triage_feedback_enabled=False,
             )
         return _session_response(
             session,
             controls_enabled=settings.ac_control_enabled,
             email_triage_workspace_enabled=settings.triage_workspace_enabled,
+            email_triage_feedback_enabled=settings.email_triage_feedback_enabled,
         )
 
     @router.post("/login", response_model=SessionResponse)
@@ -75,6 +78,7 @@ def create_auth_router(context: ApiContext) -> APIRouter:
             result.session,
             controls_enabled=settings.ac_control_enabled,
             email_triage_workspace_enabled=settings.triage_workspace_enabled,
+            email_triage_feedback_enabled=settings.email_triage_feedback_enabled,
         )
 
     @router.post("/logout", status_code=204)
@@ -98,6 +102,7 @@ def _session_response(
     *,
     controls_enabled: bool,
     email_triage_workspace_enabled: bool,
+    email_triage_feedback_enabled: bool,
 ) -> SessionResponse:
     return SessionResponse(
         authenticated=True,
@@ -105,6 +110,7 @@ def _session_response(
         controls_enabled=controls_enabled,
         email_triage_workspace_enabled=email_triage_workspace_enabled,
         email_triage_review_enabled=email_triage_workspace_enabled,
+        email_triage_feedback_enabled=email_triage_feedback_enabled,
         actor_id=session.actor_id,
         csrf_token=session.csrf_token,
         idle_expires_at_utc=session.idle_expires_at_utc,

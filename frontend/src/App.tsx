@@ -26,6 +26,7 @@ export default function App() {
         controls_enabled: current?.controls_enabled ?? false,
         email_triage_workspace_enabled: false,
         email_triage_review_enabled: false,
+        email_triage_feedback_enabled: false,
       }));
       queryClient.invalidateQueries({ queryKey: ["session"] });
     };

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from pwdlib import PasswordHash
@@ -234,3 +236,98 @@ def test_message_filters_cursor_and_missing_detail_are_bounded(tmp_path) -> None
     assert bad_cursor.status_code == 422
     assert missing.status_code == 404
     assert existing.status_code == 200
+
+
+def test_dashboard_feedback_is_csrf_protected_append_only_and_local_first(tmp_path) -> None:
+    settings = replace(
+        _settings(tmp_path),
+        email_triage_feedback_enabled=True,
+    )
+    record_id = _seed(settings.database_path, _document())
+
+    class UnavailablePublisher:
+        def publish(self, _publication) -> None:
+            raise RuntimeError("sentinel Langfuse provider body")
+
+        def close(self) -> None:
+            pass
+
+    with TestClient(
+        create_app(
+            settings,
+            triage_feedback_publisher_factory=UnavailablePublisher,
+        ),
+        base_url=ORIGIN,
+    ) as client:
+        login = client.post("/api/v1/auth/login", json={"password": PASSWORD})
+        csrf = login.json()["csrf_token"]
+        missing_csrf = client.post(
+            f"/api/v1/email-triage/messages/{record_id}/feedback",
+            json={
+                "recommendation_attempt_id": 1,
+                "expected_version": 0,
+                "action": "confirm",
+                "corrected_label": None,
+            },
+        )
+        headers = {
+            "Origin": ORIGIN,
+            "Sec-Fetch-Site": "same-origin",
+            "X-CSRF-Token": csrf,
+        }
+        confirmed = client.post(
+            f"/api/v1/email-triage/messages/{record_id}/feedback",
+            headers=headers,
+            json={
+                "recommendation_attempt_id": 1,
+                "expected_version": 0,
+                "action": "confirm",
+                "corrected_label": None,
+            },
+        )
+        corrected = client.post(
+            f"/api/v1/email-triage/messages/{record_id}/feedback",
+            headers=headers,
+            json={
+                "recommendation_attempt_id": 1,
+                "expected_version": 1,
+                "action": "correct",
+                "corrected_label": "admin",
+            },
+        )
+        stale = client.post(
+            f"/api/v1/email-triage/messages/{record_id}/feedback",
+            headers=headers,
+            json={
+                "recommendation_attempt_id": 1,
+                "expected_version": 0,
+                "action": "dismiss",
+                "corrected_label": None,
+            },
+        )
+        detail = client.get(f"/api/v1/email-triage/messages/{record_id}")
+
+    assert login.json()["email_triage_feedback_enabled"] is True
+    assert missing_csrf.status_code == 403
+    assert confirmed.status_code == 201
+    assert confirmed.json()["action"] == "confirm"
+    assert confirmed.json()["expected_label"] == "job"
+    assert confirmed.json()["sync_status"] == "unavailable"
+    assert "sentinel Langfuse provider body" not in confirmed.text
+    assert corrected.status_code == 201
+    assert corrected.json()["version"] == 2
+    assert corrected.json()["expected_label"] == "admin"
+    assert stale.status_code == 409
+    assert detail.json()["summary"]["feedback_version"] == 2
+    assert detail.json()["summary"]["latest_feedback"]["action"] == "correct"
+    with SqliteTriageRunRepository(settings.database_path) as repository:
+        publications = repository.pending_feedback_publications(limit=20)
+    assert len(publications) == 2
+    assert publications[-1].feedback.expected_label is TriageLabel.ADMIN
+    assert publications[-1].trace_id == "4" * 32
+    assert publications[-1].message_chars == 1600
+    assert "Private Sender" not in repr(publications)
+    assert "private-body" not in repr(publications)
+    assert "private reason sentinel" not in repr(publications)
+    with sqlite3.connect(settings.database_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM email_triage_feedback").fetchone() == (2,)

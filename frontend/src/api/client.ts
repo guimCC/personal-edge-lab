@@ -10,6 +10,7 @@ import {
   sessionSchema,
   triageMessageDetailSchema,
   triageMessageListSchema,
+  triageFeedbackSchema,
   triageRunDetailSchema,
   triageRunListSchema,
   type BrowserCommand,
@@ -145,6 +146,30 @@ export const getTriageMessage = (recordId: string) =>
     `/api/v1/email-triage/messages/${encodeURIComponent(recordId)}`,
     triageMessageDetailSchema,
     { cache: "no-store" },
+  );
+
+export const recordTriageFeedback = (
+  recordId: string,
+  feedback: {
+    recommendation_attempt_id: number;
+    expected_version: number;
+    action: "confirm" | "correct" | "dismiss";
+    corrected_label: TriageLabel | null;
+  },
+  csrfToken: string,
+) =>
+  request(
+    `/api/v1/email-triage/messages/${encodeURIComponent(recordId)}/feedback`,
+    triageFeedbackSchema,
+    {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(feedback),
+    },
   );
 
 export const sendCommand = (

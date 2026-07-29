@@ -8,6 +8,7 @@ export const sessionSchema = z.object({
   controls_enabled: z.boolean(),
   email_triage_workspace_enabled: z.boolean().default(false),
   email_triage_review_enabled: z.boolean().default(false),
+  email_triage_feedback_enabled: z.boolean().default(false),
   actor_id: z.string().nullable().optional(),
   csrf_token: z.string().nullable().optional(),
   idle_expires_at_utc: optionalTimestamp.optional(),
@@ -114,6 +115,33 @@ export const triageMessageSummarySchema = z.object({
   decision_source: z.enum(["model", "rule"]).nullable(),
   rule_id: z.string().nullable(),
   rule_version: z.string().nullable(),
+  feedback_version: z.number().int().nonnegative().default(0),
+  latest_feedback: z
+    .object({
+      feedback_id: z.string(),
+      version: z.number().int().positive(),
+      recommendation_attempt_id: z.number().int().positive(),
+      recommendation_label: triageLabelSchema,
+      action: z.enum(["confirm", "correct", "dismiss"]),
+      expected_label: triageLabelSchema.nullable(),
+      source: z.enum(["dashboard", "telegram"]),
+      created_at_utc: z.string().datetime(),
+      sync_status: z.enum(["pending", "synced", "unavailable"]),
+    })
+    .nullable()
+    .default(null),
+});
+
+export const triageFeedbackSchema = z.object({
+  feedback_id: z.string(),
+  version: z.number().int().positive(),
+  recommendation_attempt_id: z.number().int().positive(),
+  recommendation_label: triageLabelSchema,
+  action: z.enum(["confirm", "correct", "dismiss"]),
+  expected_label: triageLabelSchema.nullable(),
+  source: z.enum(["dashboard", "telegram"]),
+  created_at_utc: z.string().datetime(),
+  sync_status: z.enum(["pending", "synced", "unavailable"]),
 });
 
 export const triageMessageListSchema = z.object({
@@ -314,6 +342,7 @@ export type TriageLabel = z.infer<typeof triageLabelSchema>;
 export type TriageMessageSummary = z.infer<typeof triageMessageSummarySchema>;
 export type TriageMessageList = z.infer<typeof triageMessageListSchema>;
 export type TriageMessageDetail = z.infer<typeof triageMessageDetailSchema>;
+export type TriageFeedback = z.infer<typeof triageFeedbackSchema>;
 export type Health = z.infer<typeof healthSchema>;
 export type Alerts = z.infer<typeof alertsSchema>;
 export type Reading = z.infer<typeof readingSchema>;
